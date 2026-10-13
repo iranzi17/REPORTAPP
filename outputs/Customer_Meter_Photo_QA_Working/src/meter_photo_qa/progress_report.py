@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from .connectivity_trace import trace_connected_lv_lines
+from .area_selection import district_filters, selected_districts
 
 
 DEFAULT_LINE_SERVICE_URL = (
@@ -374,42 +375,32 @@ def list_cells(
 
 def _get_sector_features(
     sector_layer: Any,
-    district: str | None,
+    district: str | Sequence[str] | None,
     sectors: Sequence[str] | None,
     cell_layer: Any | None = None,
     cells: Sequence[str] | None = None,
 ) -> Any | None:
-    clean_district = str(district or "").strip()
-    clean_sectors = [str(item).strip() for item in sectors or [] if str(item).strip()]
-    clean_cells = [str(item).strip() for item in cells or [] if str(item).strip()]
-    if not clean_district and not clean_sectors and not clean_cells:
+    """Query the exact union of selected district, sector and cell boundaries.
+
+    Sector and cell names must be district-qualified for multi-district runs.
+    """
+    where = district_filters(district, sectors, cells)
+    if where is None:
         return None
-    if clean_sectors and not clean_district:
-        raise ValueError("Choose a district before choosing sectors.")
-    if clean_cells and not clean_sectors:
-        raise ValueError("Choose at least one sector before choosing cells.")
+    clean_cells = [str(value).strip() for value in (cells or []) if str(value).strip()]
     if clean_cells and cell_layer is None:
         raise ValueError("The cell boundary layer is not available.")
-
-    parts = [f"UPPER(district) = '{_sql_text(clean_district).upper()}'"]
-    if clean_sectors:
-        quoted = ",".join(f"'{_sql_text(item).upper()}'" for item in clean_sectors)
-        parts.append(f"UPPER(sector) IN ({quoted})")
-    if clean_cells:
-        quoted = ",".join(f"'{_sql_text(item).upper()}'" for item in clean_cells)
-        parts.append(f"UPPER(cell) IN ({quoted})")
     boundary_layer = cell_layer if clean_cells else sector_layer
-    out_fields = "objectid,district,sector,cell" if clean_cells else "objectid,district,sector"
+    out_fields = (
+        "objectid,district,sector,cell" if clean_cells
+        else "objectid,district,sector"
+    )
     feature_set = _query_with_retry(
-        boundary_layer,
-        where=" AND ".join(parts),
-        out_fields=out_fields,
-        return_geometry=True,
+        boundary_layer, where=where, out_fields=out_fields,
+        return_geometry=True, return_all_records=True,
     )
     if not feature_set.features:
-        scope = ", ".join(clean_cells or clean_sectors) or clean_district
-        boundary_name = "cell" if clean_cells else "sector"
-        raise ValueError(f"No {boundary_name} boundary was found for: {scope}")
+        raise ValueError("No administrative boundary was found for the selected districts/sectors/cells.")
     return feature_set
 
 
@@ -665,7 +656,7 @@ def _epoch_to_datetime(value: Any) -> datetime | None:
 def list_available_users(
     start_date: date | datetime | str,
     end_date: date | datetime | str,
-    district: str | None = None,
+    district: str | Sequence[str] | None = None,
     sectors: Sequence[str] | None = None,
     cells: Sequence[str] | None = None,
     custom_boundary_geometry: dict[str, Any] | None = None,
@@ -739,27 +730,30 @@ def _natural_join(values: Sequence[str]) -> str:
 def build_report_title(
     start_date: date | datetime | str,
     end_date: date | datetime | str,
-    district: str | None = None,
+    district: str | Sequence[str] | None = None,
     sectors: Sequence[str] | None = None,
     cells: Sequence[str] | None = None,
     custom_boundary: bool = False,
 ) -> str:
-    """Create the human-readable title used in the Excel report."""
+    """Create a correct title for one or many district selections."""
     start = _as_date(start_date)
     end = _as_date(end_date)
-    clean_district = str(district or "").strip()
+    districts = selected_districts(district)
     clean_sectors = [str(item).strip() for item in sectors or [] if str(item).strip()]
     clean_cells = [str(item).strip() for item in cells or [] if str(item).strip()]
     if custom_boundary:
         area = " CUSTOM BOUNDARY"
-    elif clean_district and clean_sectors:
+    elif len(districts) > 1:
+        area = f" {_natural_join([d.upper() for d in districts])} DISTRICTS"
+        if clean_sectors:
+            area += f": {_natural_join(clean_sectors)} " + ("Sector" if len(clean_sectors) == 1 else "Sectors")
+        else:
+            area += ": All Sectors"
+    elif districts and clean_sectors:
         sector_word = "Sector" if len(clean_sectors) == 1 else "Sectors"
-        area = (
-            f" {clean_district.upper()} DISTRICT: "
-            f"{_natural_join(clean_sectors)} {sector_word}"
-        )
-    elif clean_district:
-        area = f" {clean_district.upper()} DISTRICT: All Sectors"
+        area = f" {districts[0].upper()} DISTRICT: {_natural_join(clean_sectors)} {sector_word}"
+    elif districts:
+        area = f" {districts[0].upper()} DISTRICT: All Sectors"
     else:
         area = ""
     if clean_cells and not custom_boundary:
@@ -1220,7 +1214,7 @@ def generate_progress_report(
     start_date: date | datetime | str,
     end_date: date | datetime | str,
     usernames: Sequence[str],
-    district: str | None = None,
+    district: str | Sequence[str] | None = None,
     sectors: Sequence[str] | None = None,
     cells: Sequence[str] | None = None,
     custom_boundary_geometry: dict[str, Any] | None = None,
@@ -1399,9 +1393,10 @@ def generate_progress_report(
     ]
     clean_sectors = [str(item).strip() for item in sectors or [] if str(item).strip()]
     clean_cells = [str(item).strip() for item in cells or [] if str(item).strip()]
+    districts_selected = selected_districts(district)
     if (
         custom_boundary_geometry is None
-        and district
+        and len(districts_selected) == 1
         and not clean_sectors
         and sector_feature_set is not None
     ):
@@ -1420,6 +1415,7 @@ def generate_progress_report(
     localization_warnings = []
     connected_name_review = []
     tracking_context = None
+    district_label = _natural_join(districts_selected)
     if boundary_geometry is not None:
         for group in transformer_groups:
             group_records = [
@@ -1540,13 +1536,13 @@ def generate_progress_report(
             boundary_label = "Custom drawn polygon"
         elif clean_cells:
             boundary_label = (
-                f"{district or ''} / {', '.join(clean_sectors)} / "
+                f"{district_label} / {', '.join(clean_sectors)} / "
                 f"{', '.join(clean_cells)}"
             ).strip(" / ")
         elif clean_sectors:
-            boundary_label = f"{district or ''} / {', '.join(clean_sectors)}".strip(" / ")
+            boundary_label = f"{district_label} / {', '.join(clean_sectors)}".strip(" / ")
         else:
-            boundary_label = f"{district or 'Selected administrative area'} / All sectors"
+            boundary_label = f"{district_label or 'Selected administrative area'} / All sectors"
         tracking_context = {
             "boundary_label": boundary_label,
             "surveyors_followed": len(reported_users),
@@ -1570,7 +1566,8 @@ def generate_progress_report(
         "title": title,
         "from_date": start.isoformat(),
         "to_date_inclusive": end.isoformat(),
-        "district": district or "",
+        "district": district_label,
+        "districts": districts_selected,
         "sectors": clean_sectors,
         "cells": clean_cells,
         "boundary_mode": (
