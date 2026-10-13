@@ -23,22 +23,35 @@ def _number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _phase_set(value: Any) -> frozenset[str] | None:
-    """Only explicit phase identifiers. Phase counts alone are not phase identity."""
+def _phase_set(value: Any, notation: Any = None) -> frozenset[str] | None:
+    """Decode phase identity only when notation is unambiguous.
+
+    'B' is ambiguous: it means phase B in ABC but Blue in RYB. When
+    notation is unknown, return None unless explicit A/C or R/Y clarifies.
+    """
     if value is None:
         return None
     if isinstance(value, (set, frozenset, list, tuple)):
-        raw = list(value)
+        raw = [str(item).strip().upper() for item in value]
     else:
-        raw = re.split(r"[,; /+]+", str(value).strip().upper())
-    phase_alias = {"R": "A", "Y": "B", "B": "C", "A": "A", "C": "C"}
-    normalized = []
-    for part in raw:
-        value = str(part).strip().upper()
-        if value not in phase_alias:
-            return None
-        normalized.append(phase_alias[value])
-    return frozenset(normalized) if normalized else None
+        text = str(value).strip().upper()
+        raw = list(text) if text.isalpha() and len(text) <= 3 else [
+            item for item in re.split(r"[,; /+]+", text) if item
+        ]
+    system = str(notation or "").strip().upper()
+    if system not in ("ABC", "RYB"):
+        if any(part in ("R", "Y") for part in raw):
+            system = "RYB"
+        elif any(part in ("A", "C") for part in raw):
+            system = "ABC"
+        else:
+            return None  # Lone 'B' without a phase convention is ambiguous.
+    aliases = {"A": "A", "B": "B", "C": "C"} if system == "ABC" else {
+        "R": "A", "Y": "B", "B": "C"
+    }
+    if not raw or any(part not in aliases for part in raw):
+        return None
+    return frozenset(aliases[part] for part in raw)
 
 
 def _id(value: Any) -> str:
@@ -67,6 +80,7 @@ def audit_lv_feeder(
 
     Each section has a unique 'globalid'; optional attributes:
       phase_count (1,2,3), phase_set (A/B/C or R/Y/B),
+      phase_notation (ABC or RYB when phase identity is ambiguous),
       nominal_voltage_v, voltage_basis ('LL' or 'LN'),
       rated_current_a, conductor_size, conductor_material,
       design_current_a, protective_setting_a, adjusted_ampacity_a.
@@ -92,6 +106,8 @@ def audit_lv_feeder(
     evaluated_links = 0
     skipped_links = 0
     all_links = list(directed_links)
+    incoming = Counter(_id(link.get("downstream_globalid")) for link in all_links
+                       if link.get("topology_verified") is True)
     for link in all_links:
         upstream = _id(link.get("upstream_globalid"))
         downstream = _id(link.get("downstream_globalid"))
@@ -101,7 +117,8 @@ def audit_lv_feeder(
             # Partial export cannot prove feeder order or support a change claim.
             skipped_links += 1
             continue
-        if link.get("topology_verified") is not True:
+        if link.get("topology_verified") is not True or incoming[downstream] > 1:
+            # Do not assert feeder orientation in loops / multi-supply junctions.
             skipped_links += 1
             continue
         evaluated_links += 1
@@ -125,8 +142,8 @@ def audit_lv_feeder(
             ))
             reappeared = True
 
-        parent_set = _phase_set(parent.get("phase_set"))
-        child_set = _phase_set(child.get("phase_set"))
+        parent_set = _phase_set(parent.get("phase_set"), parent.get("phase_notation"))
+        child_set = _phase_set(child.get("phase_set"), child.get("phase_notation"))
         if parent_set is not None and child_set is not None and not child_set.issubset(parent_set):
             findings.append(_finding(
                 "PHASE_IDENTITY_MISMATCH", "REVIEW", upstream, downstream,
