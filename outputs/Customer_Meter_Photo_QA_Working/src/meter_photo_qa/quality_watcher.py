@@ -28,6 +28,7 @@ from .progress_report import (
     _sql_text,
 )
 from .review_register import REVIEW_HEADERS, build_review_rows, find_previous_report, load_review_rows
+from .phase_consistency import phase_type_conflict
 
 
 DEFAULT_QUALITY_RULES_PATH = (
@@ -105,6 +106,21 @@ def _domain_maps(line_layer: Any) -> dict[int, dict[str, dict[Any, str]]]:
                 }
         maps[subtype_id] = field_maps
     return maps
+
+
+
+def _verified_phase_expectations(domains: dict) -> dict[str, int]:
+    """Use only explicit single/three-phase labels in live ASSETTYPE domains."""
+    expected = {}
+    for group in (9, 10):
+        labels = domains.get(group, {}).get("ASSETTYPE", {})
+        for code, label in labels.items():
+            normalized = " ".join(str(label).casefold().replace("-", " ").split())
+            is_single = "single phase" in normalized
+            is_three = "three phase" in normalized or "3 phase" in normalized
+            if is_single != is_three:
+                expected[f"{group}:{code}"] = 1 if is_single else 3
+    return expected
 
 
 def _validate_service_schema(line_layer: Any, rules: dict[str, Any], domains: dict) -> None:
@@ -866,6 +882,7 @@ def run_quality_watcher(
     rules = load_quality_rules(rules_path)
     domains = _domain_maps(line_layer)
     _validate_service_schema(line_layer, rules, domains)
+    phase_expectations = _verified_phase_expectations(domains)
     clean_users = list(dict.fromkeys(
         str(item).strip() for item in usernames or [] if str(item).strip()
     ))
@@ -892,6 +909,14 @@ def run_quality_watcher(
             minimum_completion_percent=threshold,
             current_year=end.year,
         )
+        conflict = phase_type_conflict(
+            attributes,
+            domains.get(int(attributes.get("ASSETGROUP") or 0), {}).get("Phases", {}),
+            phase_expectations,
+        )
+        if conflict:
+            quality["invalid_attributes"].append(conflict)
+            quality["status"] = "FLAG"
         result = {
             **quality,
             "source_objectid": int(attributes["OBJECTID"]),
