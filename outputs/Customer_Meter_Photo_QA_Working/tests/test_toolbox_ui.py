@@ -14,9 +14,10 @@ class ToolboxUiTests(unittest.TestCase):
     def test_all_country_default_and_separate_network_tools(self):
         qa = runpy.run_path(str(ROOT / "CustomerMeterPhotoQA.pyt"))
         operations = runpy.run_path(str(ROOT / "CustomerMeterPhotoQA_Operations.pyt"))
-        self.assertEqual(len(qa["Toolbox"]().tools), 7)
+        self.assertEqual(len(qa["Toolbox"]().tools), 8)
         self.assertIn(qa["WatchDistributionTransformerQuality"], qa["Toolbox"]().tools)
         self.assertIn(qa["WatchLVPoleQuality"], qa["Toolbox"]().tools)
+        self.assertIn(qa["ScanAllElectricLineDuplicates"], qa["Toolbox"]().tools)
         self.assertEqual(len(operations["Toolbox"]().tools), 2)
         watcher = qa["WatchLVLineDataQuality"]()
         parameters = watcher.getParameterInfo()
