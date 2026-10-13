@@ -82,8 +82,13 @@ def audit_lv_feeder(
       phase_count (1,2,3), phase_set (A/B/C or R/Y/B),
       phase_notation (ABC or RYB when phase identity is ambiguous),
       nominal_voltage_v, voltage_basis ('LL' or 'LN'),
-      rated_current_a, conductor_size, conductor_material,
+      rated_current_a (conductor ampacity in amperes, not load current),
+      conductor_size, conductor_material,
       design_current_a, protective_setting_a, adjusted_ampacity_a.
+
+    Rated ampacity may be a catalogue/reference-condition rating or already
+    installation-adjusted: that provenance must be established separately.
+    Only adjusted_ampacity_a is treated as verified design Iz.
 
     Each link has upstream_globalid, downstream_globalid and
     topology_verified=True. Optional:
@@ -178,11 +183,12 @@ def audit_lv_feeder(
 
         p_rating = _number(parent.get("rated_current_a"))
         c_rating = _number(child.get("rated_current_a"))
-        if p_rating and c_rating and abs(p_rating-c_rating) > 1e-9:
+        if p_rating is not None and c_rating is not None and p_rating > 0 and c_rating > 0 and abs(p_rating-c_rating) > 1e-9:
             findings.append(_finding(
-                "RATED_CURRENT_CHANGED", "INFO", upstream, downstream,
-                f"Recorded rating changes {p_rating:g} A -> {c_rating:g} A; "
-                "rating is not measured load current.",
+                "CONDUCTOR_AMPACITY_CHANGED", "INFO", upstream, downstream,
+                f"Recorded conductor current-carrying capacity changes "
+                f"{p_rating:g} A -> {c_rating:g} A; this is not measured "
+                "load current and is not inherently a defect.",
             ))
 
     # Protection/thermal checks are independent of edge direction.
@@ -190,6 +196,30 @@ def audit_lv_feeder(
         ib = _number(section.get("design_current_a"))
         inn = _number(section.get("protective_setting_a"))
         iz = _number(section.get("adjusted_ampacity_a"))
+        recorded_ampacity = _number(section.get("rated_current_a"))
+        if recorded_ampacity is not None and recorded_ampacity <= 0:
+            findings.append(_finding(
+                "INVALID_CONDUCTOR_AMPACITY", "REVIEW", gid, gid,
+                f"Conductor Rated_Current is {recorded_ampacity:g} A; "
+                "capacity must be positive.",
+                evidence="recorded conductor-ampacity field",
+            ))
+        if ib is not None and iz is not None and ib > iz:
+            findings.append(_finding(
+                "DESIGN_LOAD_EXCEEDS_ADJUSTED_AMPACITY", "REVIEW", gid, gid,
+                f"Design current {ib:g} A exceeds independently verified "
+                f"installation-adjusted ampacity {iz:g} A.",
+                evidence="provided design/load and adjusted-ampacity data",
+            ))
+        if (ib is not None and recorded_ampacity is not None
+                and recorded_ampacity > 0 and ib > recorded_ampacity and iz is None):
+            findings.append(_finding(
+                "DESIGN_LOAD_EXCEEDS_RECORDED_AMPACITY", "REVIEW", gid, gid,
+                f"Design current {ib:g} A exceeds recorded conductor capacity "
+                f"{recorded_ampacity:g} A; verify whether Rated_Current is "
+                "reference-condition or installation-adjusted ampacity.",
+                evidence="recorded capacity and provided design current; Iz unavailable",
+            ))
         if ib is not None and inn is not None and ib > inn:
             findings.append(_finding(
                 "LOAD_EXCEEDS_PROTECTION_SETTING", "REVIEW", gid, gid,
@@ -213,8 +243,10 @@ def audit_lv_feeder(
         "informational_findings": counts["INFO"],
         "findings": findings,
         "limitations": (
-            "Requires authoritative directed LV topology, voltage reference basis, "
-            "and verified design/protection data. No connectivity inferred from "
-            "shared coordinates or transformer names. No automatic corrections."
+            "Rated_Current is conductor current-carrying capacity, NOT flowing current. "
+            "Overload checks need design current and verified installation-adjusted "
+            "ampacity. Directional checks need authoritative LV topology and voltage "
+            "reference basis. No connection inferred from map proximity. "
+            "No automatic corrections."
         ),
     }
