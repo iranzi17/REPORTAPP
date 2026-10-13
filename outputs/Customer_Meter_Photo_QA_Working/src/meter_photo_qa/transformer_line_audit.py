@@ -36,6 +36,49 @@ def _progress(message):
         pass
 
 
+
+def _fetch_line_attributes_by_ids(
+    layer, ids, version, fields, usernames=None, batch_size=150,
+):
+    """Fetch entire source-connected LV network, even beyond district bounds."""
+    selected_ids = sorted({int(v) for v in ids})
+    allowed_users = {
+        str(name).strip().casefold() for name in (usernames or [])
+        if str(name).strip()
+    }
+    result = {}
+    for offset in range(0, len(selected_ids), batch_size):
+        wanted = selected_ids[offset:offset+batch_size]
+        features = _query_with_retry(
+            layer, attempts=2, where="1=1",
+            object_ids=",".join(str(i) for i in wanted),
+            out_fields=",".join(fields), return_geometry=False,
+            return_all_records=False, gdb_version=version,
+        )
+        if getattr(features, "exceeded_transfer_limit", False):
+            raise RuntimeError("Trace-connected LV line lookup exceeded the transfer limit.")
+        received = {}
+        for feature in features.features:
+            item = dict(feature.attributes)
+            oid = int(item["OBJECTID"])
+            if oid not in wanted or oid in received:
+                raise RuntimeError(f"Unexpected/duplicate LV line ObjectID {oid} in batched trace query.")
+            if int(item.get("ASSETGROUP") or -1) not in (9,10):
+                raise RuntimeError(f"Connected trace returned a non-LV line: ObjectID {oid}.")
+            received[oid] = item
+        missing = set(wanted) - received.keys()
+        if missing:
+            raise RuntimeError(
+                f"{len(missing)} LV lines returned by the trace could not be fetched. "
+                "Incomplete audit refused."
+            )
+        for oid,item in received.items():
+            if not allowed_users or str(item.get("created_user") or "").strip().casefold() in allowed_users:
+                result[oid] = item
+        if offset == 0 or offset+batch_size >= len(selected_ids) or (offset//batch_size+1)%20 == 0:
+            _progress(f"Loaded {min(offset+batch_size,len(selected_ids))}/{len(selected_ids)} connected LV line attributes.")
+    return [result[oid] for oid in sorted(result)]
+
 def _write_workbook(
     output_path: Path,
     rows: list[dict],
@@ -45,6 +88,7 @@ def _write_workbook(
     end: date,
     source_service: str,
     version: str,
+    scope: str,
 ) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -64,7 +108,9 @@ def _write_workbook(
         ("District(s)", ", ".join(boundary_scope) if boundary_scope else "All Rwanda"),
         ("From", start.isoformat()),
         ("To (inclusive)", end.isoformat()),
-        ("Date rule", "Line created or edited during selected period; transformers have no date restriction"),
+        ("Scope", "All connected LV lines, including beyond selected district" if scope == "all_connected" else "Lines created/edited within selected dates and area"),
+        ("Date rule", "Dates ignored for all-connected mode" if scope == "all_connected" else "Line created or edited during selected period"),
+        ("Surveyor rule", "All surveyors unless a surveyor filter was explicitly selected"),
         ("LV lines examined", len(rows)),
         ("Transformers traced", source_count),
         ("Matched", totals["MATCH"]),
@@ -129,7 +175,8 @@ def _write_workbook(
     definition.append(["Source records", "All transformer points are queried irrespective of selected survey dates. LV line dates and surveyor filters select lines for review."])
     definition.append(["Excluded", "Other Electric Device asset groups (CT, VT, breakers, switches etc.) are excluded."])
     definition.append(["Read-only", "No GIS attributes or associations are changed automatically."])
-    definition.append(["Date caveat", "A recent-date selection cannot establish historical network-wide compliance."])
+    definition.append(["Date caveat", "All-connected mode ignores date fields to cover older network sections. Edited-period mode applies dates and boundaries."])
+    definition.append(["Cross-boundary", "All-connected mode follows traces beyond the selected administrative area; area only chooses transformer starting points."])
     definition.append(["Name normalization", "Case and repeated whitespace are ignored; no fuzzy/substring name matching."])
 
     for sheet in wb.worksheets:
@@ -179,11 +226,14 @@ def run_transformer_line_name_audit(
     boundary_service_url: str | None = None,
     version: str = "sde.DEFAULT",
     gis: Any | None = None,
+    scope: str = "all_connected",
 ) -> dict[str, Any]:
-    """Verify only trace-supported name differences; all other lines are unverified."""
+    """Verify trace-supported labels across entire source components by default."""
     start, end = _as_date(start_date), _as_date(end_date)
     if end < start:
         raise ValueError("End date precedes start date.")
+    if scope not in ("all_connected", "edited_period"):
+        raise ValueError("Scope must be all_connected or edited_period.")
     output = Path(output_xlsx).expanduser().resolve()
     if output.suffix.casefold() != ".xlsx":
         raise ValueError("Output must be an .xlsx workbook.")
@@ -229,19 +279,21 @@ def run_transformer_line_name_audit(
         "OBJECTID", "GLOBALID", "ASSETGROUP", "ASSETTYPE",
         transformer_name_field,
     ]
-    _progress("Searching LV lines within selected districts and survey dates.")
-    selected_lines = query_attributes_in_batches(
-        lines, build_quality_where(start,end,usernames), version,
-        line_fields, filters, _query_with_retry,
-        asset_label="LV line", progress=_progress,
-    )
+    selected_lines = []
+    if scope == "edited_period":
+        _progress("Searching LV lines within selected districts and survey dates.")
+        selected_lines = query_attributes_in_batches(
+            lines, build_quality_where(start,end,usernames), version,
+            line_fields, filters, _query_with_retry,
+            asset_label="LV line", progress=_progress,
+        )
     _progress("Searching eligible distribution transformers in selected area.")
     points = query_attributes_in_batches(
         transformers, "ASSETGROUP = 12 AND ASSETTYPE IN (1,2,3,4,5,6)",
         version, transformer_fields, filters, _query_with_retry,
         asset_label="Distribution transformer", progress=_progress,
     )
-    if selected_lines and not points:
+    if scope == "edited_period" and selected_lines and not points:
         _progress("No local distribution transformer points: all line sources will remain unverified.")
     _progress(
         f"Tracing {len(points)} distribution transformers against current Utility Network topology. "
@@ -253,6 +305,17 @@ def run_transformer_line_name_audit(
         active_gis, service, points, version, LINE_LAYER_ID, TRANSFORMER_LAYER_ID,
         progress=_progress,
     )
+    if scope == "all_connected":
+        trace_ids = set().union(
+            *(trace.get("line_objectids", set()) for trace in traces.values())
+        ) if traces else set()
+        _progress(
+            f"Fetching all {len(trace_ids)} source-connected LV lines across "
+            "district boundaries without a date restriction."
+        )
+        selected_lines = _fetch_line_attributes_by_ids(
+            lines, trace_ids, version, line_fields, usernames=usernames,
+        )
     canonical_points = [
         {
             **point,
@@ -264,12 +327,13 @@ def run_transformer_line_name_audit(
     totals = Counter(item["status"] for item in findings)
     _write_workbook(
         output, findings, len(points), selected_districts(district),
-        start, end, service, version,
+        start, end, service, version, scope,
     )
     return {
         "read_only": True,
         "output_xlsx": str(output),
         "districts": selected_districts(district),
+        "scope": scope,
         "lines_checked": len(findings),
         "transformer_points_traced": len(points),
         "matches": totals["MATCH"],
