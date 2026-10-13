@@ -17,18 +17,25 @@ class AssetQualityTests(unittest.TestCase):
 
     def test_branch_is_not_checked(self):
         self.assertNotIn("branch", ASSETS["transformer"]["checks"])
-        mapping = resolve_fields([
+        live_fields = [
             {"name":"Transfomer_name_"}, {"name":"Branch"},
-            {"name":"Manufacturer"}, {"name":"Serial_No"}, {"name":"Phases"},
-            {"name":"Rated_kVA"}], "transformer")
+            {"name":"Owner_Name"}, {"name":"Type_of_Installation"},
+            {"name":"Phase_Normal"}, {"name":"Transformer_Protection_Switch"},
+            {"name":"Transformer_mounting_support"},
+            {"name":"Number_of_Low_Voltage_feeders"},
+        ]
+        mapping = resolve_fields(live_fields, "transformer")
         result = evaluate_asset({
             "ASSETGROUP": 12, "ASSETTYPE": 4, "GLOBALID": "{G1}",
             "OBJECTID": 1, "Transfomer_name_": "TR-1", "Branch": None,
-            "Manufacturer": "ABB", "Serial_No": "1234",
-            "Phases": 3, "Rated_kVA": 100,
+            "Owner_Name": "REG", "Type_of_Installation": "Outdoor",
+            "Phase_Normal": 3, "Transformer_Protection_Switch": "DropOut",
+            "Transformer_mounting_support": "PH Concrete",
+            "Number_of_Low_Voltage_feeders": 2,
         }, "transformer", mapping)
         self.assertEqual(result["issues"], [])
         self.assertEqual(result["status"], "NO_GAPS_FOUND")
+        self.assertNotIn("branch", result["unverified_checks"])
 
     def test_live_field_name_aliases_are_not_guessed(self):
         mapping = resolve_fields([{"name":"Manufacturer"},{"name":"Notes"}], "transformer")
@@ -71,14 +78,48 @@ class AssetQualityTests(unittest.TestCase):
     def test_zero_phase_code_is_valid_when_domain_label_one(self):
         self.assertFalse(missing_value(0, {0:"1 phase", 1:"3 phases"}))
         self.assertTrue(missing_value(0, {0:"Unknown", 1:"3 phases"}))
-        mapping = {"name":"Transfomer_name_", "manufacturer":"Manufacturer",
-                   "serial":"Serial_No", "phases":"Phases", "capacity":"Rated_kVA"}
+        mapping = {key: None for key in ASSETS["transformer"]["checks"]}
+        mapping.update({
+            "name":"Transfomer_name_", "owner_name":"Owner_Name",
+            "installation_type":"Type_of_Installation",
+            "phase_normal":"Phase_Normal", "protection_switch":"Transformer_Protection_Switch",
+            "mounting_support":"Transformer_mounting_support",
+            "lv_feeder_count":"Number_of_Low_Voltage_feeders",
+        })
         result = evaluate_asset({
             "ASSETGROUP":12, "ASSETTYPE":4, "GLOBALID":"T",
-            "Transfomer_name_":"TR", "Manufacturer":"ABB", "Serial_No":"A3",
-            "Phases":0, "Rated_kVA":100
-        }, "transformer", mapping, {"Phases":{0:"1 phase", 2:"3 phases"}})
+            "Transfomer_name_":"TR", "Owner_Name":"REG",
+            "Type_of_Installation":"Outdoor", "Phase_Normal":0,
+            "Transformer_Protection_Switch":"DropOut",
+            "Transformer_mounting_support":"PH Concrete",
+            "Number_of_Low_Voltage_feeders":1,
+        }, "transformer", mapping, {"Phase_Normal":{0:"1 phase", 2:"3 phases"}})
         self.assertEqual(result["status"], "NO_GAPS_FOUND")
+
+    def test_owner_type_phase_protection_support_and_feeders_gaps(self):
+        names = ["Transfomer_name_", "Owner_Name", "Type_of_Installation",
+                 "Phase_Normal", "Transformer_Protection_Switch",
+                 "Transformer_mounting_support", "Number_of_Low_Voltage_feeders"]
+        mapping = resolve_fields([{"name":name} for name in names], "transformer")
+        attrs = {
+            "GLOBALID":"T", "OBJECTID":1, "ASSETGROUP":12, "ASSETTYPE":1,
+            "Transfomer_name_":"T1",
+            "Owner_Name":"Unknown", "Type_of_Installation":None,
+            "Phase_Normal":None, "Transformer_Protection_Switch":"Unknown",
+            "Transformer_mounting_support":"Unknown",
+            "Number_of_Low_Voltage_feeders":None,
+        }
+        result = evaluate_asset(attrs, "transformer", mapping)
+        self.assertEqual(result["status"], "GAP")
+        self.assertEqual(len(result["issues"]), 6)
+        self.assertNotIn("Branch", "; ".join(result["issues"]))
+
+    def test_alias_matching_only_if_unambiguous(self):
+        fields = [{"name":"MakerABC", "alias":"Owner Name"}]
+        mapping = resolve_fields(fields, "transformer")
+        self.assertEqual(mapping["owner_name"], "MakerABC")
+        fields.append({"name":"OtherOne", "alias":"Owner Name"})
+        self.assertIsNone(resolve_fields(fields, "transformer")["owner_name"])
 
     def test_unknown_asset_type_is_gap_not_false_coverage(self):
         result = evaluate_asset({
