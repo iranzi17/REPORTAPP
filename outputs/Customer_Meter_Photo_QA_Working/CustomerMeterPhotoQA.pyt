@@ -51,6 +51,7 @@ try:
     from meter_photo_qa import substation_containment as _substation_containment
     from meter_photo_qa import relay_associations as _relay_associations
     from meter_photo_qa import asset_quality_runner as _asset_quality_runner
+    from meter_photo_qa import transformer_line_audit as _transformer_line_audit
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -60,6 +61,7 @@ try:
     _substation_containment = importlib.reload(_substation_containment)
     _relay_associations = importlib.reload(_relay_associations)
     _asset_quality_runner = importlib.reload(_asset_quality_runner)
+    _transformer_line_audit = importlib.reload(_transformer_line_audit)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -82,6 +84,7 @@ load_province_index = _progress_report.load_province_index
 DEFAULT_QUALITY_RULES_PATH = _quality_watcher.DEFAULT_QUALITY_RULES_PATH
 run_quality_watcher = _quality_watcher.run_quality_watcher
 run_asset_quality = _asset_quality_runner.run_asset_quality
+run_transformer_line_name_audit = _transformer_line_audit.run_transformer_line_name_audit
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -105,6 +108,7 @@ class Toolbox:
             WatchLVLineDataQuality,
             WatchDistributionTransformerQuality,
             WatchLVPoleQuality,
+            CheckLVTransformerNames,
         ]
 
 
@@ -1094,6 +1098,45 @@ class WatchDistributionTransformerQuality(_AssetQualityTool):
 class WatchLVPoleQuality(_AssetQualityTool):
     asset = "pole"
     label = "Watch LV Pole Data Quality"
+
+
+class CheckLVTransformerNames(_AssetQualityTool):
+    asset = "line_transformer_name"
+    label = "Check LV Line Transformer Names"
+
+    def __init__(self):
+        self.description = (
+            "Read-only REG Utility Network trace check: compare the "
+            "Transformer_Name of each selected LV line with the name of "
+            "its connected distribution-transformer point. Ambiguous "
+            "or unverified sources are never presented as name errors. "
+            "This operation can take time because transformer traces "
+            "must be executed."
+        )
+
+    def execute(self, parameters, messages):
+        summary = run_transformer_line_name_audit(
+            output_xlsx=parameters[0].valueAsText,
+            start_date=parameters[1].value,
+            end_date=parameters[2].value,
+            district=_split_multivalue(parameters[3].valueAsText),
+            sectors=_split_multivalue(parameters[4].valueAsText),
+            cells=_split_multivalue(parameters[5].valueAsText),
+            custom_boundary_geometry=_drawn_boundary_geometry(parameters[6]),
+            usernames=_split_multivalue(parameters[7].valueAsText),
+            service_url=parameters[8].valueAsText or None,
+            boundary_service_url=parameters[9].valueAsText or None,
+            version=parameters[10].valueAsText or "sde.DEFAULT",
+        )
+        arcpy.SetParameterAsText(0, summary["output_xlsx"])
+        arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
+        if summary["ambiguous_sources"] or summary["unverified_sources"]:
+            arcpy.AddWarning(
+                "Some lines have ambiguous or unverified source transformers. "
+                "See All Checked LV Lines; do not automatically rename them."
+            )
+        if not summary["lines_checked"]:
+            arcpy.AddWarning("No LV lines met the dates and selected area.")
 
 
 class BuildSubstationContainment:
