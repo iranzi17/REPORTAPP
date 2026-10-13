@@ -28,3 +28,4 @@ jobs:
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_quality_watcher.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_phase_consistency.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_quality_watcher_workflow.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_feeder_engineering.py' -v
