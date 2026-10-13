@@ -1090,6 +1090,21 @@ class _AssetQualityTool:
                 ". Review the Schema Verification worksheet; "
                 "do not treat these checks as complete."
             )
+        if summary["surveyor_filter"]:
+            arcpy.AddWarning(
+                f"This report includes ONLY {len(summary['surveyor_filter'])} "
+                "selected surveyor account(s). To assess the full outstanding "
+                "backlog, CLEAR Surveyor(s) entirely so the filter is blank. "
+                "Do not interpret a lower gap count as confirmed corrections "
+                "unless the same GlobalIDs are checked in both runs."
+            )
+        if summary["total"] and summary["incomplete_recorded_locations"]:
+            arcpy.AddWarning(
+                f"{summary['incomplete_recorded_locations']}/{summary['total']} "
+                "features lack one or more recorded District/Sector/Cell "
+                "attributes. 'By Recorded Location' is NOT a spatially "
+                "verified sector/cell breakdown."
+            )
         if summary["total"] == 0:
             arcpy.AddWarning(
                 "No matching asset features. Verify date range, districts "
