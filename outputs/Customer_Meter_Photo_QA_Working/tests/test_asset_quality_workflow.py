@@ -19,8 +19,10 @@ class FakeLayer:
         self.rows = rows
         names = ["OBJECTID", "GLOBALID", "ASSETGROUP", "ASSETTYPE",
                  "created_user", "created_date", "last_edited_date",
-                 "Transfomer_name_", "Manufacturer", "Serial_No",
-                 "Phases", "Rated_kVA", "Notes"]
+                 "Transfomer_name_", "Owner_Name", "Type_of_Installation",
+                 "Phase_Normal", "Transformer_Protection_Switch",
+                 "Transformer_mounting_support", "Number_of_Low_Voltage_feeders",
+                 "Manufacturer", "Serial_No", "Rated_kVA", "Notes"]
         self.properties = SimpleNamespace(
             fields=[{"name": x, "alias": x, "type": "esriFieldTypeString"} for x in names],
             types=[], maxRecordCount=500,
@@ -43,8 +45,12 @@ def transformer(gid, oid, **values):
         "OBJECTID": oid, "GLOBALID": gid, "ASSETGROUP": 12,
         "ASSETTYPE": 4, "created_user": "survey.user",
         "created_date": 1789420000000, "last_edited_date": 1789420000000,
-        "Transfomer_name_": "TR-1", "Manufacturer": "ABB",
-        "Serial_No": "SN-1", "Phases": 3, "Rated_kVA": 100,
+        "Transfomer_name_": "TR-1", "Owner_Name": "REG",
+        "Type_of_Installation": "Outdoor", "Phase_Normal": 3,
+        "Transformer_Protection_Switch": "DropOut",
+        "Transformer_mounting_support": "PH Wooden",
+        "Number_of_Low_Voltage_feeders": 2,
+        "Manufacturer": "ABB", "Serial_No": "SN-1", "Rated_kVA": 100,
         **values,
     }
 
@@ -89,7 +95,7 @@ class AssetWorkflowTests(unittest.TestCase):
     def test_transformer_reads_group12_and_reports_gaps(self):
         report, sheets, requests = self.run_fake(
             "transformer",
-            [transformer("{G1}", 1), transformer("{G2}", 2, Manufacturer=None)],
+            [transformer("{G1}", 1), transformer("{G2}", 2, Owner_Name=None)],
         )
         self.assertEqual(report["total"], 2)
         self.assertEqual(report["with_gaps"], 1)
@@ -97,7 +103,7 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertEqual(report["not_verified"], 0)
         self.assertIn("ASSETGROUP = 12", requests[0]["where"])
         self.assertNotIn("Branch", str(sheets["Asset Details"][0]))
-        self.assertIn("Manufacturer missing", sheets["Asset Details"][1][5])
+        self.assertIn("Owner Name missing", sheets["Asset Details"][1][5])
         self.assertIn("Schema Verification", sheets)
         self.assertTrue(any(x[0] == "name" and x[1] == "Transfomer_name_"
                             for x in sheets["Schema Verification"]))
@@ -112,7 +118,7 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertEqual(report["no_gaps_found"], 2)
         self.assertIn("ASSETGROUP = 7", requests[0]["where"])
         rows = sheets["Asset Details"]
-        self.assertTrue(any(row[12] == "DOCUMENTED_NO_NAMEPLATE" for row in rows[1:]))
+        self.assertTrue(any(row[17] == "DOCUMENTED_NO_NAMEPLATE" for row in rows[1:]))
         self.assertTrue(any("Manufacturer missing" in str(row[5]) for row in rows[1:]))
 
     def test_schema_not_found_is_not_counted_as_clean(self):
