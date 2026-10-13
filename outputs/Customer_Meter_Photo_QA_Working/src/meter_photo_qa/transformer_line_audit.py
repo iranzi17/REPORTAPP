@@ -24,7 +24,7 @@ from .transformer_line_names import assess_line_transformer_names, summary_by_su
 REVIEW_STATUSES = {"NAME_MISMATCH_REVIEW", "MISSING_LINE_TRANSFORMER_NAME"}
 UNVERIFIED_STATUSES = {
     "AMBIGUOUS_CONNECTED_SOURCES", "SOURCE_UNVERIFIED",
-    "TRANSFORMER_NAME_UNVERIFIED",
+    "TRANSFORMER_NAME_UNVERIFIED", "TRACE_WARNING_UNVERIFIED",
 }
 
 
@@ -73,6 +73,7 @@ def _write_workbook(
         ("Ambiguous connected sources", totals["AMBIGUOUS_CONNECTED_SOURCES"]),
         ("Source unverified", totals["SOURCE_UNVERIFIED"]),
         ("Transformer name unavailable", totals["TRANSFORMER_NAME_UNVERIFIED"]),
+        ("Trace warnings requiring review", totals["TRACE_WARNING_UNVERIFIED"]),
         ("Source version", version),
         ("Source FeatureServer", source_service),
     ]:
@@ -103,7 +104,7 @@ def _write_workbook(
         "Surveyor", "LV Lines Checked", "Match",
         "Name Mismatch Review", "Missing Name Review",
         "Ambiguous Sources", "Source Unverified",
-        "Transformer Name Unverified",
+        "Transformer Name Unverified", "Trace Warnings",
     ])
     for user, counts in summary_by_surveyor(rows).items():
         surveyors.append([
@@ -113,6 +114,7 @@ def _write_workbook(
             counts.get("AMBIGUOUS_CONNECTED_SOURCES", 0),
             counts.get("SOURCE_UNVERIFIED", 0),
             counts.get("TRANSFORMER_NAME_UNVERIFIED", 0),
+            counts.get("TRACE_WARNING_UNVERIFIED", 0),
         ])
 
     definition.append(["Rule", "Meaning"])
@@ -122,6 +124,7 @@ def _write_workbook(
     definition.append(["MISMATCH_REVIEW", "One connected distribution transformer is identified, but names differ. Verify switching/source before correcting."])
     definition.append(["MISSING_LINE_TRANSFORMER_NAME", "Line name blank and one connected transformer name available."])
     definition.append(["MULTISOURCE", "If connected trace reaches multiple transformer points, do not force an automatic match."])
+    definition.append(["TRACE_WARNINGS", "Do not report a name mismatch from a trace that returned warnings."])
     definition.append(["SCOPE", "Only transformer points inside selected administrative area are starting points. Lines supplied across boundaries can remain SOURCE_UNVERIFIED."])
     definition.append(["Source records", "All transformer points are queried irrespective of selected survey dates. LV line dates and surveyor filters select lines for review."])
     definition.append(["Excluded", "Other Electric Device asset groups (CT, VT, breakers, switches etc.) are excluded."])
@@ -274,4 +277,5 @@ def run_transformer_line_name_audit(
         "ambiguous_sources": totals["AMBIGUOUS_CONNECTED_SOURCES"],
         "unverified_sources": totals["SOURCE_UNVERIFIED"],
         "unnamed_transformer_points": totals["TRANSFORMER_NAME_UNVERIFIED"],
+        "trace_warnings_unverified": totals["TRACE_WARNING_UNVERIFIED"],
     }
