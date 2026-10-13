@@ -19,20 +19,40 @@ when it is proven to be a single directed path**, a one-phase segment has
 no alternate source and no verified conversion. Parallel branches never
 establish an upstream/downstream path by themselves.
 
-### Current: three different meanings
+### Current: verified meaning and required evidence
 
-- `Rated_Current` may represent a conductor/device thermal rating (A).
-- `design_current_a` is a load-design value, not necessarily surveyed.
-- Measured feeder current is time varying and, with load branches, is
-  NOT expected to remain constant along the feeder.
+**Confirmed by the REG project user:** `Rated_Current` represents the LV
+**conductor's current-carrying capacity in amperes (ampacity)**. It is not
+measured current, load flow, or a fuse/breaker setting.
 
-Do not infer an overloaded cable or a current-conservation failure from
-`Rated_Current` alone. For a basic protective design review, the checker
-can compare design load `Ib`, protective setting `In`, and **adjusted**
-ampacity `Iz` where reliable evidence for all three is supplied. This is
-a REVIEW and requires checking applicable protection design exceptions.
-Actual per-phase flow conservation requires synchronized per-phase load
-measurements or a calibrated load-flow model, including the neutral.
+- `rated_current_a`: mapped conductor `Rated_Current`, the recorded capacity (A).
+- `design_current_a` (`Ib`): expected load current; not derived from the capacity.
+- `adjusted_ampacity_a` (`Iz`): verified permissible capacity **after
+  installation and environmental corrections**.
+- `protective_setting_a` (`In`): rated/setting current of the relevant
+  protective device, not the conductor rating.
+- Actual measured current is time-varying, can differ on each phase,
+  and decreases/changes through branches; it is NOT available from
+  `Rated_Current`.
+
+**Critical unresolved source definition:** Does the REG recorded
+`Rated_Current` already include installation derating, or is it a
+reference/catalogue ampacity? We do **not** equate it to `Iz` until verified.
+
+The Stage 1 engine:
+- marks differing consecutive `Rated_Current` values as **INFO**, not errors;
+- flags nonpositive recorded ampacity as a data-quality REVIEW;
+- flags `Ib > Iz` as a potential thermal overload **only if Iz is provided**;
+- flags `Ib > Rated_Current` for REVIEW when Iz is missing, explicitly
+  requiring reference-condition confirmation;
+- checks `Ib <= In <= Iz` where the individual inputs are available,
+  with protective-coordination caveats.
+
+Do not infer overloaded cable or current-conservation failures from
+`Rated_Current` alone. A complete assessment includes overload protection,
+installation conditions, voltage drop, phase load sharing, available fault
+level, and short-circuit withstand. Actual per-phase flow conservation needs
+synchronized measurements or a calibrated load-flow model.
 
 ### Cable sections
 
