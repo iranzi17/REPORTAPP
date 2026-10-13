@@ -1,4 +1,4 @@
-"""Reliable, read-only retrieval of LV line attributes from ArcGIS FeatureServer.
+"""Reliable, read-only retrieval of {asset_label} attributes from ArcGIS FeatureServer.
 
 Spatially expensive searches return OBJECTIDs only. Attribute data is then
 fetched in bounded batches by indexed OBJECTID. The same feature may touch
@@ -35,6 +35,7 @@ def query_attributes_in_batches(
     query_fn: Callable[..., Any],
     batch_size: int = 150,
     progress: Callable[[str], None] | None = None,
+    asset_label: str = "LV line",
 ) -> list[dict[str, Any]]:
     """Retrieve all matches or fail; never issue partial 'clean' reports.
 
@@ -61,7 +62,7 @@ def query_attributes_in_batches(
             ids = _objectids_from_query(response, area)
         except Exception as exc:
             raise RuntimeError(
-                f"Could not list LV ObjectIDs for {area} (area "
+                f"Could not list {asset_label} ObjectIDs for {area} (area "
                 f"{index}/{len(spatial_filters)}). The report was NOT generated; "
                 f"there are no reliable counts until all areas succeed. "
                 f"ArcGIS Server error: {exc}"
@@ -69,7 +70,7 @@ def query_attributes_in_batches(
         unique_ids.update(ids)
         if progress and (index == 1 or index == len(spatial_filters) or index % 10 == 0):
             progress(
-                f"LV boundary {index}/{len(spatial_filters)}: "
+                f"{asset_label} boundary {index}/{len(spatial_filters)}: "
                 f"{len(unique_ids)} unique ObjectIDs identified."
             )
 
@@ -103,7 +104,7 @@ def query_attributes_in_batches(
             )
         except Exception as exc:
             raise RuntimeError(
-                f"LV attribute batch {offset // safe_batch_size + 1} failed "
+                f"{asset_label} attribute batch {offset // safe_batch_size + 1} failed "
                 f"({len(collected)}/{len(sorted_ids)} records fetched). "
                 f"No partial report was generated. ArcGIS Server error: {exc}"
             ) from exc
@@ -131,10 +132,10 @@ def query_attributes_in_batches(
         missing = set(batch) - collected.keys()
         if missing:
             raise RuntimeError(
-                f"The service omitted {len(missing)} requested LV lines from "
+                f"The service omitted {len(missing)} requested {asset_label} features from "
                 f"an attribute batch. Report cancelled to avoid incomplete results."
             )
         if progress and (offset == 0 or offset + safe_batch_size >= len(sorted_ids)
                          or (offset // safe_batch_size + 1) % 20 == 0):
-            progress(f"Loaded {len(collected)}/{len(sorted_ids)} LV line attributes.")
+            progress(f"Loaded {len(collected)}/{len(sorted_ids)} {asset_label} attributes.")
     return [collected[oid] for oid in sorted_ids]
