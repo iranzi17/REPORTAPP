@@ -22,7 +22,8 @@ class FakeLayer:
                  "Transfomer_name_", "Owner_Name", "Type_of_Installation",
                  "Phase_Normal", "Transformer_Protection_Switch",
                  "Transformer_mounting_support", "Number_of_Low_Voltage_feeders",
-                 "Manufacturer", "Serial_No", "Rated_kVA", "Notes"]
+                 "Manufacturer", "Serial_No", "Rated_kVA", "Notes",
+                 "District", "Sector", "Cell"]
         self.properties = SimpleNamespace(
             fields=[{"name": x, "alias": x, "type": "esriFieldTypeString"} for x in names],
             types=[], maxRecordCount=500,
@@ -51,6 +52,7 @@ def transformer(gid, oid, **values):
         "Transformer_mounting_support": "PH Wooden",
         "Number_of_Low_Voltage_feeders": 2,
         "Manufacturer": "ABB", "Serial_No": "SN-1", "Rated_kVA": 100,
+        "District": "Burera", "Sector": "Cyanika", "Cell": "Gasiza",
         **values,
     }
 
@@ -61,6 +63,7 @@ def pole(gid, oid, note="", manufacturer=None, atype=1):
         "ASSETTYPE": atype, "created_user": "pole.user",
         "created_date": 1789420000000, "last_edited_date": 1789420000000,
         "Manufacturer": manufacturer, "Notes": note,
+        "District": "Rulindo", "Sector": "Buyoga", "Cell": "Munyana",
     }
 
 
@@ -105,6 +108,15 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertNotIn("Branch", str(sheets["Asset Details"][0]))
         self.assertIn("Owner Name missing", sheets["Asset Details"][1][5])
         self.assertIn("Schema Verification", sheets)
+        self.assertIn("By Recorded Location", sheets)
+        self.assertIn("District", requests[1]["out_fields"])
+        detail = sheets["Asset Details"]
+        self.assertEqual(detail[0][5:8], (
+            "Recorded District", "Recorded Sector", "Recorded Cell"
+        ))
+        self.assertEqual(detail[1][5:8], ("Burera", "Cyanika", "Gasiza"))
+        location = sheets["By Recorded Location"]
+        self.assertEqual(location[1][:6], ("Burera", "Cyanika", "Gasiza", 2, 1, 1))
         self.assertTrue(any(x[0] == "name" and x[1] == "Transfomer_name_"
                             for x in sheets["Schema Verification"]))
 
@@ -118,7 +130,9 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertEqual(report["no_gaps_found"], 2)
         self.assertIn("ASSETGROUP = 7", requests[0]["where"])
         rows = sheets["Asset Details"]
-        self.assertTrue(any(row[17] == "DOCUMENTED_NO_NAMEPLATE" for row in rows[1:]))
+        self.assertTrue(any(row[20] == "DOCUMENTED_NO_NAMEPLATE" for row in rows[1:]))
+        self.assertEqual(sheets["By Recorded Location"][1][:5],
+                         ("Rulindo", "Buyoga", "Munyana", 3, 1))
         self.assertTrue(any("Manufacturer missing" in str(row[5]) for row in rows[1:]))
 
     def test_schema_not_found_is_not_counted_as_clean(self):
