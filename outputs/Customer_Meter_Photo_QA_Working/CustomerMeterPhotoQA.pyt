@@ -227,6 +227,92 @@ def _available_cells(index, district, sectors):
     )
 
 
+
+def _apply_multi_boundary_filters(parameters, district_index, sector_index, cell_index):
+    """Fast fully local multi-district selector; qualify sectors/cells by district.
+
+    A plain sector/cell name is allowed only for a single selected district.
+    When adding a second district, old selections are retained only if they
+    identify a unique area, otherwise removed to prevent silent mis-selection.
+    """
+    district_index_data = _boundary_index()
+    cell_index_data = _cell_index()
+    district_param = parameters[district_index]
+    districts_available = list(district_index_data)
+    district_param.filter.list = districts_available
+    district_lookup = {name.casefold(): name for name in districts_available}
+    entered = _split_multivalue(district_param.valueAsText)
+    selected = list(dict.fromkeys(
+        district_lookup[item.casefold()]
+        for item in entered if item.casefold() in district_lookup
+    ))
+    if entered != selected:
+        district_param.value = ";".join(selected) if selected else None
+
+    multi = len(selected) > 1
+    sector_options = (
+        [f"{district} :: {sector}"
+         for district in selected
+         for sector in district_index_data.get(district, [])]
+        if multi else district_index_data.get(selected[0], []) if selected else []
+    )
+    sector_param = parameters[sector_index]
+    sector_param.filter.list = sector_options
+    sector_lookup = {name.casefold(): name for name in sector_options}
+    sectors_entered = _split_multivalue(sector_param.valueAsText)
+    sectors_selected = []
+    for item in sectors_entered:
+        found = sector_lookup.get(item.casefold())
+        if found is None and multi and " :: " not in item:
+            candidates = [name for name in sector_options
+                          if name.rsplit(" :: ", 1)[-1].casefold() == item.casefold()]
+            if len(candidates) == 1:
+                found = candidates[0]
+        if found is None and not multi and " :: " in item:
+            parts = item.split(" :: ", 1)
+            if len(parts) == 2 and selected and parts[0].casefold() == selected[0].casefold():
+                found = sector_lookup.get(parts[1].casefold())
+        if found is not None and found not in sectors_selected:
+            sectors_selected.append(found)
+    if sectors_entered != sectors_selected:
+        sector_param.value = ";".join(sectors_selected) if sectors_selected else None
+
+    selected_pairs = []
+    for value in sectors_selected:
+        if multi:
+            district, sector = value.split(" :: ", 1)
+        else:
+            district, sector = selected[0], value
+        selected_pairs.append((district, sector))
+    cell_options = []
+    for district, sector in selected_pairs:
+        for cell in cell_index_data.get(district, {}).get(sector, []):
+            name = (f"{district} :: {sector} :: {cell}" if multi else cell)
+            if name not in cell_options:
+                cell_options.append(name)
+    cell_options.sort(key=str.casefold)
+    cell_param = parameters[cell_index]
+    cell_param.filter.list = cell_options
+    cell_lookup = {name.casefold(): name for name in cell_options}
+    cells_entered = _split_multivalue(cell_param.valueAsText)
+    cells_selected = []
+    for item in cells_entered:
+        found = cell_lookup.get(item.casefold())
+        if found is None and multi and " :: " not in item:
+            candidates = [name for name in cell_options
+                          if name.rsplit(" :: ", 1)[-1].casefold() == item.casefold()]
+            if len(candidates) == 1:
+                found = candidates[0]
+        if found is None and not multi and " :: " in item:
+            parts = item.split(" :: ")
+            if len(parts) == 3 and selected and parts[0].casefold() == selected[0].casefold():
+                found = cell_lookup.get(parts[2].casefold())
+        if found is not None and found not in cells_selected:
+            cells_selected.append(found)
+    if cells_entered != cells_selected:
+        cell_param.value = ";".join(cells_selected) if cells_selected else None
+
+
 def _apply_boundary_filters(
     parameters,
     district_index,
@@ -235,6 +321,10 @@ def _apply_boundary_filters(
     province_index=None,
 ):
     """Populate and cascade districts, sectors, and cells locally."""
+    if getattr(parameters[district_index], "multiValue", False) and province_index is None:
+        return _apply_multi_boundary_filters(
+            parameters, district_index, sector_index, cell_index
+        )
     index = _boundary_index()
     cells_by_area = _cell_index()
     available_districts = list(index)
@@ -412,7 +502,7 @@ class GenerateSurveyProgressReport:
         end.value = datetime.combine(today, datetime.min.time())
 
         district = arcpy.Parameter(
-            displayName="District",
+            displayName="District(s) - select one or more",
             name="district",
             datatype="GPString",
             parameterType="Optional",
@@ -420,6 +510,7 @@ class GenerateSurveyProgressReport:
         )
         district.filter.type = "ValueList"
         district.filter.list = districts
+        district.multiValue = True
         district.value = default_district
 
         sectors = arcpy.Parameter(
@@ -555,7 +646,7 @@ class GenerateSurveyProgressReport:
             start_date=parameters[1].value,
             end_date=parameters[2].value,
             usernames=usernames,
-            district=parameters[3].valueAsText or None,
+            district=_split_multivalue(parameters[3].valueAsText),
             sectors=sectors,
             cells=cells,
             custom_boundary_geometry=custom_boundary_geometry,
@@ -642,7 +733,7 @@ class WatchLVLineDataQuality:
         end.value = datetime.combine(today, datetime.min.time())
 
         district = arcpy.Parameter(
-            displayName="District - blank for all Rwanda",
+            displayName="District(s) - blank for all Rwanda",
             name="district",
             datatype="GPString",
             parameterType="Optional",
@@ -650,6 +741,7 @@ class WatchLVLineDataQuality:
         )
         district.filter.type = "ValueList"
         district.filter.list = districts
+        district.multiValue = True
 
         sectors = arcpy.Parameter(
             displayName="Sector(s) - blank for all sectors in district",
@@ -819,7 +911,7 @@ class WatchLVLineDataQuality:
             output_flagged_feature_class=parameters[1].valueAsText or None,
             start_date=parameters[2].value,
             end_date=parameters[3].value,
-            district=parameters[4].valueAsText or None,
+            district=_split_multivalue(parameters[4].valueAsText),
             sectors=_split_multivalue(parameters[5].valueAsText),
             cells=_split_multivalue(parameters[6].valueAsText),
             custom_boundary_geometry=_drawn_boundary_geometry(parameters[7]),
