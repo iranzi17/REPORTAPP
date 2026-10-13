@@ -1130,7 +1130,10 @@ class CheckLVTransformerNames(_AssetQualityTool):
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
         arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
-        if summary["ambiguous_sources"] or summary["unverified_sources"]:
+        if (
+            summary["ambiguous_sources"] or summary["unverified_sources"]
+            or summary["trace_warnings_unverified"]
+        ):
             arcpy.AddWarning(
                 "Some lines have ambiguous or unverified source transformers. "
                 "See All Checked LV Lines; do not automatically rename them."
