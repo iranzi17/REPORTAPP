@@ -81,6 +81,7 @@ def query_attributes_in_batches(
     batch_size: int = 150,
     progress: Callable[[str], None] | None = None,
     asset_label: str = "LV line",
+    duplicate_globalid_policy: str = "error",
 ) -> list[dict[str, Any]]:
     """Retrieve all matches or fail; never issue partial 'clean' reports.
 
@@ -89,6 +90,8 @@ def query_attributes_in_batches(
     """
     if batch_size < 1:
         raise ValueError("Batch size must be positive.")
+    if duplicate_globalid_policy not in ("error", "report"):
+        raise ValueError("duplicate_globalid_policy must be error or report.")
     spatial_filters = list(geometry_filters)
     if not spatial_filters:
         raise ValueError("No boundary polygons were provided for the selected area.")
@@ -173,15 +176,25 @@ def query_attributes_in_batches(
             oid = int(attrs["OBJECTID"])
             if oid not in batch:
                 raise RuntimeError(f"Unexpected ObjectID {oid} returned in attribute batch.")
+            if oid in collected:
+                raise RuntimeError(f"ArcGIS Server returned ObjectID {oid} more than once.")
             gid = str(attrs.get("GLOBALID") or "").strip().strip("{}").casefold()
             if gid:
                 previous = gid_to_oid.get(gid)
                 if previous is not None and previous != oid:
-                    raise RuntimeError(
-                        f"Duplicate GlobalID {gid} belongs to two different OBJECTIDs: "
-                        f"{previous} and {oid}. Correct source data before reporting."
-                    )
-                gid_to_oid[gid] = oid
+                    if duplicate_globalid_policy == "error":
+                        raise RuntimeError(
+                            f"Duplicate GlobalID {gid} belongs to two different OBJECTIDs: "
+                            f"{previous} and {oid}. Correct source data before reporting."
+                        )
+                    if progress:
+                        progress(
+                            f"DATA INTEGRITY WARNING: duplicate {asset_label} GlobalID "
+                            f"{gid}: OBJECTIDs {previous} and {oid}. "
+                            "Both records retained for QA and Excel duplicate register."
+                        )
+                else:
+                    gid_to_oid[gid] = oid
             collected[oid] = attrs
         missing = set(batch) - collected.keys()
         if missing:
