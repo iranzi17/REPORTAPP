@@ -62,7 +62,7 @@ def _filters_for_area(boundary_features, custom_boundary_geometry):
     return result
 
 
-def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_areas, start, end):
+def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_areas, start, end, selected_users):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -81,6 +81,9 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     overview.append(["From", start.isoformat()])
     overview.append(["To (inclusive)", end.isoformat()])
     overview.append(["Date basis", "Created or last edited"])
+    overview.append(["Surveyor filter", "; ".join(selected_users) if selected_users else "ALL surveyors (no filter)"])
+    overview.append(["Surveyor filter count", len(selected_users) if selected_users else "ALL"])
+    overview.append(["Surveyor accounts returned", len({item["username"].casefold() for item in rows})])
     overview.append(["Feature Layer", ASSETS[asset]["layer_id"]])
     overview.append(["Asset Group", ASSETS[asset]["asset_group"]])
     for label, key in [
@@ -93,6 +96,9 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     overview.append(["Source", "REGUN FeatureServer (read-only)"])
     overview.append(["Interpretation", "Missing template fields are NOT checked; see Schema Verification."])
     overview.append(["Location source", "Recorded District/Sector/Cell fields; NOT spatially verified."])
+    overview.append(["Records lacking all three recorded location fields",
+                     sum(not (item["recorded_district"] and item["recorded_sector"] and item["recorded_cell"])
+                         for item in rows)])
     overview.append(["Exclusion", "Transformer group 12 only; other Electric Device groups, including plant equipment, are excluded."] if asset == "transformer"
                     else ["Exclusion", "Structure Junction LV Pole group 7 only."])
 
@@ -153,7 +159,7 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             summary_by_area["with_gaps"], summary_by_area["issue_count"],
             summary_by_area["not_verified"],
         ])
-        schema.append(["Rule / Field Purpose", "Resolved Live Field", "Status", "Candidate Names"])
+    schema.append(["Rule / Field Purpose", "Resolved Live Field", "Status", "Candidate Names"])
     for key, candidates in ASSETS[asset]["checks"].items():
         schema.append([
             key, mapping.get(key) or "", "VERIFIED" if mapping.get(key) else "NOT FOUND - NOT CHECKED",
@@ -293,11 +299,20 @@ def run_asset_quality(
     results.sort(key=lambda x: (x["status"] != "GAP", x["username"].casefold(), x["objectid"]))
     counts = summarize_assets(results)
     selected = selected_districts(district)
-    _report_xlsx(output, asset, results, mapping, fields, counts, selected, start, end)
+    selected_users = sorted({str(user).strip() for user in (usernames or [])
+                             if str(user).strip()}, key=str.casefold)
+    _report_xlsx(output, asset, results, mapping, fields, counts, selected, start, end,
+                 selected_users)
     return {
         "read_only": True, "asset": asset, "output_xlsx": str(output),
         "districts": selected, "date_start": start.isoformat(),
         "date_end": end.isoformat(), **counts,
+        "surveyor_filter": selected_users,
+        "returned_surveyor_count": len({item["username"].casefold() for item in results}),
+        "incomplete_recorded_locations": sum(
+            not (item["recorded_district"] and item["recorded_sector"] and item["recorded_cell"])
+            for item in results
+        ),
         "unverified_live_fields": [key for key, found in mapping.items() if not found],
         "source_layer": _layer_url(service, ASSETS[asset]["layer_id"]),
     }
