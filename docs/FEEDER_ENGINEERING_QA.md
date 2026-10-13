@@ -115,3 +115,45 @@ merely because they are close together on a map.
 - IEC 60038 standardized 230/400 V: https://cdn.standards.iteh.ai/samples/14766/0ef9a2c3878e40cca23313e947f90bb6/IEC-60038-2009.pdf
 - Schneider Electric conductor design: https://www.electrical-installation.org/enwiki/Conductor_sizing:_methodology_and_definition
 - Schneider Electric sizing/protection overview: https://www.electrical-installation.org/enwiki/Sizing_and_protection_of_conductors
+
+
+## Transformer-name trace QA (October 2026)
+
+The Working ArcGIS Pro toolbox has a separate read-only tool:
+**Check LV Line Transformer Names**.
+
+**Field rule:** the line's `Transformer_Name` must match the
+supplying distribution transformer's `Transfomer_name_`. The comparison
+is case-/whitespace-insensitive, but uses no fuzzy name matching.
+
+The tool:
+- Selects transformer **Electric Device layer 7 / ASSETGROUP 12 /
+  ASSETTYPE 1-6**, excluding CTs, VTs, breakers and unrelated equipment.
+- Starts a `connected` Utility Network trace from each selected transformer's
+  **secondary terminal**, with `validateConsistency=True`.
+- **By default, checks every connected LV line**, including lines outside the
+  district boundary or created before the selected dates. Districts/sector/cell
+  selection determines transformer start points, not a clipping mask.
+  Optional 'Only lines surveyed/edited in selected date range' mode
+  preserves date and geographic filters. Explicit surveyor selection
+  filters the lines in either mode.
+- Queries traced LV line OBJECTIDs in bounded batches; never infers a source
+  using nearest geometry or a shared transformer-name string.
+- Exports `Summary`, `Name Mismatch Review`, `All Checked LV Lines`,
+  `Surveyor Summary` and `Rule and Limitations` worksheets.
+  Every line and transformer receives its GlobalID for traceable corrections.
+- Treats a missing line name with one uniquely connected named transformer
+  as a correction gap.
+- Flags a different line name only as `NAME_MISMATCH_REVIEW` pending
+  verification of **energized supply and switching state**. Connected topology
+  alone does not prove electrical direction.
+- Separately identifies cases with multiple transformer points in the
+  connected component, trace warnings, unnamed transformer points or no
+  verified local transformer. None is automatically assigned a source name.
+- Fails closed if a transformer trace fails or a line returned by topology
+  cannot be retrieved; no partial report is produced.
+
+Before using the result as proof of surveyor error, a network engineer
+should confirm the actual feeder source in the relevant operating
+configuration. Mismatches must **not** be automatically renamed in the
+Utility Network.
