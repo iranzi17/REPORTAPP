@@ -96,9 +96,12 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
 
     details.append([
         "Status", "OBJECTID", "GlobalID", "Asset Type", "Surveyor Username",
-        "Issues", "Unverified Checks", "Manufacturer", "Name / ID",
-        "Serial No", "Phases", "Rated kVA", "Manufacturer Evidence",
-        "Notes",
+        "Outstanding Issues", "Unverified Checks",
+        "Owner Name", "Type of Installation", "Phase Normal",
+        "Transformer Protection Switch", "Transformer mounting support",
+        "Transformer Name", "Number of Low Voltage feeders",
+        "Manufacturer", "Serial No", "Rated kVA",
+        "Manufacturer Evidence", "Notes",
     ])
     for item in rows:
         vals = item["values"]
@@ -106,8 +109,11 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             item["status"], item["objectid"], item["globalid"],
             item["asset_type_label"], item["username"],
             "; ".join(item["issues"]), "; ".join(item["unverified_checks"]),
-            vals.get("manufacturer", ""), vals.get("name", ""),
-            vals.get("serial", ""), vals.get("phases", ""), vals.get("capacity", ""),
+            vals.get("owner_name", ""), vals.get("installation_type", ""),
+            vals.get("phase_normal", ""), vals.get("protection_switch", ""),
+            vals.get("mounting_support", ""), vals.get("name", ""),
+            vals.get("lv_feeder_count", ""), vals.get("manufacturer", ""),
+            vals.get("serial", ""), vals.get("capacity", ""),
             vals.get("manufacturer_status", ""), item["notes"],
         ])
 
@@ -137,7 +143,8 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     rules_sheet.append(["Type", "Rule", "Interpretation"])
     rules_sheet.append(["Both", "GlobalID", "Missing GlobalID is a gap."])
     rules_sheet.append(["Both", "Asset Type", "Unknown/unsupported asset type is a gap."])
-    rules_sheet.append(["Transformer", "Verified fields", "Blank transformer name/manufacturer/serial/phases/capacity are gaps only if the field exists in the live schema."])
+    rules_sheet.append(["Transformer", "Seven original correction checks", "Owner Name, Type of Installation, Phase Normal, Protection Switch, mounting support, Transformer Name and LV feeder count; only live-mapped fields are evaluated."])
+    rules_sheet.append(["Transformer", "Supplementary fields", "Manufacturer, Serial and Rated kVA are displayed where available but NOT scored in the original correction register."])
     rules_sheet.append(["Transformer", "Branch", "Explicitly excluded from mandatory checking."])
     rules_sheet.append(["LV Pole", "Manufacturer", "If blank, Notes must expressly state no name plate; otherwise a gap."])
     rules_sheet.append(["LV Pole", "Nameplate exception", "Documented absence is NOT treated as a manufacturer value."])
