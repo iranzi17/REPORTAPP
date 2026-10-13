@@ -17,14 +17,26 @@ ASSETS = {
                   4:"11kV-400V", 5:"6.6kV-400V", 6:"11kV-3.3kV"},
         "checks": {
             "name": ["Transfomer_name_", "Transformer_Name", "TransformerName", "Transformer_ID"],
+            "owner_name": ["Owner_Name", "OwnerName", "Owner name", "Owner_Name_"],
+            "installation_type": ["Type_of_Installation", "Type_of_installation",
+                                  "TypeInstallation", "Installation_Type"],
+            "phase_normal": ["Phase_Normal", "PhaseNormal", "Phase_Norm", "Phase Normal"],
+            "protection_switch": ["Transformer_Protection_Switch", "TransformerProtectionSwitch",
+                                  "Protection_Switch", "Transformer_protection_switch"],
+            "mounting_support": ["Transformer_mounting_support", "TransformerMountingSupport",
+                                 "Mounting_Support", "Transformer_mounting_support_"],
+            "lv_feeder_count": ["Number_of_Low_Voltage_feeders", "Number_of_LV_feeders",
+                                "Number_of_Low_Voltage_Feeders", "NumberLowVoltageFeeders",
+                                "No_of_LV_Feeders", "No_LV_Feeder"],
+            # Supplementary fields retained for technical context, not scored
+            # as original field-correction gaps.
             "manufacturer": ["Manufacturer", "Manufacturer_Name", "ManufacturerName", "Make"],
             "serial": ["Serial_No", "Serial_Number", "SerialNo", "SerialNumber"],
-            "phases": ["Phases", "Phase", "No_of_Phases", "Number_of_Phases"],
-            "capacity": ["Rated_kVA", "RatedPower_kVA", "Capacity_kVA", "Rated_Capacity_kVA", "Power_kVA"],
+            "capacity": ["Rated_kVA", "RatedPower_kVA", "Capacity_kVA",
+                         "Rated_Capacity_kVA", "Power_kVA"],
         },
-        # Only fields whose live names resolve are scored; unknown live
-        # schema is reported as NOT_VERIFIED, never "no issues".
-        "priority": ("name", "manufacturer", "serial", "phases", "capacity"),
+        "priority": ("owner_name", "installation_type", "phase_normal",
+                     "protection_switch", "mounting_support", "name", "lv_feeder_count"),
     },
     "pole": {
         "title": "LV Poles",
@@ -118,12 +130,17 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
             decoded = vals.get(raw, raw)
             values[key] = "" if raw is None else str(decoded)
     if asset == "transformer":
+        # Exactly the seven gaps from the previous distribution-transformer
+        # register (160 eligible records, 59 with outstanding corrections).
+        # Branch and all supplementary nameplate fields are excluded.
         labels = {
-            "name":"Transformer name missing",
-            "manufacturer":"Manufacturer missing",
-            "serial":"Serial number missing",
-            "phases":"Phases missing",
-            "capacity":"Rated capacity missing",
+            "owner_name": "Owner Name missing/unknown",
+            "installation_type": "Type of Installation missing",
+            "phase_normal": "Phase Normal missing",
+            "protection_switch": "Transformer Protection Switch missing/unknown",
+            "mounting_support": "Transformer mounting support missing/unknown",
+            "name": "Transformer Name missing",
+            "lv_feeder_count": "Number of Low Voltage feeders missing",
         }
         for key, label in labels.items():
             field = mapping.get(key)
@@ -131,12 +148,9 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
                 continue
             if missing_value(attributes.get(field), (domains or {}).get(field)):
                 issues.append(label)
-            if key == "capacity" and not missing_value(attributes.get(field), (domains or {}).get(field)):
-                # Only explicit numeric capacity is evaluated. Coded labels
-                # like '100 kVA' need normalization before comparison.
-                raw = attributes.get(field)
-                if isinstance(raw, (int, float)) and float(raw) <= 0:
-                    issues.append("Nonpositive rated capacity")
+        # A positive feeder count is normal for commissioned distribution
+        # installations, but 0 can be an intentional future/unused asset.
+        # Never infer missing from numerical zero without an agreed business rule.
     else:
         field = mapping.get("manufacturer")
         if field and missing_value(attributes.get(field), (domains or {}).get(field)):
