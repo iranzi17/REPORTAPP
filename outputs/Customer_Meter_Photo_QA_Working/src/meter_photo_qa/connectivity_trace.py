@@ -3,7 +3,64 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Sequence
+
+
+_DIRTY_LINE_PATTERN = re.compile(
+    r"ElectricLine\s*:\s*\{([0-9a-fA-F-]{36})\}", re.IGNORECASE
+)
+
+
+class TopologyDirtyAreaError(RuntimeError):
+    """Trace blocked by unvalidated topology; never a data-name mismatch."""
+
+    def __init__(self, *, transformer_objectid, transformer_globalid,
+                 dirty_line_globalids, version, trace_position, trace_total, original_error):
+        self.transformer_objectid = int(transformer_objectid)
+        self.transformer_globalid = str(transformer_globalid)
+        self.dirty_line_globalids = tuple(dirty_line_globalids)
+        self.version = str(version)
+        self.trace_position = int(trace_position)
+        self.trace_total = int(trace_total)
+        self.original_error = str(original_error)
+        dirty_list = ", ".join(self.dirty_line_globalids) or "not returned by server"
+        super().__init__(
+            f"Utility Network topology requires validation: trace "
+            f"{self.trace_position}/{self.trace_total} was blocked at distribution "
+            f"transformer OBJECTID {self.transformer_objectid} "
+            f"(GlobalID {self.transformer_globalid}), version {self.version}. "
+            f"Dirty ElectricLine GlobalID(s): {dirty_list}. "
+            "This is NOT a transformer-name mismatch. No name-consistency "
+            "report can be trusted for the selected area until affected dirty "
+            "areas are reviewed and network topology is validated by an "
+            "authorized Utility Network editor. In ArcGIS Pro, locate the "
+            "Electric Line by GlobalID and inspect Dirty Areas; coordinate "
+            "Utility Network > Validate > Current Extent. "
+            "Do not disable trace consistency validation. "
+            f"Service response: {self.original_error}"
+        )
+
+
+def _trace_dirty_error(error, point, version, position, total):
+    """Return a typed blocker when ArcGIS signals one or more dirty areas."""
+    message = str(error)
+    if not ("dirty area" in message.casefold() or
+            "dirty areas" in message.casefold()):
+        return None
+    globals_found = [
+        "{" + match.upper() + "}"
+        for match in _DIRTY_LINE_PATTERN.findall(message)
+    ]
+    return TopologyDirtyAreaError(
+        transformer_objectid=point["OBJECTID"],
+        transformer_globalid=point.get("GLOBALID") or "",
+        dirty_line_globalids=list(dict.fromkeys(globals_found)),
+        version=version,
+        trace_position=position,
+        trace_total=total,
+        original_error=message,
+    )
 
 
 def _network_schema(gis: Any, service_url: str) -> dict[str, Any]:
@@ -131,10 +188,25 @@ def trace_connected_lv_lines(
             }),
             "resultTypes": json.dumps([{"type": "elements", "includeGeometry": False}]),
         }
-        response = gis._con.post(trace_url, params=params)
-        if not isinstance(response, dict):
-            raise RuntimeError(f"Transformer {object_id} connected trace returned an invalid response.")
-        result = _parse_trace(response, int(line_source["sourceId"]), int(device_source["sourceId"]))
+        try:
+            response = gis._con.post(trace_url, params=params)
+            if not isinstance(response, dict):
+                raise RuntimeError("Connected trace returned an invalid response.")
+            result = _parse_trace(
+                response, int(line_source["sourceId"]),
+                int(device_source["sourceId"]),
+            )
+        except Exception as exc:
+            dirty = _trace_dirty_error(
+                exc, point, version, index, len(transformer_points)
+            )
+            if dirty is not None:
+                raise dirty from exc
+            raise RuntimeError(
+                f"Connected trace failed at transformer {index}/{len(transformer_points)} "
+                f"(OBJECTID {object_id}, GlobalID {global_id}) in {version}: {exc}. "
+                "No partial transformer-name QA report was generated."
+            ) from exc
         if object_id not in result["connected_transformer_objectids"]:
             raise RuntimeError(f"Transformer {object_id} was not present in its own trace result.")
         result["terminal_id"] = terminal_id
