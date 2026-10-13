@@ -52,6 +52,7 @@ try:
     from meter_photo_qa import relay_associations as _relay_associations
     from meter_photo_qa import asset_quality_runner as _asset_quality_runner
     from meter_photo_qa import transformer_line_audit as _transformer_line_audit
+    from meter_photo_qa import duplicate_line_inspector as _duplicate_line_inspector
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -62,6 +63,7 @@ try:
     _relay_associations = importlib.reload(_relay_associations)
     _asset_quality_runner = importlib.reload(_asset_quality_runner)
     _transformer_line_audit = importlib.reload(_transformer_line_audit)
+    _duplicate_line_inspector = importlib.reload(_duplicate_line_inspector)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -85,6 +87,7 @@ DEFAULT_QUALITY_RULES_PATH = _quality_watcher.DEFAULT_QUALITY_RULES_PATH
 run_quality_watcher = _quality_watcher.run_quality_watcher
 run_asset_quality = _asset_quality_runner.run_asset_quality
 run_transformer_line_name_audit = _transformer_line_audit.run_transformer_line_name_audit
+inspect_duplicate_line_globalid = _duplicate_line_inspector.inspect_duplicate_line_globalid
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -109,6 +112,7 @@ class Toolbox:
             WatchDistributionTransformerQuality,
             WatchLVPoleQuality,
             CheckLVTransformerNames,
+            InspectElectricLineGlobalID,
         ]
 
 
@@ -1099,6 +1103,71 @@ class WatchLVPoleQuality(_AssetQualityTool):
     asset = "pole"
     label = "Watch LV Pole Data Quality"
 
+
+
+class InspectElectricLineGlobalID:
+    """Confirm actual source records before any Utility Network data cleanup."""
+    label = "Inspect Electric Line Duplicate GlobalID"
+    description = (
+        "Read-only FeatureServer query by GlobalID, comparing distinct OBJECTIDs "
+        "and exact polyline vertices. Does not change any GIS records."
+    )
+    canRunInBackground = False
+
+    def getParameterInfo(self):
+        output = arcpy.Parameter(
+            displayName="Output Excel diagnostic",
+            name="output_xlsx", datatype="DEFile",
+            parameterType="Required", direction="Output",
+        )
+        output.filter.list = ["xlsx"]
+        output.value = str(ROOT / "outputs" / f"duplicate_electric_line_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
+        gid = arcpy.Parameter(
+            displayName="Electric Line GlobalID (include braces or omit)",
+            name="globalid", datatype="GPString", parameterType="Required",
+            direction="Input",
+        )
+        service = arcpy.Parameter(
+            displayName="Utility Network FeatureServer URL",
+            name="service_url", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        service.value = DEFAULT_LINE_SERVICE_URL
+        version = arcpy.Parameter(
+            displayName="Utility Network Version",
+            name="gdb_version", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        version.value = "sde.DEFAULT"
+        return [output, gid, service, version]
+
+    def updateMessages(self, parameters):
+        if parameters[1].valueAsText:
+            try:
+                _duplicate_line_inspector.canonical_globalid(parameters[1].valueAsText)
+            except ValueError as exc:
+                parameters[1].setErrorMessage(str(exc))
+
+    def execute(self, parameters, messages):
+        result = inspect_duplicate_line_globalid(
+            globalid=parameters[1].valueAsText,
+            output_xlsx=parameters[0].valueAsText,
+            service_url=parameters[2].valueAsText or None,
+            version=parameters[3].valueAsText or "sde.DEFAULT",
+        )
+        arcpy.SetParameterAsText(0, result["output_xlsx"])
+        arcpy.AddMessage(json.dumps(result, indent=2, default=str))
+        if result["duplicate_globalid"]:
+            arcpy.AddWarning(
+                "The FeatureServer returned distinct OBJECTIDs for the SAME GlobalID. "
+                "Do not delete records without reviewing geometry, attachments, "
+                "associations and network topology."
+            )
+        elif result["matched_source_objects"] == 0:
+            arcpy.AddWarning(
+                "No source records found in this version. Verify layer source "
+                "and project version if the attribute table shows results."
+            )
 
 class CheckLVTransformerNames(_AssetQualityTool):
     asset = "line_transformer_name"
