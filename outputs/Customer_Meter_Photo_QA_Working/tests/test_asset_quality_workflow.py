@@ -137,10 +137,60 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertEqual(report["no_gaps_found"], 2)
         self.assertIn("ASSETGROUP = 7", requests[0]["where"])
         rows = sheets["Asset Details"]
-        self.assertTrue(any(row[20] == "DOCUMENTED_NO_NAMEPLATE" for row in rows[1:]))
+        self.assertTrue(any(row[21] == "DOCUMENTED_NO_NAMEPLATE" for row in rows[1:]))
         self.assertEqual(sheets["By Recorded Location"][1][:5],
                          ("Rulindo", "Buyoga", "Munyana", 3, 1))
         self.assertTrue(any("Manufacturer missing" in str(row[8]) for row in rows[1:]))
+
+    def test_duplicate_transformer_ids_across_multiple_attribute_batches_are_reported(self):
+        # Distinct OBJECTIDs with one repeated GlobalID must not stop the QA.
+        # 151+ records intentionally cross the default 150-feature batch size.
+        duplicate_gid = "{8013868c-1ed5-46a9-8f97-2c3a8bd86a01}"
+        records = [transformer(f"{{TEMP-{i}}}", i)
+                   for i in range(1, 151)]
+        records += [
+            transformer(duplicate_gid, 605878, Owner_Name=None),
+            transformer(duplicate_gid.lower().strip("{}"), 606278),
+        ]
+        report, sheets, requests = self.run_fake("transformer", records)
+        self.assertEqual(report["total"], 152)
+        self.assertEqual(report["duplicate_globalid_groups"], 1)
+        self.assertEqual(report["duplicate_feature_records"], 2)
+        self.assertEqual(report["extra_records_with_reused_globalids"], 1)
+        self.assertEqual(report["with_gaps"], 2)
+        self.assertEqual(report["original_attribute_gap_records"], 1)
+        self.assertEqual(report["original_attribute_issue_count"], 1)
+        self.assertEqual(report["issue_count"], 3)
+        self.assertEqual(report["no_gaps_found"], 150)
+        group_rows = sheets["Duplicate GlobalIDs"]
+        self.assertEqual(len(group_rows), 2)
+        self.assertEqual(group_rows[1][1], "605878; 606278")
+        details = sheets["Duplicate Asset Records"]
+        self.assertEqual(len(details), 3)
+        self.assertEqual({row[1] for row in details[1:]}, {605878, 606278})
+        self.assertEqual({row[4:7] for row in details[1:]},
+                         {("Burera", "Cyanika", "Gasiza")})
+        self.assertIn("Owner Name missing", details[1][10])
+        self.assertEqual(details[2][10], None)
+        all_assets = sheets["Asset Details"]
+        self.assertEqual(len(all_assets), 153)
+        affected = [row for row in all_assets[1:] if row[1] in (605878, 606278)]
+        self.assertEqual(len(affected), 2)
+        self.assertTrue(all(row[0] == "GAP" for row in affected))
+        self.assertEqual(len([q for q in requests if q.get("object_ids")]), 2)
+
+    def test_duplicate_pole_ids_keep_no_nameplate_rule_distinct(self):
+        pole_g = "{12345678-1234-1234-1234-1234567890ab}"
+        records = [
+            pole(pole_g, 101, "No name plate"),
+            pole(pole_g, 102, ""),
+        ]
+        report, sheets, _ = self.run_fake("pole", records)
+        self.assertEqual(report["duplicate_globalid_groups"], 1)
+        self.assertEqual(report["duplicate_feature_records"], 2)
+        self.assertEqual(report["original_attribute_gap_records"], 1)
+        self.assertEqual(report["with_gaps"], 2)
+        self.assertIn("Manufacturer missing", sheets["Duplicate Asset Records"][2][10])
 
     def test_schema_not_found_is_not_counted_as_clean(self):
         report, sheets, _ = self.run_fake("transformer", [transformer("{T}", 1)])
