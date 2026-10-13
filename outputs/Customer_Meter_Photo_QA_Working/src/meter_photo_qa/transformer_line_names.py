@@ -46,6 +46,7 @@ def assess_line_transformer_names(
 
     membership: dict[int, set[int]] = defaultdict(set)
     ambiguous_lines: set[int] = set()
+    trace_warning_lines: set[int] = set()
     for oid, trace in trace_results.items():
         if oid not in point_by_id:
             raise ValueError(f"Unexpected transformer trace source {oid}")
@@ -55,6 +56,8 @@ def assess_line_transformer_names(
             membership[line_oid].add(oid)
         if len(connected_transformers) != 1:
             ambiguous_lines.update(line_ids)
+        if trace.get("warnings"):
+            trace_warning_lines.update(line_ids)
 
     output = []
     encountered = set()
@@ -73,6 +76,9 @@ def assess_line_transformer_names(
         if oid in ambiguous_lines or len(candidates) > 1:
             status = "AMBIGUOUS_CONNECTED_SOURCES"
             evidence = "Trace reaches multiple distribution-transformer points; feeder source is not unique."
+        elif oid in trace_warning_lines:
+            status = "TRACE_WARNING_UNVERIFIED"
+            evidence = "Utility Network trace returned warnings; verify network topology before judging the line label."
         elif not candidates:
             status = "SOURCE_UNVERIFIED"
             evidence = "Line is not in a trace from a selected-area transformer; its source may be outside the boundary."
