@@ -63,9 +63,13 @@ class TransformerLineNameWorkflowTests(unittest.TestCase):
             return FakeLayer([])
         arcgis=types.ModuleType("arcgis")
         features=types.ModuleType("arcgis.features")
+        geometry=types.ModuleType("arcgis.geometry")
+        filters=types.ModuleType("arcgis.geometry.filters")
+        filters.intersects=lambda polygon,sr=None: polygon
         features.FeatureLayer=layer
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder, patch.dict(
-            sys.modules, {"arcgis":arcgis,"arcgis.features":features},
+            sys.modules, {"arcgis":arcgis,"arcgis.features":features,
+                          "arcgis.geometry":geometry,"arcgis.geometry.filters":filters},
         ), patch(
             "meter_photo_qa.transformer_line_audit.trace_connected_lv_lines",
             return_value={
@@ -102,9 +106,13 @@ class TransformerLineNameWorkflowTests(unittest.TestCase):
         lines=FakeLayer([li(1,"Wrong")])
         points=FakeLayer([tr(101,"Kisaro")])
         features=types.ModuleType("arcgis.features")
+        geometry=types.ModuleType("arcgis.geometry")
+        filters=types.ModuleType("arcgis.geometry.filters")
+        filters.intersects=lambda polygon,sr=None: polygon
         features.FeatureLayer=lambda url,gis: lines if url.endswith("/10") else points
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder, patch.dict(
-            sys.modules,{"arcgis":types.ModuleType("arcgis"),"arcgis.features":features},
+            sys.modules,{"arcgis":types.ModuleType("arcgis"),"arcgis.features":features,
+                         "arcgis.geometry":geometry,"arcgis.geometry.filters":filters},
         ), patch(
             "meter_photo_qa.transformer_line_audit.trace_connected_lv_lines",
             side_effect=RuntimeError("Dirty area / invalid connected trace"),
