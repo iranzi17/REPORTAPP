@@ -1090,6 +1090,15 @@ class _AssetQualityTool:
                 ". Review the Schema Verification worksheet; "
                 "do not treat these checks as complete."
             )
+        if summary["duplicate_globalid_groups"]:
+            arcpy.AddWarning(
+                f"{summary['duplicate_globalid_groups']} repeated GlobalID group(s) "
+                f"across {summary['duplicate_feature_records']} distinct "
+                f"{self.asset} OBJECTIDs. Every record was retained in the QA "
+                "workbook; see Duplicate GlobalIDs and Duplicate Asset Records. "
+                "The identity issues are separate from the seven original "
+                "transformer field checks. Do not delete GIS features automatically."
+            )
         if summary["surveyor_filter"]:
             arcpy.AddWarning(
                 f"This report includes ONLY {len(summary['surveyor_filter'])} "
