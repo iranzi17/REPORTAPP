@@ -19,6 +19,9 @@ class FakeLineService:
 
     def query(self, **kwargs):
         self.queries.append(kwargs)
+        if kwargs.get("return_count_only"):
+            result = self.area_ids.get(kwargs.get("geometry_filter"), [])
+            return len(result) if result is not None else 0
         if kwargs.get("return_ids_only"):
             return {"objectIds": self.area_ids.get(kwargs.get("geometry_filter"), [])}
         if "object_ids" in kwargs:
@@ -69,6 +72,94 @@ class QualityBatchTests(unittest.TestCase):
         layer = FakeLineService(make_rows(1), area_ids={"A": []})
         self.assertEqual(query_batch(layer, [("A", "A")]), [])
         self.assertEqual(len(layer.queries), 1)
+
+    def test_arcgis_null_objectids_with_verified_zero_count_is_empty(self):
+        # ArcGIS Feature Service often emits {'objectIds': None} for
+        # polygons containing no distribution transformers.
+        layer = FakeLineService(make_rows(2), area_ids={"Muzo": None, "Gakenke": [1, 2]})
+        messages = []
+        rows = query_batch(
+            layer, [("Gakenke / Muzo", "Muzo"),
+                    ("Gakenke / Gakenke", "Gakenke")],
+            progress=messages.append,
+        )
+        self.assertEqual([row["OBJECTID"] for row in rows], [1, 2])
+        count_calls = [q for q in layer.queries if q.get("return_count_only")]
+        self.assertEqual(len(count_calls), 1)
+        self.assertEqual(count_calls[0]["geometry_filter"], "Muzo")
+        self.assertEqual(count_calls[0]["gdb_version"], "sde.DEFAULT")
+        self.assertIn("ASSETGROUP", count_calls[0]["where"])
+        self.assertTrue(any("no matching features in Gakenke / Muzo" in m for m in messages))
+
+    def test_missing_objectids_key_with_zero_count_is_also_empty(self):
+        layer = FakeLineService(make_rows(1), area_ids={"Muzo": []})
+        def query(target, **kwargs):
+            clean = {key: val for key, val in kwargs.items() if key != "attempts"}
+            if clean.get("return_ids_only"):
+                return {"objectIdFieldName": "OBJECTID"}
+            return target.query(**clean)
+        self.assertEqual(query_attributes_in_batches(
+            layer, "ASSETGROUP = 12", "sde.DEFAULT",
+            ["OBJECTID"], [("Gakenke / Muzo", "Muzo")], query,
+        ), [])
+        self.assertEqual(len([q for q in layer.queries if q.get("return_count_only")]), 1)
+
+    def test_missing_objectids_with_positive_count_aborts(self):
+        layer = FakeLineService(make_rows(2), area_ids={"Muzo": [1, 2]})
+        def query(target, **kwargs):
+            clean = {key: val for key, val in kwargs.items() if key != "attempts"}
+            if clean.get("return_ids_only"):
+                return {"objectIds": None}
+            return target.query(**clean)
+        with self.assertRaisesRegex(RuntimeError, "matching count is 2"):
+            query_attributes_in_batches(
+                layer, "1=1", "sde.DEFAULT", ["OBJECTID"],
+                [("Gakenke / Muzo", "Muzo")], query,
+            )
+
+    def test_missing_objectids_and_broken_count_query_aborts(self):
+        layer = FakeLineService(make_rows(1), area_ids={"Muzo": []})
+        def query(target, **kwargs):
+            if kwargs.get("return_ids_only"):
+                return {"objectIds": None}
+            if kwargs.get("return_count_only"):
+                raise RuntimeError("Count endpoint unavailable")
+            return target.query(**{key: val for key, val in kwargs.items()
+                                  if key != "attempts"})
+        with self.assertRaisesRegex(RuntimeError, "count-only verification failed"):
+            query_attributes_in_batches(
+                layer, "1=1", "sde.DEFAULT", ["OBJECTID"],
+                [("Gakenke / Muzo", "Muzo")], query,
+            )
+
+    def test_invalid_id_response_cannot_be_silent_zero(self):
+        layer = FakeLineService(make_rows(1))
+        with self.assertRaisesRegex(RuntimeError, "invalid objectIds"):
+            query_attributes_in_batches(
+                layer, "1=1", "sde.DEFAULT", ["OBJECTID"], [("Muzo", "Muzo")],
+                lambda _layer, **kwargs: {"objectIds": "not-an-array"},
+            )
+
+    def test_53_polygon_transformer_run_continues_after_empty_muzo(self):
+        # This models the reported 1/53 failure, without a live server.
+        layer = FakeLineService(
+            make_rows(2), area_ids={
+                **{"sector-" + str(i): None for i in range(1, 54)},
+                "sector-12": [1],
+                "sector-53": [1, 2],
+            },
+        )
+        areas = [
+            (f"Gakenke / Sector {i}", f"sector-{i}") for i in range(1, 54)
+        ]
+        rows = query_batch(layer, areas)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            len([q for q in layer.queries if q.get("return_count_only")]), 51,
+        )
+        self.assertEqual(
+            len([q for q in layer.queries if q.get("return_ids_only")]), 53,
+        )
 
     def test_503_fails_without_partial_report(self):
         layer = FakeLineService(make_rows(3))
