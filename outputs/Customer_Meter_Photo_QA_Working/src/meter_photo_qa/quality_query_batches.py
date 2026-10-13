@@ -1,0 +1,140 @@
+"""Reliable, read-only retrieval of LV line attributes from ArcGIS FeatureServer.
+
+Spatially expensive searches return OBJECTIDs only. Attribute data is then
+fetched in bounded batches by indexed OBJECTID. The same feature may touch
+multiple selected sector polygons; it is counted exactly once.
+"""
+from __future__ import annotations
+
+from typing import Any, Callable, Iterable
+
+
+def _objectids_from_query(response: Any, area: str) -> list[int]:
+    """ArcGIS FeatureLayer.query(return_ids_only=True) returns a dictionary."""
+    if not isinstance(response, dict):
+        raise RuntimeError(
+            f"{area}: the service did not return an ObjectID dictionary; "
+            "cannot safely confirm all features were retrieved."
+        )
+    if response.get("error"):
+        raise RuntimeError(f"{area}: ObjectID query failed: {response['error']}")
+    if "objectIds" not in response or response["objectIds"] is None:
+        raise RuntimeError(f"{area}: missing objectIds in query response.")
+    try:
+        return sorted({int(oid) for oid in response["objectIds"]})
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{area}: the query returned invalid ObjectIDs.") from exc
+
+
+def query_attributes_in_batches(
+    layer: Any,
+    where: str,
+    version: str,
+    fields: list[str],
+    geometry_filters: Iterable[tuple[str, Any]],
+    query_fn: Callable[..., Any],
+    batch_size: int = 150,
+    progress: Callable[[str], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve all matches or fail; never issue partial 'clean' reports.
+
+    geometry_filters contains tuples (human-readable area, geometry filter).
+    For a national run pass [('All areas', None)].
+    """
+    if batch_size < 1:
+        raise ValueError("Batch size must be positive.")
+    spatial_filters = list(geometry_filters)
+    if not spatial_filters:
+        raise ValueError("No boundary polygons were provided for the selected area.")
+    unique_ids: set[int] = set()
+    for index, (area, spatial_filter) in enumerate(spatial_filters, 1):
+        opts = {
+            "where": where,
+            "return_ids_only": True,
+            "return_geometry": False,
+            "gdb_version": version,
+        }
+        if spatial_filter is not None:
+            opts["geometry_filter"] = spatial_filter
+        try:
+            response = query_fn(layer, attempts=2, **opts)
+            ids = _objectids_from_query(response, area)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not list LV ObjectIDs for {area} (area "
+                f"{index}/{len(spatial_filters)}). The report was NOT generated; "
+                f"there are no reliable counts until all areas succeed. "
+                f"ArcGIS Server error: {exc}"
+            ) from exc
+        unique_ids.update(ids)
+        if progress and (index == 1 or index == len(spatial_filters) or index % 10 == 0):
+            progress(
+                f"LV boundary {index}/{len(spatial_filters)}: "
+                f"{len(unique_ids)} unique ObjectIDs identified."
+            )
+
+    sorted_ids = sorted(unique_ids)
+    if not sorted_ids:
+        return []
+
+    max_records = getattr(getattr(layer, "properties", None), "maxRecordCount", None)
+    if max_records is None and isinstance(getattr(layer, "properties", None), dict):
+        max_records = layer.properties.get("maxRecordCount")
+    try:
+        safe_batch_size = min(batch_size, int(max_records)) if max_records else batch_size
+    except (TypeError, ValueError):
+        safe_batch_size = batch_size
+    safe_batch_size = max(1, safe_batch_size)
+
+    collected: dict[int, dict[str, Any]] = {}
+    gid_to_oid: dict[str, int] = {}
+    for offset in range(0, len(sorted_ids), safe_batch_size):
+        batch = sorted_ids[offset: offset + safe_batch_size]
+        try:
+            feature_set = query_fn(
+                layer,
+                attempts=2,
+                where="1=1",
+                object_ids=",".join(str(oid) for oid in batch),
+                out_fields=",".join(fields),
+                return_geometry=False,
+                return_all_records=False,
+                gdb_version=version,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"LV attribute batch {offset // safe_batch_size + 1} failed "
+                f"({len(collected)}/{len(sorted_ids)} records fetched). "
+                f"No partial report was generated. ArcGIS Server error: {exc}"
+            ) from exc
+        if not hasattr(feature_set, "features"):
+            raise RuntimeError("ArcGIS Server returned an invalid attribute batch.")
+        if getattr(feature_set, "exceeded_transfer_limit", False):
+            raise RuntimeError("ArcGIS Server exceeded the transfer limit in a bounded batch.")
+        for feature in feature_set.features:
+            attrs = dict(feature.attributes)
+            if attrs.get("OBJECTID") is None:
+                raise RuntimeError("ArcGIS Server returned a feature without OBJECTID.")
+            oid = int(attrs["OBJECTID"])
+            if oid not in batch:
+                raise RuntimeError(f"Unexpected ObjectID {oid} returned in attribute batch.")
+            gid = str(attrs.get("GLOBALID") or "").strip().strip("{}").casefold()
+            if gid:
+                previous = gid_to_oid.get(gid)
+                if previous is not None and previous != oid:
+                    raise RuntimeError(
+                        f"Duplicate GlobalID {gid} belongs to two different OBJECTIDs: "
+                        f"{previous} and {oid}. Correct source data before reporting."
+                    )
+                gid_to_oid[gid] = oid
+            collected[oid] = attrs
+        missing = set(batch) - collected.keys()
+        if missing:
+            raise RuntimeError(
+                f"The service omitted {len(missing)} requested LV lines from "
+                f"an attribute batch. Report cancelled to avoid incomplete results."
+            )
+        if progress and (offset == 0 or offset + safe_batch_size >= len(sorted_ids)
+                         or (offset // safe_batch_size + 1) % 20 == 0):
+            progress(f"Loaded {len(collected)}/{len(sorted_ids)} LV line attributes.")
+    return [collected[oid] for oid in sorted_ids]
