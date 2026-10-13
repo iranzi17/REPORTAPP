@@ -109,6 +109,13 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertIn("Owner Name missing", sheets["Asset Details"][1][8])
         self.assertIn("Schema Verification", sheets)
         self.assertIn("By Recorded Location", sheets)
+        schema_headers = [row[0] for row in sheets["Schema Verification"]
+                          if row[0] == "Rule / Field Purpose"]
+        self.assertEqual(len(schema_headers), 1)
+        overview = {row[0]: row[1] for row in sheets["Summary"] if row[0]}
+        self.assertEqual(overview["Surveyor filter"], "ALL surveyors (no filter)")
+        self.assertEqual(overview["Surveyor accounts returned"], 1)
+        self.assertEqual(overview["Records lacking all three recorded location fields"], 0)
         self.assertIn("District", requests[1]["out_fields"])
         detail = sheets["Asset Details"]
         self.assertEqual(detail[0][5:8], (
