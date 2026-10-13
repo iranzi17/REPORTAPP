@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 *.pyo
 *.log
+
+/outputs/Customer_Meter_Photo_QA_Clean/outputs/
