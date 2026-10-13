@@ -207,3 +207,34 @@ share identical or overlapping geometries. It makes no source edits,
 deletions or Utility Network topology changes. Duplicate GlobalID
 findings must be reviewed with network associations/attachments and
 approved by authorized GIS/Utility Network editors before remediation.
+
+
+## Recorded geographic columns in asset QA (Oct 13, 2026)
+
+First successful transformer quality workbook on Burera, Gakenke and
+Rulindo (Aug 29–Oct 13) contained 131 records, 40 affected features,
+122 individual issues, and no repeated transformer GlobalIDs. All
+seven historical correction fields resolved to live attributes.
+However, its Asset Details sheet did not contain geography despite the
+live layer exposing `District`, `Sector` and `Cell` fields.
+
+The Working transformer and LV pole quality watchers now include these
+three **recorded** location columns in Asset Details, and a
+**By Recorded Location** worksheet with feature and gap counts.
+These are source attributes for planning corrections, not verified
+spatial intersections. Unknown/unrecorded locations are labeled
+`(not recorded)`; geography is informational and does not inflate
+the original correction priorities. Branch remains excluded.
+
+The initial transformer QA showed 39 missing LV-feeder counts,
+20 missing installation types, 17 missing mounting supports, 16
+missing protection-switch attributes, 15 missing owners, and 15
+missing phase attributes. Transformer Name was complete within
+that date/geography/surveyor scope; connectivity-based name consistency
+is a separate check requiring validated Utility Network topology.
+
+The uploaded duplicate report had 154 repeated GlobalID groups
+(309 records, one group with three records), of which 17 groups did
+not have wholly identical vertex sequences. It contained asset
+groups 9 (overhead LV) and 10 (underground LV) only, so do not call
+it a full LV/MV/HV inventory absent an overall scan summary.
