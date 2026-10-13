@@ -208,6 +208,56 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
     }
 
 
+def annotate_duplicate_asset_globalids(rows):
+    """Mark every distinct source OBJECTID in repeated GlobalID groups.
+
+    Keeps the original seven transformer correction checks separately from
+    identity-integrity issues. This is scoped to the rows in this run;
+    another copy outside the selected area/date/surveyor set may be missed.
+    """
+    from collections import defaultdict
+
+    grouped = defaultdict(list)
+    observed = set()
+    for row in rows:
+        oid = int(row["objectid"])
+        if oid in observed:
+            raise RuntimeError(f"Duplicate OBJECTID {oid} in an asset QA result.")
+        observed.add(oid)
+        row["attribute_gap_before_duplicate_check"] = row["status"] == "GAP"
+        row["identifier_issues"] = []
+        row["duplicate_peer_objectids"] = []
+        raw = str(row.get("globalid") or "").strip().strip("{}").casefold()
+        if raw:
+            grouped[raw].append(row)
+    duplicate_groups = {}
+    for normalized, group in grouped.items():
+        if len(group) < 2:
+            continue
+        all_ids = sorted(int(item["objectid"]) for item in group)
+        duplicate_groups[normalized] = all_ids
+        for row in group:
+            other_ids = [oid for oid in all_ids if oid != int(row["objectid"])]
+            row["duplicate_peer_objectids"] = other_ids
+            issue = ("Duplicate GlobalID: this identifier also belongs to "
+                     "OBJECTID(s) " + ", ".join(map(str, other_ids)))
+            row["identifier_issues"].append(issue)
+            row["issues"].append(issue)
+            row["status"] = "GAP"
+    return dict(sorted(duplicate_groups.items()))
+
+
+def asset_duplicate_summary(rows):
+    groups = {str(row["globalid"]).strip().strip("{}").casefold()
+              for row in rows if row.get("duplicate_peer_objectids")}
+    duplicates = sum(bool(row.get("duplicate_peer_objectids")) for row in rows)
+    return {
+        "duplicate_globalid_groups": len(groups),
+        "duplicate_feature_records": duplicates,
+        "extra_records_with_reused_globalids": duplicates - len(groups),
+    }
+
+
 def summarize_assets(rows):
     counts = Counter(row["status"] for row in rows)
     return {
@@ -216,4 +266,15 @@ def summarize_assets(rows):
         "no_gaps_found": counts["NO_GAPS_FOUND"],
         "not_verified": counts["NOT_VERIFIED"],
         "issue_count": sum(len(row["issues"]) for row in rows),
+        # Historic seven-category gap totals remain separable from
+        # duplicate GlobalID integrity findings.
+        "original_attribute_gap_records": sum(
+            row.get("attribute_gap_before_duplicate_check", row["status"] == "GAP")
+            for row in rows
+        ),
+        "original_attribute_issue_count": sum(
+            len(row["issues"]) - len(row.get("identifier_issues", []))
+            for row in rows
+        ),
+        **asset_duplicate_summary(rows),
     }
