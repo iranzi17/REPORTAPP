@@ -250,7 +250,8 @@ def run_transformer_line_name_audit(
     # Every trace is required: skipping failed traces could falsely assign
     # a single transformer to a multi-supply component.
     traces = trace_connected_lv_lines(
-        active_gis, service, points, version, LINE_LAYER_ID, TRANSFORMER_LAYER_ID
+        active_gis, service, points, version, LINE_LAYER_ID, TRANSFORMER_LAYER_ID,
+        progress=_progress,
     )
     canonical_points = [
         {
