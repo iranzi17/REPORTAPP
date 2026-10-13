@@ -14,8 +14,35 @@ import arcpy
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+# ArcGIS Pro may cache the identically named meter_photo_qa package from
+# another toolbox folder (for example Customer_Meter_Photo_QA_Clean).
+# Remove only modules loaded from outside this toolbox's own src directory.
+# This is necessary even when SRC has already been added to sys.path.
+if str(SRC) in sys.path:
+    sys.path.remove(str(SRC))
+sys.path.insert(0, str(SRC))
+
+def _uses_other_toolbox(module):
+    path = getattr(module, "__file__", None)
+    if not path:
+        package_paths = getattr(module, "__path__", ())
+        return bool(package_paths) and not any(
+            Path(p).resolve() == (SRC / "meter_photo_qa").resolve()
+            for p in package_paths
+        )
+    try:
+        return not Path(path).resolve().is_relative_to(SRC.resolve())
+    except (OSError, ValueError):
+        return True
+
+if any(
+    name == "meter_photo_qa" or name.startswith("meter_photo_qa.")
+    for name in sys.modules
+    if _uses_other_toolbox(sys.modules[name])
+):
+    for name in list(sys.modules):
+        if name == "meter_photo_qa" or name.startswith("meter_photo_qa."):
+            sys.modules.pop(name, None)
 
 try:
     from meter_photo_qa.arcgis_inventory import run_inventory
