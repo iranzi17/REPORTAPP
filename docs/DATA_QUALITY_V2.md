@@ -238,3 +238,43 @@ The uploaded duplicate report had 154 repeated GlobalID groups
 not have wholly identical vertex sequences. It contained asset
 groups 9 (overhead LV) and 10 (underground LV) only, so do not call
 it a full LV/MV/HV inventory absent an overall scan summary.
+
+
+## Repeated distribution-transformer GlobalIDs in a quality run (Oct 13, 2026)
+
+The transformer watcher can encounter repeated GlobalIDs on distinct
+source Electric Device OBJECTIDs. A live three-district test found
+GlobalID `8013868c-1ed5-46a9-8f97-2c3a8bd86a01` on source
+OBJECTIDs **605878** and **606278**. The first version failed after
+retrieving 150 of 786 unique ObjectIDs; these are source-feature counts,
+not confirmed physically distinct transformers.
+
+**Change:** both the transformer and LV pole quality watchers opt in to
+the `query_attributes_in_batches(..., duplicate_globalid_policy="report")`
+mode. The reusable batch loader defaults to `"error"` for stricter
+other callers. Asset QA now continues through every requested batch,
+retains each distinct OBJECTID, flags each repeated GlobalID as a separate
+identifier/data-integrity gap, and produces:
+
+- **Duplicate GlobalIDs** — one row per repeated identifier with all
+  OBJECTIDs, surveyors, transformer names and recorded admin attributes.
+- **Duplicate Asset Records** — one row per affected OBJECTID with all
+  peer OBJECTIDs, original attribute issues, recorded district/sector/cell
+  and identity-review information.
+
+The Summary shows **both** original field-correction counts (the seven
+previously agreed transformer attributes, excluding Branch) and all
+data-integrity findings. Do not count each duplicate record as a unique
+physical transformer until field/network review. Reports remain read-only.
+
+**Important scope limitation:** a duplicate is found only when at least
+two source OBJECTIDs are included by the **selected date range, surveyors
+and administrative boundaries** in the *same run*. This workbook is NOT a
+full nationwide transformer duplicate inventory. A full unrestricted
+distribution-transformer inventory is a separate task. Recorded
+District/Sector/Cell fields may be blank; empty cells do not prove
+the asset has no geographic location. No geometry, attachments, or
+Utility Network associations are compared in this watcher.
+
+Source query failure or missing requested OBJECTIDs still cancels the
+run—do not produce misleading partial reports.
