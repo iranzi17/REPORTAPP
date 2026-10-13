@@ -162,3 +162,48 @@ the Electric Line attribute table on OBJECTIDs 122510 and 122944,
 and independently reported as a dirty-area blocker by Utility Network
 connected trace. The duplicate may contribute to network issues, but
 the trace error alone does not establish causation.
+
+
+## Nationwide duplicate Electric Line register (October 2026)
+
+A second Working ArcGIS Pro tool, **Scan All Electric Line Duplicate
+GlobalIDs**, searches **all source Electric Line features** by default;
+optionally restrict to LV overhead/underground asset groups 9 and 10.
+It is independent from the single-GlobalID **Inspect Electric Line
+Duplicate GlobalID** tool.
+
+It scans the requested Utility Network version using bounded,
+ascending OBJECTID pagination without date or surveyor filters, counts
+duplicate groups by normalized GlobalID, then fetches attributes and
+geometry **only for duplicate records**. The hosted national cell
+boundaries are spatially intersected with each distinct duplicate
+polyline, with intersections reused for exactly identical geometry.
+
+Excel output:
+- **Summary:** full scan size, duplicate GlobalID group count,
+  affected record count, extra copies, invalid/missing GlobalIDs,
+  source and version.
+- **Duplicate GlobalIDs:** one row per repeated GlobalID with all
+  OBJECTIDs and aggregated district/sector/cell names.
+- **All Duplicate Records:** one row per source OBJECTID, its GlobalID,
+  district, sector, cell, other duplicate OBJECTIDs, asset group/type,
+  shape length, editor tracking and transformer name.
+- **By District Sector Cell:** unique repeated GlobalIDs and source
+  feature counts for each intersecting cell.
+- **Method and Warnings:** review precautions and measurement limits.
+
+Some lines cross more than one cell; the report lists all intersections,
+not a guessed single administrative location. Missing geometry/CRS or
+missing cell matches are labelled **unverified**, not fabricated.
+The tool aborts rather than writing a partial successful report if the
+source record count changes during a scan, a page fails, or a required
+duplicate geometry fetch fails. In-place modifications during the scan
+with the same total count are not fully detectable; perform final checks
+when editing is paused for the most stable inventory.
+
+**Scope limitation:** this identifies multiple source OBJECTIDs with
+the **same GlobalID**. It does not yet scan distinct GlobalIDs that may
+share identical or overlapping geometries. It makes no source edits,
+deletions or Utility Network topology changes. Duplicate GlobalID
+findings must be reviewed with network associations/attachments and
+approved by authorized GIS/Utility Network editors before remediation.
