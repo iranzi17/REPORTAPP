@@ -59,14 +59,34 @@ NO_NAMEPLATE = re.compile(
 
 
 def resolve_fields(layer_fields, asset):
+    """Match verified service field names or aliases; never fuzzy guess."""
     if asset not in ASSETS:
         raise ValueError("Asset must be 'transformer' or 'pole'.")
-    available = {str(f["name"]).casefold(): str(f["name"]) for f in layer_fields}
-    return {
-        key: next((available[c.casefold()] for c in candidates
-                   if c.casefold() in available), None)
-        for key, candidates in ASSETS[asset]["checks"].items()
-    }
+    def norm(value):
+        return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+    fields = [dict(field) for field in layer_fields]
+    available = {str(f["name"]).casefold(): str(f["name"])
+                 for f in fields if f.get("name")}
+    mapping = {}
+    for key, candidates in ASSETS[asset]["checks"].items():
+        direct = next((available[c.casefold()] for c in candidates
+                       if c.casefold() in available), None)
+        if direct:
+            mapping[key] = direct
+            continue
+        normalized_candidates = {norm(name) for name in candidates}
+        matched = {
+            str(field["name"])
+            for field in fields
+            if field.get("name") and (
+                norm(field["name"]) in normalized_candidates
+                or norm(field.get("alias")) in normalized_candidates
+            )
+        }
+        # Multiple possible live columns are ambiguous; ask for schema
+        # verification rather than silently picking an incorrect one.
+        mapping[key] = next(iter(matched)) if len(matched) == 1 else None
+    return mapping
 
 
 def missing_value(value, domain=None):
