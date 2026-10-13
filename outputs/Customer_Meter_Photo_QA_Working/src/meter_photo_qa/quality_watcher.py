@@ -29,6 +29,7 @@ from .progress_report import (
 )
 from .review_register import REVIEW_HEADERS, build_review_rows, find_previous_report, load_review_rows
 from .phase_consistency import phase_type_conflict
+from .outstanding_gaps import GAP_CATEGORIES, priority_gaps, summarize_priority_gaps
 
 
 DEFAULT_QUALITY_RULES_PATH = (
@@ -420,6 +421,8 @@ def _create_quality_workbook(
     workbook = Workbook()
     summary_sheet = workbook.active
     summary_sheet.title = "Linesman Summary"
+    priority_summary_sheet = workbook.create_sheet("Outstanding Gap Summary", 0)
+    priority_details_sheet = workbook.create_sheet("Outstanding LV Gaps", 1)
     details_sheet = workbook.create_sheet("Line Details")
     rules_sheet = workbook.create_sheet("Rules")
     review_sheet = workbook.create_sheet("Review Queue")
@@ -699,6 +702,114 @@ def _create_quality_workbook(
         "M": 18, "N": 25, "O": 25, "P": 28, "Q": 60,
     })
 
+    # Priority correction register: independent of the percentage-based QA result.
+    # A line can MEET_THRESHOLD and still have an outstanding correction.
+    priority_summary_sheet.sheet_view.showGridLines = False
+    priority_summary_sheet.merge_cells("A1:L1")
+    priority_summary_sheet["A1"] = "LV LINES - OUTSTANDING FIELD GAPS"
+    priority_summary_sheet["A1"].fill = PatternFill("solid", fgColor=navy)
+    priority_summary_sheet["A1"].font = Font(color=white, bold=True, size=14)
+    priority_summary_sheet.merge_cells("A2:L2")
+    priority_summary_sheet["A2"] = (
+        "Only original correction priorities. Counts show issues, not distinct features; "
+        "construction years and supplying lines remain in Line Details."
+    )
+    priority_summary_sheet["A2"].alignment = Alignment(wrap_text=True)
+    priority_summary_sheet.row_dimensions[2].height = 29
+    priority_headers = [
+        "Username", "Surveyor", "Lines Checked", "With Outstanding Gaps",
+        "Gap Rate", *GAP_CATEGORIES, "Total Issues",
+    ]
+    priority_summary_sheet.append([])
+    priority_summary_sheet.append(priority_headers)
+    priority_user_rows = summarize_priority_gaps(results)
+    for user in priority_user_rows:
+        priority_summary_sheet.append([
+            user["username"], user["full_name"], user["lines_checked"],
+            user["affected_lines"],
+            user["affected_lines"] / user["lines_checked"] if user["lines_checked"] else 0,
+            *(user[category] for category in GAP_CATEGORIES),
+            user["total_issues"],
+        ])
+        priority_summary_sheet.cell(priority_summary_sheet.max_row, 5).number_format = "0.0%"
+    total_checked = sum(item["lines_checked"] for item in priority_user_rows)
+    total_affected = sum(item["affected_lines"] for item in priority_user_rows)
+    total_issues = sum(item["total_issues"] for item in priority_user_rows)
+    total_cells = [
+        "TOTAL", "", total_checked, total_affected,
+        total_affected / total_checked if total_checked else 0,
+        *(sum(item[category] for item in priority_user_rows) for category in GAP_CATEGORIES),
+        total_issues,
+    ]
+    priority_summary_sheet.append(total_cells)
+    total_row = priority_summary_sheet.max_row
+    priority_summary_sheet.cell(total_row, 5).number_format = "0.0%"
+    for cell in priority_summary_sheet[4]:
+        cell.fill = PatternFill("solid", fgColor=navy)
+        cell.font = Font(color=white, bold=True)
+        cell.alignment = Alignment(wrap_text=True)
+    for cell in priority_summary_sheet[total_row]:
+        cell.fill = PatternFill("solid", fgColor=light_blue)
+        cell.font = Font(color=navy, bold=True)
+    priority_summary_sheet.row_dimensions[4].height = 32
+    priority_summary_sheet.freeze_panes = "C5"
+    priority_summary_sheet.auto_filter.ref = f"A4:L{max(4, total_row - 1)}"
+    _set_column_widths(priority_summary_sheet, {
+        "A": 28, "B": 28, "C": 17, "D": 23, "E": 14,
+        "F": 19, "G": 25, "H": 24, "I": 26, "J": 22,
+        "K": 24, "L": 18,
+    })
+    _keep_source_text_literal(priority_summary_sheet, 5, total_row)
+
+    priority_details_sheet.sheet_view.showGridLines = False
+    priority_detail_headers = [
+        "Username", "Surveyor", "GlobalID", "Source OBJECTID",
+        "Asset Group", "Asset Type", "Transformer Name", "Phases",
+        "Issue Count", "Outstanding Issues", "Issue Details",
+        "Created Date", "Last Edited Date", "Threshold Status",
+        "Completion %", "Notes",
+    ]
+    priority_details_sheet.append(priority_detail_headers)
+    for result in results:
+        issues = result.get("priority_gaps", [])
+        if not issues:
+            continue
+        display_values = result["display_values"]
+        priority_details_sheet.append([
+            result["username"], result["full_name"], result["globalid"],
+            result["source_objectid"], result.get("asset_group"),
+            result.get("asset_type"), display_values.get("transformer_name"),
+            display_values.get("phases"), len(issues),
+            "; ".join(issue["category"] for issue in issues),
+            "; ".join(issue["category"] + ": " + issue["detail"] for issue in issues),
+            result["created_date"], result["last_edited_date"],
+            result["status"], result["completion_percent"] / 100.0,
+            result["notes"],
+        ])
+        row_no = priority_details_sheet.max_row
+        priority_details_sheet.cell(row_no, 15).number_format = "0.0%"
+        for date_column in (12, 13):
+            priority_details_sheet.cell(row_no, date_column).number_format = "yyyy-mm-dd hh:mm"
+    for cell in priority_details_sheet[1]:
+        cell.fill = PatternFill("solid", fgColor=navy)
+        cell.font = Font(color=white, bold=True)
+        cell.alignment = Alignment(wrap_text=True)
+    if priority_details_sheet.max_row > 1:
+        gap_table = Table(
+            displayName="LVOutstandingGaps",
+            ref=f"A1:P{priority_details_sheet.max_row}",
+        )
+        gap_table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+        priority_details_sheet.add_table(gap_table)
+        _keep_source_text_literal(priority_details_sheet, 2, priority_details_sheet.max_row)
+    priority_details_sheet.freeze_panes = "C2"
+    priority_details_sheet.auto_filter.ref = f"A1:P{priority_details_sheet.max_row}"
+    _set_column_widths(priority_details_sheet, {
+        "A": 26, "B": 28, "C": 40, "D": 19, "E": 16, "F": 16,
+        "G": 30, "H": 15, "I": 15, "J": 70, "K": 85,
+        "L": 21, "M": 21, "N": 23, "O": 15, "P": 45,
+    })
+
     metadata_sheet.append(["Field", "Value"])
     for key, value in metadata:
         metadata_sheet.append([key, "" if value is None else str(value)])
@@ -919,6 +1030,9 @@ def run_quality_watcher(
             quality["status"] = "FLAG"
         result = {
             **quality,
+            "priority_gaps": priority_gaps(quality, conflict),
+            "asset_group": attributes.get("ASSETGROUP"),
+            "asset_type": attributes.get("ASSETTYPE"),
             "source_objectid": int(attributes["OBJECTID"]),
             "globalid": str(attributes.get("GLOBALID") or ""),
             "username": username,
@@ -936,6 +1050,8 @@ def run_quality_watcher(
         item["source_objectid"],
     ))
     user_summary = _summarize_users(results, full_names)
+    priority_user_summary = summarize_priority_gaps(results)
+    outstanding_results = [item for item in results if item["priority_gaps"]]
     flagged_results = [item for item in results if item["status"] == "FLAG"]
     met_threshold_count = len(results) - len(flagged_results)
     review_rows = build_review_rows(results, prior_reviews, run_utc)
@@ -971,6 +1087,8 @@ def run_quality_watcher(
         ),
         ("Selected users", "; ".join(clean_users) if clean_users else "All matching users"),
         ("Minimum completion percent", threshold),
+        ("LV outstanding lines", len(outstanding_results)),
+        ("LV outstanding issues", sum(len(item["priority_gaps"]) for item in outstanding_results)),
         ("Query", where),
         ("Version", version),
         ("Line feature service", _layer_url(active_service_url, LINE_LAYER_ID)),
@@ -1014,6 +1132,9 @@ def run_quality_watcher(
         "flagged_lines": len(flagged_results),
         "threshold_rate": met_threshold_count / len(results) if results else 0.0,
         "review_queue_items": len(review_rows),
+        "outstanding_lv_lines": len(outstanding_results),
+        "outstanding_lv_issues": sum(len(item["priority_gaps"]) for item in outstanding_results),
+        "outstanding_lv_by_user": priority_user_summary,
         "previous_review_report": str(prior_path) if prior_path else "",
         "average_completion_percent": (
             sum(item["completion_percent"] for item in results) / len(results)
