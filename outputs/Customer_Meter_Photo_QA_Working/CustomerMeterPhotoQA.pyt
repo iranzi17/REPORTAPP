@@ -507,10 +507,10 @@ class GenerateSurveyProgressReport:
             datatype="GPString",
             parameterType="Optional",
             direction="Input",
+            multiValue=True,
         )
         district.filter.type = "ValueList"
         district.filter.list = districts
-        district.multiValue = True
         district.value = default_district
 
         sectors = arcpy.Parameter(
@@ -738,10 +738,10 @@ class WatchLVLineDataQuality:
             datatype="GPString",
             parameterType="Optional",
             direction="Input",
+            multiValue=True,
         )
         district.filter.type = "ValueList"
         district.filter.list = districts
-        district.multiValue = True
 
         sectors = arcpy.Parameter(
             displayName="Sector(s) - blank for all sectors in district",
