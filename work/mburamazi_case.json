@@ -1,0 +1,32 @@
+{
+  "area": "Gicumbi / Rukomo",
+  "sector_boundary_objectids": [
+    316
+  ],
+  "transformers_national": [],
+  "transformers_local_objectids": [],
+  "line_relationship_field_candidates": [
+    "FROMDEVICETERMINAL",
+    "TODEVICETERMINAL",
+    "SUBNETWORKNAME",
+    "SUPPORTEDSUBNETWORKNAME",
+    "SUPPORTINGSUBNETWORKNAME",
+    "ContractorName",
+    "CondustorSize",
+    "ConductorInsulation",
+    "ConductorType",
+    "Sector",
+    "MvFeederID",
+    "FeederName",
+    "Toff",
+    "mv_feeder_meter_SN",
+    "Transformer_Name",
+    "Conductor_cross_section",
+    "Conductor_material",
+    "Conductor_type_UG",
+    "LV_Feeder_Name"
+  ],
+  "lv_lines_name_total": 0,
+  "lv_lines_name_intersects_sector": 0,
+  "lv_lines_name_within_sector": 0
+}

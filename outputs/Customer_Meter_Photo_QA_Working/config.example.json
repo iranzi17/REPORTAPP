@@ -1,0 +1,17 @@
+{
+  "service_url": "https://gisweb.reg.rw/server/rest/services/REG_UN_Service__/FeatureServer",
+  "version": "sde.DEFAULT",
+  "meter_layer_id": 22,
+  "asset_group": 3,
+  "asset_type": 1,
+  "meter_number_field": "MeterNumber",
+  "service_point_globalid_field": "ParentGlobaliD",
+  "last_edited_date_field": "last_edited_date",
+  "attachment_image_types": ["image/jpeg", "image/png", "image/heic", "image/tiff"],
+  "ocr": {
+    "provider": "not_configured",
+    "minimum_confidence_for_pass": 0.9,
+    "minimum_confidence_for_review": 0.65
+  }
+}
+

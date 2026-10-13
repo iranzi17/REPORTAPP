@@ -1,0 +1,35 @@
+{
+  "transformer_name": "Mburamazi trf",
+  "boundary": "Gicumbi / Rukomo",
+  "national_transformer_count": 1,
+  "local_transformer_count": 1,
+  "transformer_objectids": [
+    227017
+  ],
+  "national_lv_line_count": 29,
+  "intersecting_line_count": 29,
+  "inside_line_count": 29,
+  "outside_line_count": 0,
+  "crossing_line_count": 0,
+  "recorded_sector_counts": {
+    "[Blank]": 29
+  },
+  "feeder_counts": {
+    "[Blank]": 29
+  },
+  "earliest_created_utc": "2026-09-14T05:29:46+00:00",
+  "latest_created_utc": "2026-09-14T15:29:21+00:00",
+  "line_field_candidates": [
+    "FROMDEVICETERMINAL",
+    "TODEVICETERMINAL",
+    "GLOBALID",
+    "SUBNETWORKNAME",
+    "SUPPORTEDSUBNETWORKNAME",
+    "SUPPORTINGSUBNETWORKNAME",
+    "MvFeederID",
+    "FeederName",
+    "mv_feeder_meter_SN",
+    "Transformer_Name",
+    "LV_Feeder_Name"
+  ]
+}

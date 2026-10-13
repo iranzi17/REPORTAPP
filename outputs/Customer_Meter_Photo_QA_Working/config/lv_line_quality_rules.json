@@ -1,0 +1,124 @@
+{
+  "minimum_completion_percent": 60,
+  "placeholder_strings": [
+    "unknown",
+    "select value",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "-",
+    "0"
+  ],
+  "scored_attributes": [
+    {
+      "key": "transformer_name",
+      "label": "Transformer Name",
+      "field": "Transformer_Name",
+      "validation": "required_text",
+      "mandatory": true,
+      "template_domain": "Text",
+      "notes": "Blank and placeholder text are incomplete."
+    },
+    {
+      "key": "voltage",
+      "label": "Voltage Level",
+      "field": "Voltage_Level_kV",
+      "validation": "domain_not_placeholder",
+      "invalid_domain_labels": ["select value", "unknown"],
+      "template_domain": "400; 242; 230",
+      "notes": "Validated against the live subtype domain."
+    },
+    {
+      "key": "line_construction_type",
+      "label": "Line Construction Type",
+      "field": "ASSETGROUP",
+      "validation": "asset_group",
+      "template_domain": "Underground; Overhead",
+      "notes": "Derived from LV overhead asset group 9 or LV underground asset group 10."
+    },
+    {
+      "key": "conductor_size",
+      "label": "Conductor Size",
+      "field": "CondustorSize",
+      "validation": "domain_not_placeholder",
+      "invalid_domain_labels": ["unknown", "select value"],
+      "template_domain": "2*16mm2; 2*25mm2; 2*35mm2; 3*35mm2; 3*25mm2+1*54.6mm2; 3*35mm2+1*54.6mm2; 4*16mm2; 4*25mm2; 4*35mm2; 4*50mm2; 4*70mm2; 4*75mm2; 4*95mm2; 4*120mm2; 4*150mm2; 4*185mm2; 1*240mm2; 1*300mm2; 1*400mm2; 1*630mm2; Others",
+      "notes": "Validated against the applicable overhead or underground live domain."
+    },
+    {
+      "key": "conductor_material",
+      "label": "Conductor Material",
+      "field": "Material",
+      "validation": "domain_not_placeholder",
+      "invalid_domain_labels": ["unknown", "select value"],
+      "template_domain": "Aluminium; Copper; ACSR; AAA; Steel; Others",
+      "notes": "The populated live field is Material; Conductor_material is currently blank."
+    },
+    {
+      "key": "rated_current",
+      "label": "Rated Current (A)",
+      "field": "Rated_Current",
+      "validation": "positive_number",
+      "template_domain": "Double greater than 0",
+      "notes": "Zero, negative, blank, and non-numeric values are incomplete."
+    },
+    {
+      "key": "conductor_insulation",
+      "label": "Conductor Insulation",
+      "field": "ConductorInsulation",
+      "validation": "domain_any",
+      "template_domain": "YES; NO",
+      "notes": "Both Yes and No are valid; domain code 0 means No and is not missing."
+    },
+    {
+      "key": "phases",
+      "label": "Phases",
+      "field": "Phases",
+      "validation": "domain_any",
+      "template_domain": "1; 2; 3",
+      "notes": "All three phase-count choices are valid; domain code 0 means 1 phase."
+    },
+    {
+      "key": "supplying_lines",
+      "label": "Supplying Lines",
+      "field": "SupplyingLines",
+      "validation": "domain_not_placeholder",
+      "invalid_domain_labels": ["unknown", "select value"],
+      "template_domain": "Residential; Non Residential; Small Industries; Street lights in case transformer is shared",
+      "notes": "Unknown is incomplete."
+    },
+    {
+      "key": "year_construction",
+      "label": "Year of Construction",
+      "field": "Year_construction",
+      "validation": "year",
+      "template_domain": "Integer year",
+      "notes": "Accepted range is 1900 through one year after the report end year."
+    },
+    {
+      "key": "year_commissioning",
+      "label": "Year of Commissioning",
+      "field": "Year_of_commisioning",
+      "validation": "year",
+      "template_domain": "Integer year",
+      "notes": "Must not be earlier than the construction year."
+    }
+  ],
+  "optional_attributes": [
+    {
+      "key": "lv_feeder_name",
+      "label": "LV Feeder Name",
+      "field": "LV_Feeder_Name",
+      "template_domain": "Text",
+      "notes": "Optional and excluded from the completion denominator."
+    },
+    {
+      "key": "notes",
+      "label": "Notes",
+      "field": "Notes",
+      "template_domain": "Free note for facility problems or unknown data",
+      "notes": "Optional and excluded from the completion denominator."
+    }
+  ]
+}

@@ -1,0 +1,141 @@
+"""Read-only connected utility-network trace membership for LV survey reports."""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Sequence
+
+
+def _network_schema(gis: Any, service_url: str) -> dict[str, Any]:
+    root = service_url.rstrip("/")
+    response = gis._con.get(
+        root + "/queryDataElements", params={"f": "json", "layers": "[0]"}
+    )
+    if not isinstance(response, dict) or response.get("error"):
+        raise RuntimeError(f"Utility-network schema could not be read: {response.get('error') if isinstance(response, dict) else response}")
+    elements = response.get("layerDataElements") or []
+    if not elements or not isinstance(elements[0].get("dataElement"), dict):
+        raise RuntimeError("The feature service did not return its utility-network data element.")
+    return elements[0]["dataElement"]
+
+
+def _source(schema: dict[str, Any], layer_id: int) -> dict[str, Any]:
+    for domain in schema.get("domainNetworks", []):
+        for kind in ("junctionSources", "edgeSources"):
+            for source in domain.get(kind, []):
+                if int(source.get("layerId", -1)) == layer_id:
+                    return source
+    raise RuntimeError(f"Utility-network source for feature layer {layer_id} was not found.")
+
+
+def _terminal_id(schema: dict[str, Any], device_source: dict[str, Any], point: dict[str, Any]) -> int:
+    asset_group = int(point["ASSETGROUP"])
+    asset_type = int(point["ASSETTYPE"])
+    for group in device_source.get("assetGroups", []):
+        if int(group.get("assetGroupCode", -1)) != asset_group:
+            continue
+        for asset in group.get("assetTypes", []):
+            if int(asset.get("assetTypeCode", -1)) != asset_type:
+                continue
+            config_id = int(asset.get("terminalConfigurationId", -1))
+            for config in schema.get("terminalConfigurations", []):
+                if int(config.get("terminalConfigurationId", -2)) != config_id:
+                    continue
+                terminals = config.get("terminals") or []
+                secondary = next((t for t in terminals if str(t.get("terminalName", "")).casefold() == "secondary"), None)
+                selected = secondary or (terminals[0] if len(terminals) == 1 else None)
+                if selected is None:
+                    raise RuntimeError(
+                        f"Transformer {point['OBJECTID']} has multiple terminals but no Secondary terminal."
+                    )
+                return int(selected["terminalId"])
+    raise RuntimeError(
+        f"Transformer {point['OBJECTID']} asset group/type lacks terminal configuration metadata."
+    )
+
+
+def _parse_trace(
+    response: dict[str, Any], line_source_id: int, device_source_id: int,
+) -> dict[str, Any]:
+    if response.get("error") or response.get("success") is not True:
+        raise RuntimeError(f"Connected trace failed: {response.get('error') or response}")
+    result = response.get("traceResults")
+    if not isinstance(result, dict):
+        raise RuntimeError("Connected trace returned no traceResults object.")
+    if result.get("startingPointsIgnored"):
+        raise RuntimeError("The connected trace ignored its transformer starting point.")
+    elements = result.get("elements")
+    if not isinstance(elements, list):
+        raise RuntimeError("Connected trace returned no network elements array.")
+    line_ids = {
+        int(element["objectId"])
+        for element in elements
+        if int(element.get("networkSourceId", -1)) == line_source_id
+        and int(element.get("assetGroupCode", -1)) in (9, 10)
+    }
+    transformer_ids = {
+        int(element["objectId"])
+        for element in elements
+        if int(element.get("networkSourceId", -1)) == device_source_id
+        and int(element.get("assetGroupCode", -1)) == 12
+    }
+    return {
+        "line_objectids": line_ids,
+        "connected_transformer_objectids": transformer_ids,
+        "network_element_count": len(elements),
+        "warnings": list(result.get("warnings") or []),
+    }
+
+
+def trace_connected_lv_lines(
+    gis: Any,
+    service_url: str,
+    transformer_points: Sequence[dict[str, Any]],
+    version: str,
+    line_layer_id: int = 10,
+    transformer_layer_id: int = 7,
+) -> dict[int, dict[str, Any]]:
+    """Return distinct connected LV feature IDs for each localized point asset.
+
+    The trace runs against the utility-network topology, with consistency checked.
+    An error fails the report; it never silently substitutes a name match.
+    """
+    if not transformer_points:
+        return {}
+    schema = _network_schema(gis, service_url)
+    line_source = _source(schema, line_layer_id)
+    device_source = _source(schema, transformer_layer_id)
+    trace_url = service_url.rstrip("/").removesuffix("/FeatureServer") + "/UtilityNetworkServer/trace"
+    results: dict[int, dict[str, Any]] = {}
+    for point in transformer_points:
+        object_id = int(point["OBJECTID"])
+        global_id = str(point.get("GLOBALID") or "").strip()
+        if not global_id:
+            raise RuntimeError(f"Transformer {object_id} has no GLOBALID for a connected trace.")
+        terminal_id = _terminal_id(schema, device_source, point)
+        params = {
+            "f": "json",
+            "gdbVersion": version,
+            "traceType": "connected",
+            "traceLocations": json.dumps([{
+                "traceLocationType": "startingPoint",
+                "globalId": global_id,
+                "terminalId": terminal_id,
+            }]),
+            "traceConfiguration": json.dumps({
+                "validateConsistency": True,
+                "includeContainers": False,
+                "includeContent": False,
+                "includeStructures": False,
+            }),
+            "resultTypes": json.dumps([{"type": "elements", "includeGeometry": False}]),
+        }
+        response = gis._con.post(trace_url, params=params)
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Transformer {object_id} connected trace returned an invalid response.")
+        result = _parse_trace(response, int(line_source["sourceId"]), int(device_source["sourceId"]))
+        if object_id not in result["connected_transformer_objectids"]:
+            raise RuntimeError(f"Transformer {object_id} was not present in its own trace result.")
+        result["terminal_id"] = terminal_id
+        results[object_id] = result
+    return results
