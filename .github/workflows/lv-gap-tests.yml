@@ -1,0 +1,30 @@
+name: REPORTAPP LV gap regression tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/**'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/**'
+      - 'outputs/Customer_Meter_Photo_QA_Working/config/lv_line_quality_rules.json'
+      - '.github/workflows/lv-gap-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  lv-gap-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependency
+        run: python -m pip install openpyxl
+      - name: Run focused LV regression tests
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_outstanding_gaps.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_quality_watcher.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_phase_consistency.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_quality_watcher_workflow.py' -v
