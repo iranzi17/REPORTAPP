@@ -1,6 +1,7 @@
 import unittest
 
 from meter_photo_qa.phase_consistency import phase_type_conflict
+from meter_photo_qa.quality_watcher import _verified_phase_expectations
 
 
 class PhaseConsistencyTests(unittest.TestCase):
@@ -29,6 +30,21 @@ class PhaseConsistencyTests(unittest.TestCase):
     def test_missing_and_unknown_phases_are_not_double_counted(self):
         self.assertIsNone(self.check(11, None))
         self.assertIsNone(self.check(11, 15))
+
+    def test_expectations_only_from_explicit_live_domain_labels(self):
+        domains = {
+            9: {"ASSETTYPE": {
+                17: "LV Single Phase OH Conductor",
+                18: "LV Three Phase OH Conductor",
+                19: "Other LV Conductor",
+            }},
+            10: {"ASSETTYPE": {6: "Underground 3-phase conductor"}},
+        }
+        expected = _verified_phase_expectations(domains)
+        self.assertEqual(expected["9:17"], 1)
+        self.assertEqual(expected["9:18"], 3)
+        self.assertEqual(expected["10:6"], 3)
+        self.assertNotIn("9:19", expected)
 
     def test_two_phase_label_not_inferred(self):
         self.assertIsNone(self.check(11, 1))
