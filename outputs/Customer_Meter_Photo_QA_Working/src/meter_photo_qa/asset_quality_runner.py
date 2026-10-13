@@ -74,6 +74,7 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     surveyors = wb.create_sheet("Surveyor Gaps")
     schema = wb.create_sheet("Schema Verification")
     rules_sheet = wb.create_sheet("Rules")
+    geo_sheet = wb.create_sheet("By Recorded Location")
 
     overview.append([ASSETS[asset]["title"] + " - Field Data Quality"])
     overview.append(["Scope", "; ".join(selected_areas) if selected_areas else "All Rwanda"])
@@ -91,11 +92,13 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         overview.append([label, summary[key]])
     overview.append(["Source", "REGUN FeatureServer (read-only)"])
     overview.append(["Interpretation", "Missing template fields are NOT checked; see Schema Verification."])
+    overview.append(["Location source", "Recorded District/Sector/Cell fields; NOT spatially verified."])
     overview.append(["Exclusion", "Transformer group 12 only; other Electric Device groups, including plant equipment, are excluded."] if asset == "transformer"
                     else ["Exclusion", "Structure Junction LV Pole group 7 only."])
 
     details.append([
         "Status", "OBJECTID", "GlobalID", "Asset Type", "Surveyor Username",
+        "Recorded District", "Recorded Sector", "Recorded Cell",
         "Outstanding Issues", "Unverified Checks",
         "Owner Name", "Type of Installation", "Phase Normal",
         "Transformer Protection Switch", "Transformer mounting support",
@@ -108,6 +111,8 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         details.append([
             item["status"], item["objectid"], item["globalid"],
             item["asset_type_label"], item["username"],
+            item["recorded_district"], item["recorded_sector"],
+            item["recorded_cell"],
             "; ".join(item["issues"]), "; ".join(item["unverified_checks"]),
             vals.get("owner_name", ""), vals.get("installation_type", ""),
             vals.get("phase_normal", ""), vals.get("protection_switch", ""),
@@ -127,7 +132,32 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             username, counts["total"], counts["with_gaps"], counts["no_gaps_found"],
             counts["not_verified"], counts["issue_count"],
         ])
-    schema.append(["Rule / Field Purpose", "Resolved Live Field", "Status", "Candidate Names"])
+    geo_sheet.append([
+        "Recorded District", "Recorded Sector", "Recorded Cell",
+        "Assets Checked", "Assets with Gaps", "Individual Issues", "Not Verified",
+    ])
+    location_groups = defaultdict(list)
+    for item in rows:
+        key = (
+            item["recorded_district"] or "(not recorded)",
+            item["recorded_sector"] or "(not recorded)",
+            item["recorded_cell"] or "(not recorded)",
+        )
+        location_groups[key].append(item)
+    for (district_name, sector_name, cell_name), members in sorted(
+        location_groups.items(), key=lambda entry: tuple(part.casefold() for part in entry[0])
+    ):
+        summary_by_area = summarize_assets(members)
+        geo_sheet.append([
+            district_name, sector_name, cell_name, summary_by_area["total"],
+            summary_by_area["with_gaps"], summary_by_area["issue_count"],
+            summary_by_area["not_verified"],
+        ])
+    geo_sheet.append([
+        "NOTE: Recorded attributes only", "", "",
+        "Geographic labels are not independently verified against boundary polygons.",
+    ])
+        schema.append(["Rule / Field Purpose", "Resolved Live Field", "Status", "Candidate Names"])
     for key, candidates in ASSETS[asset]["checks"].items():
         schema.append([
             key, mapping.get(key) or "", "VERIFIED" if mapping.get(key) else "NOT FOUND - NOT CHECKED",
@@ -150,6 +180,7 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     rules_sheet.append(["LV Pole", "Nameplate exception", "Documented absence is NOT treated as a manufacturer value."])
     rules_sheet.append(["Both", "NOT_VERIFIED", "Unavailable live fields are not silently passed."])
     rules_sheet.append(["Both", "Source data", "Read-only. No records are edited."])
+    rules_sheet.append(["Both", "Recorded District/Sector/Cell", "Exported from feature attributes for correction coordination; not proof of actual location."])
 
     for sheet in wb.worksheets:
         sheet.sheet_view.showGridLines = False
@@ -163,11 +194,13 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             letter = col[0].column_letter
             max_len = max(len(str(c.value or "")) for c in list(col)[:1500])
             sheet.column_dimensions[letter].width = min(max(max_len + 2, 13), 55)
-    for sheet in (details, surveyors):
+    for sheet in (details, surveyors, geo_sheet):
         if sheet.max_row > 1:
             table = Table(
                 displayName=("DistributionTransformerDetails" if sheet == details and asset == "transformer"
-                             else "LVPoleDetails" if sheet == details else "AssetSurveyorGaps"),
+                             else "LVPoleDetails" if sheet == details
+                             else "AssetSurveyorGaps" if sheet == surveyors
+                             else "RecordedAssetLocations"),
                 ref=f"A1:{sheet.cell(1, sheet.max_column).column_letter}{sheet.max_row}",
             )
             table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
@@ -241,6 +274,8 @@ def run_asset_quality(
             raise RuntimeError(f"Live {ASSETS[asset]['title']} service lacks {name}.")
     names = list(dict.fromkeys([
         *[lookup[name.casefold()] for name in core],
+        *[lookup[field.casefold()] for field in ("District", "Sector", "Cell")
+          if field.casefold() in lookup],
         *[resolved for resolved in mapping.values() if resolved],
     ]))
     def progress(message):
