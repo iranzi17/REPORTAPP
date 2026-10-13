@@ -1,4 +1,4 @@
-"""Reliable, read-only retrieval of {asset_label} attributes from ArcGIS FeatureServer.
+"""Reliable, read-only retrieval of feature attributes from ArcGIS FeatureServer.
 
 Spatially expensive searches return OBJECTIDs only. Attribute data is then
 fetched in bounded batches by indexed OBJECTID. The same feature may touch
@@ -9,8 +9,14 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable
 
 
-def _objectids_from_query(response: Any, area: str) -> list[int]:
-    """ArcGIS FeatureLayer.query(return_ids_only=True) returns a dictionary."""
+def _objectids_from_query(response: Any, area: str) -> list[int] | None:
+    """Parse ArcGIS returnIdsOnly response.
+
+    ArcGIS Server may send objectIds:null or omit objectIds entirely
+    for a spatial query with ZERO matches. Those cases require a separate
+    count verification before being treated as empty; None is the sentinel
+    for "count verification required", never an implicit pass.
+    """
     if not isinstance(response, dict):
         raise RuntimeError(
             f"{area}: the service did not return an ObjectID dictionary; "
@@ -18,12 +24,51 @@ def _objectids_from_query(response: Any, area: str) -> list[int]:
         )
     if response.get("error"):
         raise RuntimeError(f"{area}: ObjectID query failed: {response['error']}")
-    if "objectIds" not in response or response["objectIds"] is None:
-        raise RuntimeError(f"{area}: missing objectIds in query response.")
+    ids = response.get("objectIds")
+    if ids is None:
+        return None
+    if not isinstance(ids, (tuple, list)):
+        raise RuntimeError(
+            f"{area}: the service returned invalid objectIds ({type(ids).__name__})."
+        )
     try:
-        return sorted({int(oid) for oid in response["objectIds"]})
+        return sorted({int(oid) for oid in ids})
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"{area}: the query returned invalid ObjectIDs.") from exc
+
+
+def _confirm_empty_id_response(layer, query_fn, options, area):
+    """Treat null/absent objectIds as empty only if a matching count is zero."""
+    count_options = dict(options)
+    count_options.pop("return_ids_only", None)
+    count_options["return_count_only"] = True
+    try:
+        count_response = query_fn(layer, attempts=2, **count_options)
+        # FeatureLayer.query(return_count_only=True) returns an integer;
+        # a raw REST-like {'count': 0} response is also acceptable.
+        if isinstance(count_response, dict):
+            if count_response.get("error"):
+                raise RuntimeError(str(count_response["error"]))
+            if "count" not in count_response:
+                raise RuntimeError("missing 'count' in count-only response")
+            count_response = count_response["count"]
+        if isinstance(count_response, bool):
+            raise ValueError("boolean count response")
+        count = int(count_response)
+        if count < 0 or (isinstance(count_response, float) and count_response != count):
+            raise ValueError(f"invalid count {count_response!r}")
+    except Exception as exc:
+        raise RuntimeError(
+            f"{area}: the service omitted/nullified objectIds and a "
+            f"count-only verification failed ({exc}). "
+            "Cannot safely skip this area."
+        ) from exc
+    if count != 0:
+        raise RuntimeError(
+            f"{area}: the service omitted/nullified objectIds although the "
+            f"matching count is {count}. Refusing to omit these records."
+        )
+    return []
 
 
 def query_attributes_in_batches(
@@ -60,6 +105,15 @@ def query_attributes_in_batches(
         try:
             response = query_fn(layer, attempts=2, **opts)
             ids = _objectids_from_query(response, area)
+            if ids is None:
+                ids = _confirm_empty_id_response(
+                    layer, query_fn, opts, area,
+                )
+                if progress:
+                    progress(
+                        f"{asset_label}: no matching features in {area} "
+                        "(confirmed by server count = 0); continuing."
+                    )
         except Exception as exc:
             raise RuntimeError(
                 f"Could not list {asset_label} ObjectIDs for {area} (area "
