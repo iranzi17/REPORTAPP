@@ -153,10 +153,6 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             summary_by_area["with_gaps"], summary_by_area["issue_count"],
             summary_by_area["not_verified"],
         ])
-    geo_sheet.append([
-        "NOTE: Recorded attributes only", "", "",
-        "Geographic labels are not independently verified against boundary polygons.",
-    ])
         schema.append(["Rule / Field Purpose", "Resolved Live Field", "Status", "Candidate Names"])
     for key, candidates in ASSETS[asset]["checks"].items():
         schema.append([
