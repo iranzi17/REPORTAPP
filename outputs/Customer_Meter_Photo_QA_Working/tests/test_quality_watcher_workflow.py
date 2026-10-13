@@ -64,6 +64,13 @@ class QualityWatcherWorkflowTests(unittest.TestCase):
                 self.assertNotIn("created_user IS NOT NULL", first["where"])
                 workbook = load_workbook(first["output_xlsx"])
                 self.assertIn("Review Queue", workbook.sheetnames)
+                self.assertIn("Outstanding Gap Summary", workbook.sheetnames)
+                self.assertIn("Outstanding LV Gaps", workbook.sheetnames)
+                self.assertEqual(first["outstanding_lv_lines"], 1)
+                self.assertEqual(first["outstanding_lv_issues"], 1)
+                gap_row = workbook["Outstanding LV Gaps"]
+                self.assertEqual(gap_row["C2"].value, "{EXAMPLE-GID}")
+                self.assertIn("Missing transformer name", gap_row["J2"].value)
                 queue = workbook["Review Queue"]
                 self.assertEqual(queue["E5"].value, "FLAG")
                 queue["M5"] = "RESOLVED"
