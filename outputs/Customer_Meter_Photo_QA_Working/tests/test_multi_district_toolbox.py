@@ -39,6 +39,7 @@ class MultiDistrictToolboxTests(unittest.TestCase):
                 ("GenerateSurveyProgressReport", 3, 4, 5),
                 ("WatchDistributionTransformerQuality", 3, 4, 5),
                 ("WatchLVPoleQuality", 3, 4, 5),
+                ("CheckLVTransformerNames", 3, 4, 5),
             ):
                 tool = toolbox[class_name]()
                 params = tool.getParameterInfo()
