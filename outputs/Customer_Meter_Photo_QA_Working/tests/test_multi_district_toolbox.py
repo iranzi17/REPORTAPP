@@ -37,6 +37,8 @@ class MultiDistrictToolboxTests(unittest.TestCase):
             for class_name, district_idx, sector_idx, cell_idx in (
                 ("WatchLVLineDataQuality", 4, 5, 6),
                 ("GenerateSurveyProgressReport", 3, 4, 5),
+                ("WatchDistributionTransformerQuality", 3, 4, 5),
+                ("WatchLVPoleQuality", 3, 4, 5),
             ):
                 tool = toolbox[class_name]()
                 params = tool.getParameterInfo()
