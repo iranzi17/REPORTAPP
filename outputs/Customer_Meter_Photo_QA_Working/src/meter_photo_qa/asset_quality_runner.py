@@ -172,6 +172,14 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             )
             table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
             sheet.add_table(table)
+    # Surveyor notes, names and GIS attributes are external text. Prevent a
+    # string such as '=HYPERLINK(...)' from becoming an executable Excel formula.
+    for sheet in wb.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.startswith("="):
+                    cell.data_type = "s"
+
     wb.calculation.fullCalcOnLoad = True
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists():
