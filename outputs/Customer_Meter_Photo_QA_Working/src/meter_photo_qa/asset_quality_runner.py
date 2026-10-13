@@ -7,7 +7,10 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Sequence
 
-from .asset_quality import ASSETS, domain_map, evaluate_asset, resolve_fields, summarize_assets
+from .asset_quality import (
+    ASSETS, domain_map, evaluate_asset, resolve_fields, summarize_assets,
+    annotate_duplicate_asset_globalids,
+)
 from .area_selection import selected_districts
 from .progress_report import (
     DEFAULT_BOUNDARY_SERVICE_URL, DEFAULT_LINE_SERVICE_URL,
@@ -75,6 +78,8 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     schema = wb.create_sheet("Schema Verification")
     rules_sheet = wb.create_sheet("Rules")
     geo_sheet = wb.create_sheet("By Recorded Location")
+    duplicate_groups_sheet = wb.create_sheet("Duplicate GlobalIDs")
+    duplicate_records_sheet = wb.create_sheet("Duplicate Asset Records")
 
     overview.append([ASSETS[asset]["title"] + " - Field Data Quality"])
     overview.append(["Scope", "; ".join(selected_areas) if selected_areas else "All Rwanda"])
@@ -90,12 +95,19 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         ("Features examined", "total"), ("With outstanding gaps", "with_gaps"),
         ("No gaps in verified fields", "no_gaps_found"),
         ("Not verified (schema mismatch)", "not_verified"),
-        ("Total individual issues", "issue_count"),
+        ("Total individual issues (including duplicated identifiers)", "issue_count"),
+        ("Original attribute-gap records (excluding duplicate identifiers)", "original_attribute_gap_records"),
+        ("Original attribute issues (excluding duplicate identifiers)", "original_attribute_issue_count"),
+        ("Duplicate GlobalID groups within this run", "duplicate_globalid_groups"),
+        ("Feature records with reused GlobalIDs", "duplicate_feature_records"),
+        ("Additional copies beyond one per GlobalID", "extra_records_with_reused_globalids"),
     ]:
         overview.append([label, summary[key]])
     overview.append(["Source", "REGUN FeatureServer (read-only)"])
     overview.append(["Interpretation", "Missing template fields are NOT checked; see Schema Verification."])
     overview.append(["Location source", "Recorded District/Sector/Cell fields; NOT spatially verified."])
+    overview.append(["Duplicate scan coverage", "ONLY features matching this run\u2019s districts, dates and surveyor filters; counterparts outside scope may be absent."])
+    overview.append(["Duplicate review", "Distinct OBJECTIDs with reused GlobalID need source investigation, not automatic deletion."])
     overview.append(["Records lacking all three recorded location fields",
                      sum(not (item["recorded_district"] and item["recorded_sector"] and item["recorded_cell"])
                          for item in rows)])
@@ -105,7 +117,7 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     details.append([
         "Status", "OBJECTID", "GlobalID", "Asset Type", "Surveyor Username",
         "Recorded District", "Recorded Sector", "Recorded Cell",
-        "Outstanding Issues", "Unverified Checks",
+        "Outstanding Issues", "Unverified Checks", "Other OBJECTIDs sharing GlobalID",
         "Owner Name", "Type of Installation", "Phase Normal",
         "Transformer Protection Switch", "Transformer mounting support",
         "Transformer Name", "Number of Low Voltage feeders",
@@ -120,6 +132,7 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             item["recorded_district"], item["recorded_sector"],
             item["recorded_cell"],
             "; ".join(item["issues"]), "; ".join(item["unverified_checks"]),
+            "; ".join(map(str, item.get("duplicate_peer_objectids", []))),
             vals.get("owner_name", ""), vals.get("installation_type", ""),
             vals.get("phase_normal", ""), vals.get("protection_switch", ""),
             vals.get("mounting_support", ""), vals.get("name", ""),
@@ -127,6 +140,56 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             vals.get("serial", ""), vals.get("capacity", ""),
             vals.get("manufacturer_status", ""), item["notes"],
         ])
+
+    # Duplicates must not hide the seven original field-correction issues.
+    duplicate_groups_sheet.append([
+        "GlobalID", "Distinct OBJECTIDs", "Number of records",
+        "Recorded District(s)", "Recorded Sector(s)", "Recorded Cell(s)",
+        "Surveyor(s)", "Transformer/Pole name(s)",
+        "Geometry comparison", "Correction advice",
+    ])
+    duplicate_records_sheet.append([
+        "GlobalID", "OBJECTID", "Other OBJECTIDs With Same GlobalID",
+        "Number In Duplicate Group", "Recorded District", "Recorded Sector",
+        "Recorded Cell", "Created By", "Asset Type", "Transformer Name",
+        "Other Outstanding Issues", "Source Confirmation",
+    ])
+    group_members = defaultdict(list)
+    for item in rows:
+        if item.get("duplicate_peer_objectids"):
+            key = item["globalid"].strip().strip("{}").casefold()
+            group_members[key].append(item)
+    for key, group in sorted(group_members.items()):
+        unique_oids = sorted({int(item["objectid"]) for item in group})
+        if len(unique_oids) < 2:
+            raise RuntimeError("Duplicate group lost an OBJECTID; refusing an incomplete register.")
+        first_gid = group[0]["globalid"]
+        def unique_text(field):
+            return "; ".join(sorted({str(item.get(field) or "").strip()
+                                     for item in group if str(item.get(field) or "").strip()},
+                                    key=str.casefold))
+        names = "; ".join(sorted({
+            str(item["values"].get("name") or "").strip()
+            for item in group if str(item["values"].get("name") or "").strip()
+        }, key=str.casefold))
+        duplicate_groups_sheet.append([
+            first_gid, "; ".join(map(str, unique_oids)), len(group),
+            unique_text("recorded_district"), unique_text("recorded_sector"),
+            unique_text("recorded_cell"), unique_text("username"), names,
+            "NOT CHECKED (attributes only)",
+            "Verify whether both physical assets exist, their geometry, network associations and attachments. Do not delete automatically.",
+        ])
+        for item in sorted(group, key=lambda x: int(x["objectid"])):
+            duplicate_records_sheet.append([
+                item["globalid"], item["objectid"],
+                "; ".join(map(str,item["duplicate_peer_objectids"])), len(group),
+                item["recorded_district"], item["recorded_sector"],
+                item["recorded_cell"], item["username"], item["asset_type_label"],
+                item["values"].get("name", ""),
+                "; ".join(issue for issue in item["issues"]
+                          if issue not in item.get("identifier_issues", [])),
+                "Source OBJECTID; spatial geometry and physical duplication NOT independently checked",
+            ])
 
     surveyors.append(["Username", "Checked", "With Gaps", "No Gaps Found", "Not Verified", "Issue Count"])
     grouped = defaultdict(list)
@@ -183,6 +246,10 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     rules_sheet.append(["Both", "NOT_VERIFIED", "Unavailable live fields are not silently passed."])
     rules_sheet.append(["Both", "Source data", "Read-only. No records are edited."])
     rules_sheet.append(["Both", "Recorded District/Sector/Cell", "Exported from feature attributes for correction coordination; not proof of actual location."])
+    rules_sheet.append(["Both", "Duplicate GlobalID", "Every repeated GlobalID within this selected run is retained by OBJECTID and marked as a data-integrity gap."])
+    rules_sheet.append(["Both", "Duplicates outside selected area/date/user", "Not detected unless both source OBJECTIDs occur in the current report; full inventory needs a separate unrestricted scan."])
+    rules_sheet.append(["Both", "Duplicate geometry", "Not compared. Duplicate identifiers do not prove identical physical equipment."])
+    rules_sheet.append(["Both", "Changes", "No GIS data changed; manual engineering review required."])
 
     for sheet in wb.worksheets:
         sheet.sheet_view.showGridLines = False
@@ -196,13 +263,15 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             letter = col[0].column_letter
             max_len = max(len(str(c.value or "")) for c in list(col)[:1500])
             sheet.column_dimensions[letter].width = min(max(max_len + 2, 13), 55)
-    for sheet in (details, surveyors, geo_sheet):
+    for sheet in (details, surveyors, geo_sheet, duplicate_groups_sheet, duplicate_records_sheet):
         if sheet.max_row > 1:
             table = Table(
                 displayName=("DistributionTransformerDetails" if sheet == details and asset == "transformer"
                              else "LVPoleDetails" if sheet == details
                              else "AssetSurveyorGaps" if sheet == surveyors
-                             else "RecordedAssetLocations"),
+                             else "RecordedAssetLocations" if sheet == geo_sheet
+                             else "DuplicateAssetGroups" if sheet == duplicate_groups_sheet
+                             else "DuplicateAssetRecords"),
                 ref=f"A1:{sheet.cell(1, sheet.max_column).column_letter}{sheet.max_row}",
             )
             table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
@@ -290,12 +359,19 @@ def run_asset_quality(
         layer, _query_where(start, end, ASSETS[asset]["asset_group"], usernames),
         version, names, selections, _query_with_retry,
         progress=progress, asset_label="Distribution transformer" if asset == "transformer" else "LV pole",
+        duplicate_globalid_policy="report",
     )
     domains = domain_map(layer.properties, ASSETS[asset]["asset_group"])
     results = [
         evaluate_asset(item, asset, mapping, domains)
         for item in attributes
     ]
+    duplicate_groups = annotate_duplicate_asset_globalids(results)
+    if duplicate_groups:
+        progress(
+            f"Found {len(duplicate_groups)} repeated {asset} GlobalID groups, "
+            "all distinct OBJECTIDs retained for QA. See Excel Duplicate GlobalIDs."
+        )
     results.sort(key=lambda x: (x["status"] != "GAP", x["username"].casefold(), x["objectid"]))
     counts = summarize_assets(results)
     selected = selected_districts(district)
