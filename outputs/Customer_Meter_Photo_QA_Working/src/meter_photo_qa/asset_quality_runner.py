@@ -1,0 +1,257 @@
+"""Read-only district-aware Quality Watcher for distribution transformers and LV poles."""
+from __future__ import annotations
+
+import os
+from collections import Counter, defaultdict
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Any, Sequence
+
+from .asset_quality import ASSETS, domain_map, evaluate_asset, resolve_fields, summarize_assets
+from .area_selection import selected_districts
+from .progress_report import (
+    DEFAULT_BOUNDARY_SERVICE_URL, DEFAULT_LINE_SERVICE_URL,
+    _as_date, _get_gis, _get_sector_features, _query_with_retry, _layer_url,
+    _sql_text,
+)
+from .quality_query_batches import query_attributes_in_batches
+
+
+def _query_where(start, end, asset_group, usernames):
+    end_next = end + timedelta(days=1)
+    start_str = start.strftime("%Y-%m-%d 00:00:00")
+    next_str = end_next.strftime("%Y-%m-%d 00:00:00")
+    clauses = [
+        f"ASSETGROUP = {int(asset_group)}",
+        "((" +
+        f"created_date >= TIMESTAMP '{start_str}' AND created_date < TIMESTAMP '{next_str}'"
+        ") OR (" +
+        f"last_edited_date >= TIMESTAMP '{start_str}' AND last_edited_date < TIMESTAMP '{next_str}'"
+        "))",
+    ]
+    selected = [str(u).strip() for u in usernames or [] if str(u).strip()]
+    if selected:
+        quoted = ",".join(f"'{_sql_text(u)}'" for u in selected)
+        clauses.append(f"created_user IN ({quoted})")
+    return " AND ".join(clauses)
+
+
+def _filters_for_area(boundary_features, custom_boundary_geometry):
+    from arcgis.geometry.filters import intersects
+    if custom_boundary_geometry is not None:
+        return [(
+            "Custom boundary",
+            intersects(custom_boundary_geometry,
+                       sr=custom_boundary_geometry.get("spatialReference", {})),
+        )]
+    if boundary_features is None:
+        return [("All Rwanda", None)]
+    result = []
+    sr = boundary_features.spatial_reference
+    for ix, feature in enumerate(boundary_features.features, 1):
+        geom = feature.geometry
+        if not geom or not geom.get("rings"):
+            raise RuntimeError(f"Selected boundary polygon {ix} has invalid geometry.")
+        attrs = dict(feature.attributes or {})
+        desc = " / ".join(str(attrs.get(k) or "").strip()
+                          for k in ("district", "sector", "cell")
+                          if attrs.get(k)) or f"Boundary {ix}"
+        result.append((desc, intersects(geom, sr=sr)))
+    if not result:
+        raise RuntimeError("No selected administrative boundaries were returned.")
+    return result
+
+
+def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_areas, start, end):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+
+    wb = Workbook()
+    overview = wb.active
+    overview.title = "Summary"
+    details = wb.create_sheet("Asset Details")
+    surveyors = wb.create_sheet("Surveyor Gaps")
+    schema = wb.create_sheet("Schema Verification")
+    rules_sheet = wb.create_sheet("Rules")
+
+    overview.append([ASSETS[asset]["title"] + " - Field Data Quality"])
+    overview.append(["Scope", "; ".join(selected_areas) if selected_areas else "All Rwanda"])
+    overview.append(["From", start.isoformat()])
+    overview.append(["To (inclusive)", end.isoformat()])
+    overview.append(["Date basis", "Created or last edited"])
+    overview.append(["Feature Layer", ASSETS[asset]["layer_id"]])
+    overview.append(["Asset Group", ASSETS[asset]["asset_group"]])
+    for label, key in [
+        ("Features examined", "total"), ("With outstanding gaps", "with_gaps"),
+        ("No gaps in verified fields", "no_gaps_found"),
+        ("Not verified (schema mismatch)", "not_verified"),
+        ("Total individual issues", "issue_count"),
+    ]:
+        overview.append([label, summary[key]])
+    overview.append(["Source", "REGUN FeatureServer (read-only)"])
+    overview.append(["Interpretation", "Missing template fields are NOT checked; see Schema Verification."])
+    overview.append(["Exclusion", "Transformer group 12 only; other Electric Device groups, including plant equipment, are excluded."] if asset == "transformer"
+                    else ["Exclusion", "Structure Junction LV Pole group 7 only."])
+
+    details.append([
+        "Status", "OBJECTID", "GlobalID", "Asset Type", "Surveyor Username",
+        "Issues", "Unverified Checks", "Manufacturer", "Name / ID",
+        "Serial No", "Phases", "Rated kVA", "Manufacturer Evidence",
+        "Notes",
+    ])
+    for item in rows:
+        vals = item["values"]
+        details.append([
+            item["status"], item["objectid"], item["globalid"],
+            item["asset_type_label"], item["username"],
+            "; ".join(item["issues"]), "; ".join(item["unverified_checks"]),
+            vals.get("manufacturer", ""), vals.get("name", ""),
+            vals.get("serial", ""), vals.get("phases", ""), vals.get("capacity", ""),
+            vals.get("manufacturer_status", ""), item["notes"],
+        ])
+
+    surveyors.append(["Username", "Checked", "With Gaps", "No Gaps Found", "Not Verified", "Issue Count"])
+    grouped = defaultdict(list)
+    for item in rows:
+        grouped[item["username"]].append(item)
+    for username, records in sorted(grouped.items(), key=lambda pair: pair[0].casefold()):
+        counts = summarize_assets(records)
+        surveyors.append([
+            username, counts["total"], counts["with_gaps"], counts["no_gaps_found"],
+            counts["not_verified"], counts["issue_count"],
+        ])
+    schema.append(["Rule / Field Purpose", "Resolved Live Field", "Status", "Candidate Names"])
+    for key, candidates in ASSETS[asset]["checks"].items():
+        schema.append([
+            key, mapping.get(key) or "", "VERIFIED" if mapping.get(key) else "NOT FOUND - NOT CHECKED",
+            "; ".join(candidates),
+        ])
+    schema.append(["NOTE", "", "Branch is never scored or required." if asset == "transformer"
+                   else "No nameplate requires an explicit note.", ""])
+    schema.append(["NOTE", "", "Review unrecognized live schema fields before judging results.", ""])
+    schema.append(["Live Feature Service Field", "Alias", "Type", ""])
+    for field in fields:
+        schema.append([field.get("name"), field.get("alias"), field.get("type"), ""])
+
+    rules_sheet.append(["Type", "Rule", "Interpretation"])
+    rules_sheet.append(["Both", "GlobalID", "Missing GlobalID is a gap."])
+    rules_sheet.append(["Both", "Asset Type", "Unknown/unsupported asset type is a gap."])
+    rules_sheet.append(["Transformer", "Verified fields", "Blank transformer name/manufacturer/serial/phases/capacity are gaps only if the field exists in the live schema."])
+    rules_sheet.append(["Transformer", "Branch", "Explicitly excluded from mandatory checking."])
+    rules_sheet.append(["LV Pole", "Manufacturer", "If blank, Notes must expressly state no name plate; otherwise a gap."])
+    rules_sheet.append(["LV Pole", "Nameplate exception", "Documented absence is NOT treated as a manufacturer value."])
+    rules_sheet.append(["Both", "NOT_VERIFIED", "Unavailable live fields are not silently passed."])
+    rules_sheet.append(["Both", "Source data", "Read-only. No records are edited."])
+
+    for sheet in wb.worksheets:
+        sheet.sheet_view.showGridLines = False
+        sheet.freeze_panes = "A2"
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="17365D")
+            cell.alignment = Alignment(wrap_text=True)
+        sheet.row_dimensions[1].height = 30
+        for col in sheet.columns:
+            letter = col[0].column_letter
+            max_len = max(len(str(c.value or "")) for c in list(col)[:1500])
+            sheet.column_dimensions[letter].width = min(max(max_len + 2, 13), 55)
+    for sheet in (details, surveyors):
+        if sheet.max_row > 1:
+            table = Table(
+                displayName=("DistributionTransformerDetails" if sheet == details and asset == "transformer"
+                             else "LVPoleDetails" if sheet == details else "AssetSurveyorGaps"),
+                ref=f"A1:{sheet.cell(1, sheet.max_column).column_letter}{sheet.max_row}",
+            )
+            table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+            sheet.add_table(table)
+    wb.calculation.fullCalcOnLoad = True
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        raise FileExistsError(f"Refusing to overwrite existing quality report: {output_path}")
+    wb.save(output_path)
+
+
+def run_asset_quality(
+    asset: str,
+    output_xlsx: str | Path,
+    start_date: date | datetime | str,
+    end_date: date | datetime | str,
+    district: str | Sequence[str] | None = None,
+    sectors: Sequence[str] | None = None,
+    cells: Sequence[str] | None = None,
+    usernames: Sequence[str] | None = None,
+    custom_boundary_geometry: dict | None = None,
+    service_url: str | None = None,
+    boundary_service_url: str | None = None,
+    version: str = "sde.DEFAULT",
+    gis: Any | None = None,
+) -> dict[str, Any]:
+    """Run one strict asset-class audit against live REGUN metadata."""
+    if asset not in ASSETS:
+        raise ValueError(f"Unsupported asset audit: {asset}")
+    start, end = _as_date(start_date), _as_date(end_date)
+    if end < start:
+        raise ValueError("End date cannot be earlier than start date.")
+    output = Path(output_xlsx).expanduser().resolve()
+    if output.suffix.lower() != ".xlsx":
+        raise ValueError("Report must be an .xlsx file.")
+    now = datetime.now()
+    output = output.with_name(f"{output.stem}_{now:%Y%m%d_%H%M%S}{output.suffix}")
+    if output.exists():
+        raise FileExistsError(f"Report already exists: {output}")
+
+    active_gis = _get_gis(gis)
+    service = service_url or os.environ.get("UN_REPORT_SERVICE_URL", DEFAULT_LINE_SERVICE_URL)
+    boundary = boundary_service_url or os.environ.get("UN_SECTOR_BOUNDARY_URL", DEFAULT_BOUNDARY_SERVICE_URL)
+    from arcgis.features import FeatureLayer
+    from .progress_report import SECTOR_LAYER_ID, CELL_LAYER_ID
+    layer = FeatureLayer(_layer_url(service, ASSETS[asset]["layer_id"]), active_gis)
+    sector_layer = FeatureLayer(_layer_url(boundary, SECTOR_LAYER_ID), active_gis)
+    cell_layer = FeatureLayer(_layer_url(boundary, CELL_LAYER_ID), active_gis)
+    boundary_features = None
+    if custom_boundary_geometry is None:
+        boundary_features = _get_sector_features(
+            sector_layer, district, sectors, cell_layer, cells
+        )
+    selections = _filters_for_area(boundary_features, custom_boundary_geometry)
+    fields = [dict(item) for item in layer.properties.fields]
+    mapping = resolve_fields(fields, asset)
+    # Do not invent physical data-collection field names. Flag unverified
+    # schema coverage clearly in both the report and ArcGIS messages.
+    core = ["OBJECTID","GLOBALID","ASSETGROUP","ASSETTYPE","created_user","created_date","last_edited_date"]
+    lookup = {field["name"].casefold(): field["name"] for field in fields}
+    for name in core:
+        if name.casefold() not in lookup:
+            raise RuntimeError(f"Live {ASSETS[asset]['title']} service lacks {name}.")
+    names = list(dict.fromkeys([
+        *[lookup[name.casefold()] for name in core],
+        *[resolved for resolved in mapping.values() if resolved],
+    ]))
+    def progress(message):
+        try:
+            import arcpy
+            arcpy.AddMessage(message)
+        except ImportError:
+            pass
+    attributes = query_attributes_in_batches(
+        layer, _query_where(start, end, ASSETS[asset]["asset_group"], usernames),
+        version, names, selections, _query_with_retry,
+        progress=progress, asset_label="Distribution transformer" if asset == "transformer" else "LV pole",
+    )
+    domains = domain_map(layer.properties, ASSETS[asset]["asset_group"])
+    results = [
+        evaluate_asset(item, asset, mapping, domains)
+        for item in attributes
+    ]
+    results.sort(key=lambda x: (x["status"] != "GAP", x["username"].casefold(), x["objectid"]))
+    counts = summarize_assets(results)
+    selected = selected_districts(district)
+    _report_xlsx(output, asset, results, mapping, fields, counts, selected, start, end)
+    return {
+        "read_only": True, "asset": asset, "output_xlsx": str(output),
+        "districts": selected, "date_start": start.isoformat(),
+        "date_end": end.isoformat(), **counts,
+        "unverified_live_fields": [key for key, found in mapping.items() if not found],
+        "source_layer": _layer_url(service, ASSETS[asset]["layer_id"]),
+    }
