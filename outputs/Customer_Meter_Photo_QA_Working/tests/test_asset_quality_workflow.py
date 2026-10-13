@@ -106,7 +106,7 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertEqual(report["not_verified"], 0)
         self.assertIn("ASSETGROUP = 12", requests[0]["where"])
         self.assertNotIn("Branch", str(sheets["Asset Details"][0]))
-        self.assertIn("Owner Name missing", sheets["Asset Details"][1][5])
+        self.assertIn("Owner Name missing", sheets["Asset Details"][1][8])
         self.assertIn("Schema Verification", sheets)
         self.assertIn("By Recorded Location", sheets)
         self.assertIn("District", requests[1]["out_fields"])
@@ -133,7 +133,7 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertTrue(any(row[20] == "DOCUMENTED_NO_NAMEPLATE" for row in rows[1:]))
         self.assertEqual(sheets["By Recorded Location"][1][:5],
                          ("Rulindo", "Buyoga", "Munyana", 3, 1))
-        self.assertTrue(any("Manufacturer missing" in str(row[5]) for row in rows[1:]))
+        self.assertTrue(any("Manufacturer missing" in str(row[8]) for row in rows[1:]))
 
     def test_schema_not_found_is_not_counted_as_clean(self):
         report, sheets, _ = self.run_fake("transformer", [transformer("{T}", 1)])
