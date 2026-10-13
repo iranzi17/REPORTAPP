@@ -1104,6 +1104,21 @@ class CheckLVTransformerNames(_AssetQualityTool):
     asset = "line_transformer_name"
     label = "Check LV Line Transformer Names"
 
+    def getParameterInfo(self):
+        parameters = super().getParameterInfo()
+        scope = arcpy.Parameter(
+            displayName="Lines to check",
+            name="network_scope",
+            datatype="GPString", parameterType="Required", direction="Input",
+        )
+        scope.filter.type = "ValueList"
+        scope.filter.list = [
+            "All lines connected to selected transformers",
+            "Only lines surveyed/edited in selected date range",
+        ]
+        scope.value = scope.filter.list[0]
+        return parameters + [scope]
+
     def __init__(self):
         self.description = (
             "Read-only REG Utility Network trace check: compare the "
@@ -1127,6 +1142,11 @@ class CheckLVTransformerNames(_AssetQualityTool):
             service_url=parameters[8].valueAsText or None,
             boundary_service_url=parameters[9].valueAsText or None,
             version=parameters[10].valueAsText or "sde.DEFAULT",
+            scope=(
+                "edited_period" if parameters[11].valueAsText ==
+                "Only lines surveyed/edited in selected date range"
+                else "all_connected"
+            ),
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
         arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
