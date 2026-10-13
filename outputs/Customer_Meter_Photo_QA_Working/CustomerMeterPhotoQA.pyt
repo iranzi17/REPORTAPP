@@ -50,6 +50,7 @@ try:
     from meter_photo_qa import quality_watcher as _quality_watcher
     from meter_photo_qa import substation_containment as _substation_containment
     from meter_photo_qa import relay_associations as _relay_associations
+    from meter_photo_qa import asset_quality_runner as _asset_quality_runner
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -58,6 +59,7 @@ try:
     _quality_watcher = importlib.reload(_quality_watcher)
     _substation_containment = importlib.reload(_substation_containment)
     _relay_associations = importlib.reload(_relay_associations)
+    _asset_quality_runner = importlib.reload(_asset_quality_runner)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -79,6 +81,7 @@ load_cell_index = _progress_report.load_cell_index
 load_province_index = _progress_report.load_province_index
 DEFAULT_QUALITY_RULES_PATH = _quality_watcher.DEFAULT_QUALITY_RULES_PATH
 run_quality_watcher = _quality_watcher.run_quality_watcher
+run_asset_quality = _asset_quality_runner.run_asset_quality
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -100,6 +103,8 @@ class Toolbox:
             PreflightMeterPhotoInventory,
             GenerateSurveyProgressReport,
             WatchLVLineDataQuality,
+            WatchDistributionTransformerQuality,
+            WatchLVPoleQuality,
         ]
 
 
@@ -935,6 +940,160 @@ class WatchLVLineDataQuality:
         if summary["total_lines"] == 0:
             arcpy.AddWarning("No matching LV lines were found. Check the dates and area before treating this as a clean result.")
         arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
+
+
+
+class _AssetQualityTool:
+    asset = None
+    label = "Asset Data Quality"
+    canRunInBackground = False
+
+    def __init__(self):
+        self.description = (
+            "Read-only REG Utility Network QA. Checks the selected asset "
+            "group only, uses live field names, and separates unverified "
+            "schema fields from confirmed missing attribute values."
+        )
+
+    @_log_tool_open_errors
+    def getParameterInfo(self):
+        opened = datetime.now()
+        today = opened.date()
+        output = arcpy.Parameter(
+            displayName="Output Excel QA report",
+            name="output_xlsx",
+            datatype="DEFile", parameterType="Required", direction="Output",
+        )
+        output.filter.list = ["xlsx"]
+        output.value = str(
+            ROOT / "outputs" / f"{self.asset}_quality_{opened:%Y%m%d_%H%M%S}.xlsx"
+        )
+        start = arcpy.Parameter(
+            displayName="From date (created or edited)", name="start_date",
+            datatype="GPDate", parameterType="Required", direction="Input",
+        )
+        start.value = datetime.combine(today - timedelta(days=14), datetime.min.time())
+        end = arcpy.Parameter(
+            displayName="To date (inclusive)", name="end_date",
+            datatype="GPDate", parameterType="Required", direction="Input",
+        )
+        end.value = datetime.combine(today, datetime.min.time())
+        district = arcpy.Parameter(
+            displayName="District(s) - blank for all Rwanda", name="district",
+            datatype="GPString", parameterType="Optional", direction="Input",
+            multiValue=True,
+        )
+        district.filter.type = "ValueList"
+        district.filter.list = list(_boundary_index())
+        sectors = arcpy.Parameter(
+            displayName="Sector(s) - blank for all in districts", name="sectors",
+            datatype="GPString", parameterType="Optional", direction="Input",
+            multiValue=True,
+        )
+        sectors.filter.type = "ValueList"
+        sectors.filter.list = []
+        cells = arcpy.Parameter(
+            displayName="Cell(s)", name="cells",
+            datatype="GPString", parameterType="Optional", direction="Input",
+            multiValue=True,
+        )
+        cells.filter.type = "ValueList"
+        cells.filter.list = []
+        custom = arcpy.Parameter(
+            displayName="Custom boundary (draw polygon) - optional",
+            name="custom_boundary",
+            datatype="GPFeatureRecordSetLayer",
+            parameterType="Optional", direction="Input",
+        )
+        custom.value = str(CUSTOM_BOUNDARY_TEMPLATE)
+        users = arcpy.Parameter(
+            displayName="Surveyor(s) - blank for all",
+            name="usernames", datatype="GPString",
+            parameterType="Optional", direction="Input", multiValue=True,
+        )
+        users.filter.type = "ValueList"
+        users.filter.list = _mapped_usernames()
+        service = arcpy.Parameter(
+            displayName="Utility Network FeatureServer URL",
+            name="service_url", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        service.value = DEFAULT_LINE_SERVICE_URL
+        service.category = "Advanced"
+        boundaries = arcpy.Parameter(
+            displayName="Administrative Boundary FeatureServer URL",
+            name="boundary_service_url", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        boundaries.value = DEFAULT_BOUNDARY_SERVICE_URL
+        boundaries.category = "Advanced"
+        version = arcpy.Parameter(
+            displayName="Utility Network Version",
+            name="gdb_version", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        version.value = "sde.DEFAULT"
+        version.category = "Advanced"
+        return [output, start, end, district, sectors, cells,
+                custom, users, service, boundaries, version]
+
+    def updateParameters(self, parameters):
+        _apply_boundary_filters(parameters, 3, 4, 5)
+
+    def updateMessages(self, parameters):
+        if parameters[1].value and parameters[2].value and parameters[2].value < parameters[1].value:
+            parameters[2].setErrorMessage("The end date cannot be earlier than the start date.")
+        custom = _drawn_boundary_geometry(parameters[6]) is not None
+        if parameters[4].valueAsText and not parameters[3].valueAsText and not custom:
+            parameters[3].setErrorMessage("Select district(s) before sectors.")
+        if parameters[5].valueAsText and not parameters[4].valueAsText and not custom:
+            parameters[4].setErrorMessage("Select sector(s) before cells.")
+
+    def execute(self, parameters, messages):
+        summary = run_asset_quality(
+            asset=self.asset,
+            output_xlsx=parameters[0].valueAsText,
+            start_date=parameters[1].value,
+            end_date=parameters[2].value,
+            district=_split_multivalue(parameters[3].valueAsText),
+            sectors=_split_multivalue(parameters[4].valueAsText),
+            cells=_split_multivalue(parameters[5].valueAsText),
+            custom_boundary_geometry=_drawn_boundary_geometry(parameters[6]),
+            usernames=_split_multivalue(parameters[7].valueAsText),
+            service_url=parameters[8].valueAsText or None,
+            boundary_service_url=parameters[9].valueAsText or None,
+            version=parameters[10].valueAsText or "sde.DEFAULT",
+        )
+        arcpy.SetParameterAsText(0, summary["output_xlsx"])
+        arcpy.AddMessage(
+            f"Checked {summary['total']} {self.asset}(s): "
+            f"{summary['with_gaps']} with confirmed gaps, "
+            f"{summary['not_verified']} not fully verified, "
+            f"{summary['no_gaps_found']} with no gaps in verified fields."
+        )
+        if summary["unverified_live_fields"]:
+            arcpy.AddWarning(
+                "Unverified live schema fields: " +
+                ", ".join(summary["unverified_live_fields"]) +
+                ". Review the Schema Verification worksheet; "
+                "do not treat these checks as complete."
+            )
+        if summary["total"] == 0:
+            arcpy.AddWarning(
+                "No matching asset features. Verify date range, districts "
+                "and surveyor filters before concluding there are no gaps."
+            )
+        arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
+
+
+class WatchDistributionTransformerQuality(_AssetQualityTool):
+    asset = "transformer"
+    label = "Watch Distribution Transformer Data Quality"
+
+
+class WatchLVPoleQuality(_AssetQualityTool):
+    asset = "pole"
+    label = "Watch LV Pole Data Quality"
 
 
 class BuildSubstationContainment:
