@@ -140,6 +140,11 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
         type_code = -1
     if type_code not in spec["types"]:
         issues.append("Unknown or unsupported asset type")
+    available_attrs = {str(key).casefold(): value
+                       for key, value in attributes.items()}
+    def recorded_location(field):
+        return str(available_attrs.get(field.casefold()) or "").strip()
+
     values = {}
     for key, field in mapping.items():
         if not field:
@@ -192,9 +197,9 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
         "asset_type": type_code,
         "asset_type_label": spec["types"].get(type_code, "[Unknown]"),
         "username": str(attributes.get("created_user") or "").strip() or "(unattributed)",
-        "recorded_district": str(attributes.get("District") or "").strip(),
-        "recorded_sector": str(attributes.get("Sector") or "").strip(),
-        "recorded_cell": str(attributes.get("Cell") or "").strip(),
+        "recorded_district": recorded_location("District"),
+        "recorded_sector": recorded_location("Sector"),
+        "recorded_cell": recorded_location("Cell"),
         "status": status,
         "issues": issues,
         "unverified_checks": missing_checks,
