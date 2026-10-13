@@ -94,6 +94,7 @@ def trace_connected_lv_lines(
     version: str,
     line_layer_id: int = 10,
     transformer_layer_id: int = 7,
+    progress: Any | None = None,
 ) -> dict[int, dict[str, Any]]:
     """Return distinct connected LV feature IDs for each localized point asset.
 
@@ -107,7 +108,7 @@ def trace_connected_lv_lines(
     device_source = _source(schema, transformer_layer_id)
     trace_url = service_url.rstrip("/").removesuffix("/FeatureServer") + "/UtilityNetworkServer/trace"
     results: dict[int, dict[str, Any]] = {}
-    for point in transformer_points:
+    for index, point in enumerate(transformer_points, 1):
         object_id = int(point["OBJECTID"])
         global_id = str(point.get("GLOBALID") or "").strip()
         if not global_id:
@@ -138,4 +139,9 @@ def trace_connected_lv_lines(
             raise RuntimeError(f"Transformer {object_id} was not present in its own trace result.")
         result["terminal_id"] = terminal_id
         results[object_id] = result
+        if progress and (index == 1 or index % 10 == 0 or index == len(transformer_points)):
+            progress(
+                f"Transformer connectivity trace {index}/{len(transformer_points)} "
+                f"(ObjectID {object_id}); {len(result['line_objectids'])} LV line IDs in this component."
+            )
     return results
