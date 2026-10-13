@@ -70,11 +70,11 @@ class FeederEngineeringTests(unittest.TestCase):
         self.assertEqual(result["review_findings"], 0)
         self.assertEqual(result["links_not_verified_or_incomplete"], 2)
 
-    def test_rated_current_change_is_information_not_violation(self):
+    def test_conductor_ampacity_change_is_information_not_violation(self):
         data = [segment("T", rated_current_a=200), segment("C", rated_current_a=80)]
         result = audit_lv_feeder(data, [link("T", "C")])
         self.assertEqual(result["review_findings"], 0)
-        self.assertIn("RATED_CURRENT_CHANGED", codes(result, "INFO"))
+        self.assertIn("CONDUCTOR_AMPACITY_CHANGED", codes(result, "INFO"))
 
     def test_cable_size_change_not_automatically_incorrect(self):
         data = [
@@ -93,6 +93,42 @@ class FeederEngineeringTests(unittest.TestCase):
         result = audit_lv_feeder(data, [])
         self.assertIn("LOAD_EXCEEDS_PROTECTION_SETTING", codes(result, "REVIEW"))
         self.assertIn("PROTECTION_EXCEEDS_DERATED_AMPACITY", codes(result, "REVIEW"))
+
+    def test_actual_load_not_inferred_from_conductor_capacity(self):
+        sections = [segment("A", rated_current_a=100), segment("B", rated_current_a=200)]
+        result = audit_lv_feeder(sections, [link("A", "B")])
+        self.assertEqual(result["review_findings"], 0)
+        self.assertIn("CONDUCTOR_AMPACITY_CHANGED", codes(result, "INFO"))
+
+    def test_load_above_verified_adjusted_ampacity_needs_review(self):
+        record = segment("A", rated_current_a=200,
+                         design_current_a=140, adjusted_ampacity_a=110)
+        result = audit_lv_feeder([record], [])
+        self.assertIn("DESIGN_LOAD_EXCEEDS_ADJUSTED_AMPACITY", codes(result, "REVIEW"))
+
+    def test_load_below_adjusted_ampacity_not_overload(self):
+        record = segment("A", rated_current_a=100,
+                         design_current_a=70, adjusted_ampacity_a=80,
+                         protective_setting_a=75)
+        result = audit_lv_feeder([record], [])
+        self.assertEqual(result["review_findings"], 0)
+
+    def test_load_above_recorded_ampacity_with_unknown_basis_needs_review(self):
+        record = segment("A", rated_current_a=80, design_current_a=120)
+        result = audit_lv_feeder([record], [])
+        self.assertIn("DESIGN_LOAD_EXCEEDS_RECORDED_AMPACITY", codes(result, "REVIEW"))
+        self.assertNotIn("DESIGN_LOAD_EXCEEDS_ADJUSTED_AMPACITY", codes(result))
+
+    def test_invalid_zero_ampacity_needs_review(self):
+        result = audit_lv_feeder([segment("A", rated_current_a=0)], [])
+        self.assertIn("INVALID_CONDUCTOR_AMPACITY", codes(result, "REVIEW"))
+
+    def test_reference_rating_not_used_as_verified_derated_ampacity(self):
+        # A reference rating of 100 A is not an independently verified Iz.
+        record = segment("A", rated_current_a=100,
+                         protective_setting_a=125)
+        result = audit_lv_feeder([record], [])
+        self.assertNotIn("PROTECTION_EXCEEDS_DERATED_AMPACITY", codes(result, "REVIEW"))
 
     def test_phase_identity_mismatch(self):
         data = [
