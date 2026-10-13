@@ -81,6 +81,16 @@ class TransformerLineNameTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]["status"],"TRANSFORMER_NAME_UNVERIFIED")
 
+    def test_trace_warning_is_unverified_not_mismatch(self):
+        trace = traced(101, [1])
+        trace["warnings"] = ["A topology warning"]
+        rows = assess_line_transformer_names(
+            [line(1, "Wrong")], [point(101, "Kisaro")],
+            {101: trace},
+        )
+        self.assertEqual(rows[0]["status"], "TRACE_WARNING_UNVERIFIED")
+        self.assertFalse(rows[0]["connected_transformer_name"])
+
     def test_source_outside_selected_area_is_not_called_mismatch(self):
         rows = assess_line_transformer_names(
             [line(1,"Wrong?")], [point(101,"Kisaro")],
