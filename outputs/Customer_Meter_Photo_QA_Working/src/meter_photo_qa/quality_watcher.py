@@ -29,6 +29,7 @@ from .progress_report import (
 )
 from .review_register import REVIEW_HEADERS, build_review_rows, find_previous_report, load_review_rows
 from .phase_consistency import phase_type_conflict
+from .area_selection import selected_districts
 from .outstanding_gaps import GAP_CATEGORIES, priority_gaps, summarize_priority_gaps
 
 
@@ -928,7 +929,7 @@ def run_quality_watcher(
     start_date: date | datetime | str,
     end_date: date | datetime | str,
     usernames: Sequence[str] | None = None,
-    district: str | None = None,
+    district: str | Sequence[str] | None = None,
     sectors: Sequence[str] | None = None,
     cells: Sequence[str] | None = None,
     custom_boundary_geometry: dict[str, Any] | None = None,
@@ -1058,7 +1059,12 @@ def run_quality_watcher(
 
     clean_sectors = [str(item).strip() for item in sectors or [] if str(item).strip()]
     clean_cells = [str(item).strip() for item in cells or [] if str(item).strip()]
-    area_label = "Custom boundary" if custom_boundary_geometry is not None else (district or "All Areas")
+    selected_areas = selected_districts(district)
+    district_label = ", ".join(selected_areas)
+    area_label = (
+        "Custom boundary" if custom_boundary_geometry is not None
+        else (district_label or "All Areas")
+    )
     if clean_sectors and custom_boundary_geometry is None:
         area_label = f"{area_label}: {', '.join(clean_sectors)}"
     if clean_cells and custom_boundary_geometry is None:
@@ -1078,7 +1084,7 @@ def run_quality_watcher(
         ("From date", start.isoformat()),
         ("To date (inclusive)", end.isoformat()),
         ("Date basis", "Created or last edited"),
-        ("District", district or ""),
+        ("District(s)", district_label),
         ("Sectors", "; ".join(clean_sectors)),
         ("Cells", "; ".join(clean_cells)),
         (
@@ -1121,7 +1127,8 @@ def run_quality_watcher(
         "from_date": start.isoformat(),
         "to_date_inclusive": end.isoformat(),
         "minimum_completion_percent": threshold,
-        "district": district or "",
+        "district": district_label,
+        "districts": selected_areas,
         "sectors": clean_sectors,
         "cells": clean_cells,
         "boundary_mode": (
