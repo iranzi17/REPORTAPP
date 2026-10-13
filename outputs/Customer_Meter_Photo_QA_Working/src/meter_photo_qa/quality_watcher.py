@@ -30,6 +30,7 @@ from .progress_report import (
 from .review_register import REVIEW_HEADERS, build_review_rows, find_previous_report, load_review_rows
 from .phase_consistency import phase_type_conflict
 from .area_selection import selected_districts
+from .quality_query_batches import query_attributes_in_batches
 from .outstanding_gaps import GAP_CATEGORIES, priority_gaps, summarize_priority_gaps
 
 
@@ -333,32 +334,63 @@ def _query_quality_attributes(
     version: str,
     geometry_filter: Any | None,
     rules: dict[str, Any],
+    sector_feature_set: Any | None = None,
+    custom_boundary_geometry: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    """Search each selected administrative polygon, then fetch ID batches.
+
+    A multi-district polygon union generated expensive spatial-attribute
+    requests that timed out with ArcGIS Server 503. Querying IDs per
+    sector/cell avoids that union, and each subsequent attribute request
+    uses a small indexed OBJECTID batch with no geometry filter.
+    """
     fields = [
-        "OBJECTID",
-        "GLOBALID",
-        "created_user",
-        "created_date",
-        "last_edited_user",
-        "last_edited_date",
-        "ASSETGROUP",
-        "ASSETTYPE",
-        "Notes",
+        "OBJECTID", "GLOBALID", "created_user", "created_date",
+        "last_edited_user", "last_edited_date", "ASSETGROUP",
+        "ASSETTYPE", "Notes",
     ]
     fields.extend(str(item["field"]) for item in rules["scored_attributes"])
     fields.extend(str(item["field"]) for item in rules.get("optional_attributes", []))
     unique_fields = list(dict.fromkeys(fields))
-    kwargs = {
-        "where": where,
-        "out_fields": ",".join(unique_fields),
-        "return_geometry": False,
-        "gdb_version": version,
-        "return_all_records": True,
-    }
-    if geometry_filter is not None:
-        kwargs["geometry_filter"] = geometry_filter
-    feature_set = _query_with_retry(line_layer, attempts=3, **kwargs)
-    return [dict(feature.attributes) for feature in feature_set.features]
+
+    filters: list[tuple[str, Any]] = []
+    if sector_feature_set is not None and custom_boundary_geometry is None:
+        from arcgis.geometry.filters import intersects
+
+        reference = sector_feature_set.spatial_reference
+        for index, feature in enumerate(sector_feature_set.features, 1):
+            attrs = dict(getattr(feature, "attributes", {}) or {})
+            name = " / ".join(
+                str(attrs.get(field) or "").strip()
+                for field in ("district", "sector", "cell")
+                if str(attrs.get(field) or "").strip()
+            ) or f"Boundary polygon {index}"
+            geometry = getattr(feature, "geometry", None)
+            if not geometry or not geometry.get("rings"):
+                raise RuntimeError(f"Selected boundary has no polygon geometry: {name}")
+            filters.append((name, intersects(geometry, sr=reference)))
+    else:
+        filters.append((
+            "Custom boundary" if custom_boundary_geometry is not None else "All Rwanda",
+            geometry_filter,
+        ))
+
+    def report_progress(message: str) -> None:
+        try:
+            import arcpy
+            arcpy.AddMessage(message)
+        except ImportError:  # tests outside ArcGIS Pro
+            pass
+
+    return query_attributes_in_batches(
+        layer=line_layer,
+        where=where,
+        version=version,
+        fields=unique_fields,
+        geometry_filters=filters,
+        query_fn=_query_with_retry,
+        progress=report_progress,
+    )
 
 
 def _summarize_users(
@@ -988,8 +1020,12 @@ def run_quality_watcher(
         sector_feature_set = _get_sector_features(
             sector_layer, district, sectors, cell_layer, cells
         )
-    geometry_filter = _combined_geometry_filter(
-        sector_feature_set, custom_boundary_geometry
+    # Do not build one huge union of every sector's geometry: large combined
+    # searches cause ArcGIS Server 503 timeouts. The query helper searches
+    # each polygon for IDs separately, followed by small attribute batches.
+    geometry_filter = (
+        _combined_geometry_filter(None, custom_boundary_geometry)
+        if custom_boundary_geometry is not None else None
     )
     rules = load_quality_rules(rules_path)
     domains = _domain_maps(line_layer)
@@ -1000,7 +1036,9 @@ def run_quality_watcher(
     ))
     where = build_quality_where(start, end, clean_users)
     attributes_list = _query_quality_attributes(
-        line_layer, where, version, geometry_filter, rules
+        line_layer, where, version, geometry_filter, rules,
+        sector_feature_set=sector_feature_set,
+        custom_boundary_geometry=custom_boundary_geometry,
     )
 
     usernames_found = sorted({
