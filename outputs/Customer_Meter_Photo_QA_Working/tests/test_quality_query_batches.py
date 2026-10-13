@@ -187,6 +187,30 @@ class QualityBatchTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Duplicate GlobalID"):
             query_batch(layer, [("A", "A")])
 
+    def test_opt_in_duplicate_globalid_reporting_keeps_both_oids(self):
+        rows = make_rows(3)
+        rows[2]["GLOBALID"] = rows[0]["GLOBALID"].lower().strip("{}")
+        layer = FakeLineService(rows, area_ids={"A": [1, 2, 3]})
+        progress = []
+        result = query_attributes_in_batches(
+            layer, "ASSETGROUP IN (9,10)", "sde.DEFAULT",
+            ["OBJECTID", "GLOBALID"], [("A", "A")],
+            lambda lyr, **kw: lyr.query(**{k:v for k,v in kw.items() if k!="attempts"}),
+            batch_size=2, progress=progress.append,
+            duplicate_globalid_policy="report",
+        )
+        self.assertEqual([rec["OBJECTID"] for rec in result], [1, 2, 3])
+        self.assertTrue(any("DATA INTEGRITY WARNING" in message for message in progress))
+
+    def test_duplicate_policy_is_explicit(self):
+        layer = FakeLineService(make_rows(1))
+        with self.assertRaisesRegex(ValueError, "duplicate_globalid_policy"):
+            query_attributes_in_batches(
+                layer, "1=1", "sde.DEFAULT", ["OBJECTID"],
+                [("A", "A")], lambda lyr, **kw: lyr.query(**kw),
+                duplicate_globalid_policy="ignore",
+            )
+
     def test_unexpected_response_format_is_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "ObjectID dictionary"):
             query_attributes_in_batches(
