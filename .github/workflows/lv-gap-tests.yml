@@ -38,5 +38,6 @@ jobs:
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_progress_report.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_transformer_line_names.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_transformer_line_audit_workflow.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_dirty_trace_errors.py' -v
       - name: Check ArcGIS toolbox Python syntax
         run: python -c "import ast,pathlib;ast.parse(pathlib.Path('outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt').read_text(encoding='utf-8'))"
