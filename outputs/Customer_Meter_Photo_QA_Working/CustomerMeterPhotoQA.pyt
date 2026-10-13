@@ -53,6 +53,7 @@ try:
     from meter_photo_qa import asset_quality_runner as _asset_quality_runner
     from meter_photo_qa import transformer_line_audit as _transformer_line_audit
     from meter_photo_qa import duplicate_line_inspector as _duplicate_line_inspector
+    from meter_photo_qa import duplicate_line_scanner as _duplicate_line_scanner
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -64,6 +65,7 @@ try:
     _asset_quality_runner = importlib.reload(_asset_quality_runner)
     _transformer_line_audit = importlib.reload(_transformer_line_audit)
     _duplicate_line_inspector = importlib.reload(_duplicate_line_inspector)
+    _duplicate_line_scanner = importlib.reload(_duplicate_line_scanner)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -88,6 +90,7 @@ run_quality_watcher = _quality_watcher.run_quality_watcher
 run_asset_quality = _asset_quality_runner.run_asset_quality
 run_transformer_line_name_audit = _transformer_line_audit.run_transformer_line_name_audit
 inspect_duplicate_line_globalid = _duplicate_line_inspector.inspect_duplicate_line_globalid
+scan_electric_line_duplicate_globalids = _duplicate_line_scanner.scan_electric_line_duplicate_globalids
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -113,6 +116,7 @@ class Toolbox:
             WatchLVPoleQuality,
             CheckLVTransformerNames,
             InspectElectricLineGlobalID,
+            ScanAllElectricLineDuplicates,
         ]
 
 
@@ -1104,6 +1108,84 @@ class WatchLVPoleQuality(_AssetQualityTool):
     label = "Watch LV Pole Data Quality"
 
 
+
+
+class ScanAllElectricLineDuplicates:
+    """Full-network read-only duplicate GlobalID Excel register with location."""
+    label = "Scan All Electric Line Duplicate GlobalIDs"
+    description = (
+        "Read-only country-wide scan for repeated Electric Line GlobalIDs. "
+        "Exports one row per duplicate source feature with its OBJECTID, "
+        "GlobalID, District, Sector and Cell derived by spatial intersection. "
+        "No dates or surveyor restrictions. Do not delete Electric Lines "
+        "from this tool."
+    )
+    canRunInBackground = False
+
+    def getParameterInfo(self):
+        output = arcpy.Parameter(
+            displayName="Output Excel duplicate register",
+            name="output_xlsx", datatype="DEFile",
+            parameterType="Required", direction="Output",
+        )
+        output.filter.list = ["xlsx"]
+        output.value = str(
+            ROOT / "outputs" /
+            f"all_electric_line_duplicate_globalids_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+        )
+        types = arcpy.Parameter(
+            displayName="Electric Line assets to scan",
+            name="asset_scope", datatype="GPString",
+            parameterType="Required", direction="Input",
+        )
+        types.filter.type = "ValueList"
+        types.filter.list = [
+            "All Electric Lines (LV, MV and HV)",
+            "LV Electric Lines only",
+        ]
+        types.value = types.filter.list[0]
+        service = arcpy.Parameter(
+            displayName="Utility Network FeatureServer URL",
+            name="service_url", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        service.value = DEFAULT_LINE_SERVICE_URL
+        boundary = arcpy.Parameter(
+            displayName="Administrative Boundary FeatureServer URL",
+            name="boundary_service_url", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        boundary.value = DEFAULT_BOUNDARY_SERVICE_URL
+        version = arcpy.Parameter(
+            displayName="Utility Network Version",
+            name="gdb_version", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        version.value = "sde.DEFAULT"
+        return [output, types, service, boundary, version]
+
+    def execute(self, parameters, messages):
+        selected = parameters[1].valueAsText
+        summary = scan_electric_line_duplicate_globalids(
+            output_xlsx=parameters[0].valueAsText,
+            classes="lv" if selected == "LV Electric Lines only" else "all",
+            service_url=parameters[2].valueAsText or None,
+            boundary_service_url=parameters[3].valueAsText or None,
+            version=parameters[4].valueAsText or "sde.DEFAULT",
+        )
+        arcpy.SetParameterAsText(0, summary["output_xlsx"])
+        arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
+        if summary["duplicate_globalid_groups"]:
+            arcpy.AddWarning(
+                f"Found {summary['duplicate_globalid_groups']} duplicate GlobalID "
+                f"groups in {summary['duplicate_feature_records']} Electric Line "
+                "records. Review Excel before any authorized edits."
+            )
+        if summary["records_without_admin_location"]:
+            arcpy.AddWarning(
+                f"{summary['records_without_admin_location']} duplicate line records "
+                "had no verified district/sector/cell. See Admin Status in Excel."
+            )
 
 class InspectElectricLineGlobalID:
     """Confirm actual source records before any Utility Network data cleanup."""
