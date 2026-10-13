@@ -4,3 +4,6 @@ __pycache__/
 *.log
 
 /outputs/Customer_Meter_Photo_QA_Clean/outputs/
+
+# Generated QA reports: tracked historical pilot files remain tracked
+/outputs/Customer_Meter_Photo_QA_Working/outputs/*.xlsx
