@@ -33,7 +33,11 @@ def fake_line_layer(attributes: dict):
         "fields": [{"name": name} for name in fields],
         "types": service_types,
     })
-    layer.query = lambda **kwargs: SimpleNamespace(features=[SimpleNamespace(attributes=dict(attributes))])
+    def query(**kwargs):
+        if kwargs.get("return_ids_only"):
+            return {"objectIds": [attributes["OBJECTID"]]}
+        return SimpleNamespace(features=[SimpleNamespace(attributes=dict(attributes))])
+    layer.query = query
     return layer
 
 
