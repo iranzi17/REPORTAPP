@@ -131,3 +131,34 @@ reports. There are no service edits, and incomplete service responses
 abort without producing partial success reports. The tool does not
 automatically compare against the historical baseline workbook yet;
 a subsequent user-provided live QA workbook can be compared on GlobalID.
+
+
+## Confirming suspected duplicate Electric Line records
+
+For investigating repeated GlobalIDs in the same Electric Line table, the
+Working toolbox includes **Inspect Electric Line Duplicate GlobalID**.
+Paste one GlobalID and select the same Utility Network version as the map.
+
+The diagnostic independently queries the Electric Line FeatureServer
+(layer 10) by `GLOBALID`, returns each distinct `OBJECTID`, and writes
+the source attributes, geometry assessment and both OBJECTIDs to Excel.
+Geometry is called *exactly identical* only when all 2D vertex sequences
+match, allowing reversed direction/path order. Same `SHAPE_Length` alone
+is **not** enough to prove geometry duplication. Different vertex
+sequences may still overlap: verify in ArcGIS Pro and review all Utility
+Network associations and attachments.
+
+A repeated GlobalID on different source OBJECTIDs is a data-integrity
+issue requiring authorized investigation; two table rows can otherwise
+arise from joined displays or different versions, which is why the
+independent FeatureServer query matters. No automatic deletion, edits or
+topology validation occur. Fix source issues under approved workflows,
+validate the appropriate version's affected topology, and then re-run
+network-connected transformer name QA.
+
+Example under investigation:
+`{9FD1C5F4-AF23-43A3-90E3-CB1E7D8CA08C}`, observed in
+the Electric Line attribute table on OBJECTIDs 122510 and 122944,
+and independently reported as a dirty-area blocker by Utility Network
+connected trace. The duplicate may contribute to network issues, but
+the trace error alone does not establish causation.
