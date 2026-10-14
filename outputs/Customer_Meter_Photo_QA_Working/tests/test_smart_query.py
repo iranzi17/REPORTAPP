@@ -23,6 +23,27 @@ class SmartQueryParserTests(unittest.TestCase):
         self.assertIn("Manufacturers = ''",where)
         self.assertIn("'GICUMBI'",boundary_where(plan))
 
+    def test_pole_mandatory_append_cable_query(self):
+        from meter_photo_qa.smart_query import AttributeCondition
+        plan=parse_request("Show LV poles in Gicumbi with missing append cable")
+        self.assertEqual(
+            plan.conditions,(AttributeCondition("append_cable","missing"),)
+        )
+        sql=compile_attribute_where(plan,[
+            {"name":"Append_Cable","alias":"Append Cable",
+             "type":"esriFieldTypeString"}
+        ])
+        self.assertIn("Append_Cable IS NULL",sql)
+        yes=parse_request("Find LV poles in Gicumbi with append cable = Yes")
+        self.assertEqual(
+            yes.conditions,(AttributeCondition("append_cable","equals","Yes"),)
+        )
+        self.assertIn("Append_Cable = 'Yes'",compile_attribute_where(
+            yes,[{"name":"Append_Cable","type":"esriFieldTypeString"}]
+        ))
+        with self.assertRaisesRegex(ValueError,"Cannot verify live"):
+            compile_attribute_where(plan,[{"name":"OtherPoleField"}])
+
     def test_transformer_switch_unknown(self):
         plan = parse_request("Find distribution transformers in Burera with protection switch is unknown")
         self.assertEqual(plan.asset,"transformer")
