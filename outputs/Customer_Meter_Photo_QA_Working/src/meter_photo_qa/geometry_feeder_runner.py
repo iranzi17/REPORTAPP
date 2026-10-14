@@ -151,6 +151,15 @@ def _write_geometry_report(
     sources=book.create_sheet("Starting Transformers")
     gaps=book.create_sheet("Suggested Endpoint Gaps")
     cautions=book.create_sheet("Method and Limitations")
+    duplicates_sheet=book.create_sheet("Repeated Source GlobalIDs")
+    gid_groups=defaultdict(list)
+    for item in lines:
+        a=item["attributes"]
+        gid=str(a.get("GLOBALID") or "").strip().strip("{}").casefold()
+        if gid:
+            gid_groups[gid].append(int(a["OBJECTID"]))
+    repeated={gid:sorted(ids) for gid,ids in gid_groups.items() if len(set(ids))>1}
+    repeated_ids={oid for group in repeated.values() for oid in group}
     flags=Counter(row["status"] for row in checked["results"])
     in_scope=[r for r in checked["results"] if r["source_count"]]
     out_scope=[r for r in checked["results"] if not r["source_count"]]
@@ -164,6 +173,8 @@ def _write_geometry_report(
         ("Nationwide candidate lines not linked to local transformer starts",len(out_scope)),
         ("Geometric line components",checked["components"]),
         ("Potential endpoint gaps for review",len(checked["suggested_gaps"])),
+        ("Repeated GlobalIDs in candidate pool",len(repeated)),
+        ("Candidate feature records with repeated GlobalIDs",len(repeated_ids)),
         ("Source transformers evaluated",len(checked["source_details"])),
         ("Endpoint tolerance (metres)",checked["endpoint_tolerance_m"]),
         ("Transformer proximity search (metres)",checked["seed_tolerance_m"]),
@@ -180,7 +191,7 @@ def _write_geometry_report(
         "Nearby Transformer OBJECTID","Nearby Transformer GlobalID",
         "Number of Nearby Source Transformers","Candidate Source OBJECTIDs",
         "Geometric Component ID","Component Size","Multiple Geometry Paths",
-        "Evidence",
+        "Evidence","Repeated GlobalID among candidates",
         "Phases","Voltage","Material","Conductor Size","Rated Current",
         "Insulation",
     ]
@@ -195,6 +206,7 @@ def _write_geometry_report(
             r["source_count"],"; ".join(map(str,r["source_objectids"])),
             r["component_id"],r["component_size"],
             "YES" if r["multipart"] else "NO",r["evidence"],
+            "YES" if r["objectid"] in repeated_ids else "NO",
             row.get("Phases"),row.get("Voltage_Level_kV"),
             row.get("Material"),row.get("CondustorSize"),
             row.get("Rated_Current"),row.get("ConductorInsulation"),
@@ -208,6 +220,14 @@ def _write_geometry_report(
         sources.append([
             r["objectid"],r["globalid"],r["name"],
             r["candidate_components"],r["nearest_endpoint_m"],r["status"],
+        ])
+    duplicates_sheet.append([
+        "Repeated GlobalID","Source OBJECTIDs","Candidate records","Review"
+    ])
+    for gid,ids in sorted(repeated.items()):
+        duplicates_sheet.append([
+            gid,"; ".join(map(str,ids)),len(ids),
+            "Distinct source features do not establish distinct physical conductor segments."
         ])
     gaps.append([
         "LV Line OBJECTID A","LV Line OBJECTID B",
@@ -233,6 +253,8 @@ def _write_geometry_report(
         ("Projected CRS","EPSG:3857 metre distances are approximate around Rwanda, not survey-grade measurements."),
         ("Suggested gaps","Near endpoints beyond tolerance are listed but NOT traversed automatically."),
         ("Other records","Not linked to one of the district's transformer starts; included for completeness review."),
+        ("Duplicate source IDs","Repeated candidate GlobalIDs are listed separately; feature count can exceed physical conductor count."),
+        ("Feature counts","Distinct source OBJECTIDs, not independently verified physical line quantities."),
         ("No source edits","Read-only source data, Excel report only."),
     ]:cautions.append(row)
     for sheet in book.worksheets:
@@ -255,7 +277,10 @@ def _write_geometry_report(
     return {
         "connected":len(in_scope),
         "not_associated":len(out_scope),
-        "review":len([r for r in in_scope if r["status"]!="PROVISIONAL_GEOMETRY_MATCH"]),
+        "review":len([r for r in in_scope
+            if r["status"]!="PROVISIONAL_GEOMETRY_MATCH"
+            or r["objectid"] in repeated_ids]),
+        "duplicate_globalid_groups":len(repeated),
     }
 
 
@@ -360,6 +385,7 @@ def run_provisional_geometry_feeder_report(
         "engineering_review_lines":sheet_stats["review"],
         "unassociated_lines":sheet_stats["not_associated"],
         "suggested_gap_count":len(checked["suggested_gaps"]),
+        "candidate_duplicate_globalid_groups":sheet_stats["duplicate_globalid_groups"],
         "boundary_rule":"District selects transformer start only; geometry can cross borders",
         "caution":"Physical geometry, creator and nearby transformer do not prove energized electrical connectivity.",
     }
