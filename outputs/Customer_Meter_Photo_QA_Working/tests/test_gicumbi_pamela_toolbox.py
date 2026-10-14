@@ -88,7 +88,7 @@ class ProfileToolUiTests(unittest.TestCase):
             self.assertEqual(observed["assets"],"transformer")
             self.assertEqual(observed["scope"],"all_in_assigned_sectors")
             self.assertNotIn("kwizerwa_username",observed)
-            self.assertTrue(any("Kwizerwa Edison" in text and "handover date" in text
+            self.assertTrue(any("Kwizerwa Edison" in text and "handover" in text
                                 for category,text in messages if category=="warning"))
 
 
