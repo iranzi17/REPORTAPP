@@ -27,16 +27,18 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
         self.assertEqual(sum(len(s["cells"]) for s in data["sectors"]), 32)
         self.assertEqual(sum(s["planned_transformers"] for s in data["sectors"]), 95)
         self.assertEqual(sum(len(s["surveyors"]) for s in data["sectors"]), 12)
-        self.assertEqual(len(users), 11)
-        self.assertEqual(unknown, [{"name":"Kwizerwa Edison","sector":"Rukomo"}])
+        self.assertEqual(len(users), 12)
+        self.assertEqual(unknown, [])
         self.assertEqual(data["staff_replacements"][0]["incoming"],"Kwizerwa Edison")
         self.assertEqual(data["staff_replacements"][0]["outgoing"],"Manzi Intime")
         edison = next(person for sector in data["sectors"]
                       for person in sector["surveyors"]
                       if person["name_in_plan"] == "Kwizerwa Edison")
         self.assertEqual(edison["replaces"], "Manzi Intime")
-        self.assertIsNone(edison["username"])
-        self.assertNotIn("maniraguhatheogene01", users)
+        self.assertEqual(edison["username"], "maniraguhatheogene01")
+        self.assertEqual(edison["mapped_full_name"], "Kwizerwa Edison")
+        self.assertIn("maniraguhatheogene01", users)
+        self.assertIsNone(data["staff_replacements"][0]["handover_date"])
         self.assertIn("martinnzubahimana", users)
         self.assertIn("julesmugae72", users)
         self.assertIn("thomascyiza", users)
@@ -111,18 +113,21 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
             self.assertEqual(manifest["reports"][0]["other_or_unmapped_records"],2)
             self.assertEqual(manifest["reports"][0]["by_surveyor"][1]["profile_membership"],
                              "UNMAPPED_OR_OTHER_ACCOUNT_IN_AREA")
-            self.assertEqual(manifest["unresolved_planned_surveyors"][0]["name"],
-                             "Kwizerwa Edison")
+            self.assertEqual(manifest["unresolved_planned_surveyors"], [])
+            self.assertEqual(manifest["verified_usernames"], users)
+            self.assertEqual(manifest["transferred_accounts_need_historical_review"], ["maniraguhatheogene01"])
+            self.assertEqual(manifest["account_transfers"][0]["incoming"], "Kwizerwa Edison")
             with open(result["roster_csv"],newline="",encoding="utf-8-sig") as fh:
                 roster=list(csv.DictReader(fh))
             self.assertEqual(len(roster),12)
             self.assertEqual(sum(r["Mapping Status"].startswith("UNMAPPED")
-                                 for r in roster),1)
+                                 for r in roster),0)
             record=next(item for item in roster
                         if item["Planned Surveyor"]=="Kwizerwa Edison")
             self.assertEqual(record["Replaces"],"Manzi Intime")
-            self.assertEqual(record["Portal Username"],"")
-            self.assertIn("confirm",record["Staffing Change Note"].casefold())
+            self.assertEqual(record["Portal Username"],"maniraguhatheogene01")
+            self.assertIn("ACCOUNT HOLDER",record["Mapping Status"])
+            self.assertIn("confirmed account transfer",record["Staffing Change Note"].casefold())
 
     def test_all_accounts_mode_must_not_label_outside_username_as_team(self):
         calls=[]
@@ -144,29 +149,34 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
             self.assertEqual(report["by_surveyor"][0]["profile_membership"],
                              "UNMAPPED_OR_OTHER_ACCOUNT_IN_AREA")
 
-    def test_kwizerwa_override_is_explicitly_unverified(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder, \
+    def test_transferred_username_is_team_member_but_historical_authorship_unproven(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder, \\
              patch("meter_photo_qa.gicumbi_pamela_profile.run_asset_quality",
-                   return_value={"output_xlsx":"report.xlsx","total":0,"with_gaps":0}):
+                   return_value={
+                       "output_xlsx":"report.xlsx","total":1,"with_gaps":1,
+                       "per_surveyor":[{
+                           "username":"maniraguhatheogene01","total":1,"with_gaps":1,
+                       }],
+                   }):
             result=run_gicumbi_pamela_profile(
-                folder,"2026-09-14","2026-10-13",
-                assets="pole",kwizerwa_username="edison_unconfirmed",
+                folder,"2026-09-14","2026-10-13",assets="pole",
             )
             manifest=json.loads(Path(result["manifest_json"]).read_text())
-            self.assertEqual(manifest["unverified_username_overrides"],[
-                {"name":"Kwizerwa Edison","username":"edison_unconfirmed"}
-            ])
             self.assertEqual(manifest["unresolved_planned_surveyors"],[])
+            self.assertEqual(len(manifest["verified_usernames"]),12)
+            self.assertEqual(
+                manifest["reports"][0]["by_surveyor"][0]["profile_membership"],
+                "KNOWN_PAMELA_ACCOUNT",
+            )
+            self.assertIn(
+                "ACCOUNT_TRANSFER_DATE_UNKNOWN",
+                manifest["reports"][0]["by_surveyor"][0]["historical_attribution"],
+            )
             with open(result["roster_csv"],newline="",encoding="utf-8-sig") as fh:
                 rows=list(csv.DictReader(fh))
-            match=next(r for r in rows if r["Planned Surveyor"]=="Kwizerwa Edison")
-            self.assertIn("REQUIRES PORTAL VERIFICATION",match["Mapping Status"])
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
-            with self.assertRaises(ValueError):
-                run_gicumbi_pamela_profile(
-                    folder,"2026-09-14","2026-10-13",assets="pole",
-                    kwizerwa_username="x' OR 1=1",
-                )
+            edison=next(r for r in rows if r["Planned Surveyor"]=="Kwizerwa Edison")
+            self.assertEqual(edison["Portal Username"],"maniraguhatheogene01")
+            self.assertEqual(edison["Replaces"],"Manzi Intime")
 
     def test_failure_writes_incomplete_manifest_and_preserves_roster(self):
         def fails(**kwargs):
