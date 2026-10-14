@@ -62,7 +62,7 @@ class AssetQualityTests(unittest.TestCase):
                      "No nameplate found"):
             result = evaluate_asset({
                 "ASSETGROUP":7, "ASSETTYPE":3, "GLOBALID":"P2",
-                "Manufacturer":None, "Notes":note,
+                "Manufacturer":None, "Notes":note, "Append_Cable":"No",
             }, "pole", mapping)
             self.assertEqual(result["status"], "NO_GAPS_FOUND")
             self.assertEqual(result["values"]["manufacturer_status"],
