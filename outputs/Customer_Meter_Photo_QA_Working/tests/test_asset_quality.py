@@ -48,11 +48,12 @@ class AssetQualityTests(unittest.TestCase):
         self.assertIn("name", result["unverified_checks"])
 
     def test_missing_manufacturer_must_have_specific_nameplate_note(self):
-        mapping = {"manufacturer":"Manufacturer", "notes":"Notes"}
+        mapping = {"manufacturer":"Manufacturer", "notes":"Notes",
+                   "append_cable":"Append_Cable"}
         for note in ("", "N/A", "Manufacturer unknown", "Pole inspected"):
             result = evaluate_asset({
                 "ASSETGROUP":7, "ASSETTYPE":1, "GLOBALID":"P1",
-                "Manufacturer":None, "Notes":note,
+                "Manufacturer":None, "Notes":note, "Append_Cable":"No",
             }, "pole", mapping)
             self.assertEqual(result["status"], "GAP", note)
             self.assertIn("Manufacturer missing: Notes must state no name plate",
@@ -74,17 +75,19 @@ class AssetQualityTests(unittest.TestCase):
             {"name": "Manufacturers", "alias": "Manufacturers"},
             {"name": "CountryOfManufacturer", "alias": "Country Of Manufacturer"},
             {"name": "Notes", "alias": "Notes"},
+            {"name": "Append_Cable", "alias": "Append Cable"},
         ]
         mapping = resolve_fields(fields, "pole")
         self.assertEqual(mapping, {
             "manufacturer": "Manufacturers",
             "notes": "Notes",
+            "append_cable": "Append_Cable",
         })
         for pole_type in (1, 2, 3):
             good = evaluate_asset({
                 "GLOBALID": "{POLE}", "OBJECTID": 15,
                 "ASSETGROUP": 7, "ASSETTYPE": pole_type,
-                "Manufacturers": "Company X", "Notes": "",
+                "Manufacturers": "Company X", "Notes": "", "Append_Cable": "No",
             }, "pole", mapping)
             self.assertEqual(good["status"], "NO_GAPS_FOUND")
             self.assertEqual(good["values"]["manufacturer_status"], "RECORDED")
@@ -93,17 +96,19 @@ class AssetQualityTests(unittest.TestCase):
                 "GLOBALID": "{POLE}", "OBJECTID": 16,
                 "ASSETGROUP": 7, "ASSETTYPE": pole_type,
                 "Manufacturers": None, "Notes": "Name plate not clear",
+                "Append_Cable": "Yes",
             }, "pole", mapping)
             self.assertEqual(wrong["status"], "GAP")
 
     def test_kinyarwanda_explicit_absence_of_pole_nameplate(self):
-        fields = {"manufacturer": "Manufacturers", "notes": "Notes"}
+        fields = {"manufacturer": "Manufacturers", "notes": "Notes",
+                  "append_cable": "Append_Cable"}
         for note in ("Nta name plate iriho", "Nta nameplate iriho"):
             with self.subTest(note=note):
                 result = evaluate_asset({
                     "GLOBALID": "{POLE}", "OBJECTID": 123,
                     "ASSETGROUP": 7, "ASSETTYPE": 1,
-                    "Manufacturers": None, "Notes": note,
+                    "Manufacturers": None, "Notes": note, "Append_Cable":"No",
                 }, "pole", fields)
                 self.assertEqual(result["status"], "NO_GAPS_FOUND")
                 self.assertEqual(
@@ -115,9 +120,78 @@ class AssetQualityTests(unittest.TestCase):
             result = evaluate_asset({
                 "GLOBALID": "{POLE}", "OBJECTID": 124,
                 "ASSETGROUP": 7, "ASSETTYPE": 1,
-                "Manufacturers": None, "Notes": note,
+                "Manufacturers": None, "Notes": note, "Append_Cable":"No",
             }, "pole", fields)
             self.assertEqual(result["status"], "GAP", note)
+
+    def test_append_cable_is_mandatory_even_with_documented_no_nameplate(self):
+        fields = resolve_fields([
+            {"name":"Manufacturers"}, {"name":"Notes"}, {"name":"Append_Cable"}
+        ],"pole")
+        for raw in (None, "", "Unknown", "N/A"):
+            with self.subTest(value=raw):
+                pole = evaluate_asset({
+                    "OBJECTID":5, "GLOBALID":"{P5}", "ASSETGROUP":7, "ASSETTYPE":1,
+                    "Manufacturers":None, "Notes":"No name plate",
+                    "Append_Cable":raw,
+                },"pole",fields)
+                self.assertEqual(pole["status"],"GAP")
+                self.assertIn(
+                    "Append Cable missing/unknown (mandatory LV pole field)",
+                    pole["issues"],
+                )
+                self.assertEqual(pole["values"]["manufacturer_status"],
+                                 "DOCUMENTED_NO_NAMEPLATE")
+
+    def test_append_cable_yes_and_no_are_valid_answers(self):
+        fields = {"manufacturer":"Manufacturers", "notes":"Notes",
+                  "append_cable":"Append_Cable"}
+        for answer in ("Yes", "No", 0, 1):
+            with self.subTest(answer=answer):
+                value = evaluate_asset({
+                    "GLOBALID":"{A}", "OBJECTID":1,
+                    "ASSETGROUP":7,"ASSETTYPE":2,
+                    "Manufacturers":"ABC", "Notes":"",
+                    "Append_Cable":answer,
+                },"pole",fields,{"Append_Cable":{0:"No",1:"Yes"}})
+                self.assertEqual(value["status"],"NO_GAPS_FOUND")
+                self.assertEqual(value["values"]["append_cable_status"],"RECORDED")
+        coded_text = evaluate_asset({
+            "GLOBALID":"{A}", "OBJECTID":1,
+            "ASSETGROUP":7,"ASSETTYPE":2,
+            "Manufacturers":"ABC", "Notes":"",
+            "Append_Cable":"0",
+        },"pole",fields,{"Append_Cable":{0:"No",1:"Yes"}})
+        self.assertEqual(coded_text["status"],"NO_GAPS_FOUND")
+        ambiguous_zero = evaluate_asset({
+            "GLOBALID":"{A}", "OBJECTID":1,
+            "ASSETGROUP":7,"ASSETTYPE":2,
+            "Manufacturers":"ABC", "Notes":"",
+            "Append_Cable":"0",
+        },"pole",fields)
+        self.assertEqual(ambiguous_zero["status"],"GAP")
+
+    def test_append_cable_code_unknown_and_missing_schema_cannot_pass(self):
+        mapping=resolve_fields([
+            {"name":"Manufacturers"}, {"name":"Notes"}, {"name":"Append Cable"}
+        ],"pole")
+        self.assertEqual(mapping["append_cable"],"Append Cable")
+        unknown=evaluate_asset({
+            "GLOBALID":"{P}", "OBJECTID":1,"ASSETGROUP":7,"ASSETTYPE":1,
+            "Manufacturers":"ABC","Notes":"",
+            "Append Cable":0,
+        },"pole",mapping,{"Append Cable":{0:"Unknown",1:"Yes",2:"No"}})
+        self.assertEqual(unknown["status"],"GAP")
+        missing_field = evaluate_asset({
+            "GLOBALID":"{P}", "OBJECTID":1,
+            "ASSETGROUP":7,"ASSETTYPE":1,
+            "Manufacturers":"ABC","Notes":"",
+        },"pole",{"manufacturer":"Manufacturers","notes":"Notes",
+                  "append_cable":None})
+        self.assertEqual(missing_field["status"],"NOT_VERIFIED")
+        self.assertIn("append_cable", missing_field["unverified_checks"])
+        self.assertEqual(missing_field["values"]["append_cable_status"],
+                         "NOT_VERIFIED_FIELD")
 
     def test_absent_notes_field_blocks_complete_result(self):
         result = evaluate_asset({
