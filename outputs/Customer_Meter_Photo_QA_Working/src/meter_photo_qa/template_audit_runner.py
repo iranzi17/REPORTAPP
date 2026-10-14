@@ -281,9 +281,13 @@ def run_template_surveyor_audit(
         audit=Path(output_json).expanduser().resolve()
         if audit.suffix.lower()!=".json":
             raise ValueError("Query audit output path must end with .json.")
+        # ArcGIS Pro retains the output path between runs. Never overwrite
+        # the previous audit, but do not fail after Excel was generated.
         if audit.exists():
-            raise FileExistsError(f"Audit JSON path already exists: {audit}.")
+            audit=audit.with_name(
+                audit.stem+"_"+datetime.now().strftime("%Y%m%d_%H%M%S_%f")+".json"
+            )
         audit.parent.mkdir(parents=True,exist_ok=True)
-        audit.write_text(json.dumps(result,ensure_ascii=False,indent=2,default=str)+"\n",encoding="utf-8")
         result["output_json"]=str(audit)
+        audit.write_text(json.dumps(result,ensure_ascii=False,indent=2,default=str)+"\n",encoding="utf-8")
     return result
