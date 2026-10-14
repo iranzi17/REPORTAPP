@@ -368,6 +368,44 @@ def compile_attribute_where(plan: QueryPlan, live_fields: list[Mapping[str,Any]]
     return " AND ".join(clauses)
 
 
+
+def parse_lv_report_request(message: str) -> dict:
+    """Parse only specific create-report instructions, no arbitrary path in prose.
+
+    Destination is an explicit ArcGIS Pro folder parameter, not a path
+    inferred from natural language. Report username is optional.
+    """
+    raw=str(message or "").strip()
+    if not 1 <= len(raw) <= 550:
+        raise ValueError("Enter a short LV Lines Report instruction.")
+    pat=(
+        r"^(?:prepare|create|generate|make)\s+(?:an?\s+)?"
+        r"(?:lv\s+lines?|low\s+voltage\s+lines?)\s+report"
+        r"(?:\s+(?:for|of)\s+(?P<person>.+?))?"
+        r"\s+in\s+(?P<district>[a-zA-Z][a-zA-Z ]+?)"
+        r"(?:\s+district)?\s*[.!]?$"
+    )
+    match=re.fullmatch(pat,raw,re.I)
+    if not match:
+        raise ValueError(
+            "Use 'Prepare LV Lines Report for Kwizerwa Edison in Gicumbi'. "
+            "Choose the output folder in the separate Destination Folder control."
+        )
+    district_name=" ".join(match.group("district").split())
+    districts,_=_load_admin()
+    matches=[d for d in districts if d.casefold()==district_name.casefold()]
+    if len(matches)!=1:
+        raise ValueError(f"Unknown or ambiguous transformer starting district: '{district_name}'.")
+    district=matches[0]
+    person=(match.group("person") or "").strip()
+    if person and re.search(r"\b(?:and|or|where|with|outside|within)\b",person,re.I):
+        raise ValueError("Specify one surveyor per report; complex conditions are not supported.")
+    user=resolve_surveyor_name(person,district) if person else None
+    return {"action":"lv_feeder_report","district":district,
+            "usernames":[user] if user else [],
+            "requested_name":person or None,
+            "trace_rule":"Select starting transformers in district; trace all connected LV lines across borders"}
+
 def boundary_where(plan: QueryPlan):
     if not plan.district:
         return None
