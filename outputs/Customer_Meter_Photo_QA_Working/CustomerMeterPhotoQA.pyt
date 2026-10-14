@@ -55,6 +55,8 @@ try:
     from meter_photo_qa import duplicate_line_inspector as _duplicate_line_inspector
     from meter_photo_qa import duplicate_line_scanner as _duplicate_line_scanner
     from meter_photo_qa import gicumbi_pamela_profile as _gicumbi_pamela_profile
+    from meter_photo_qa import smart_query as _smart_query
+    from meter_photo_qa import smart_query_runner as _smart_query_runner
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -68,6 +70,8 @@ try:
     _duplicate_line_inspector = importlib.reload(_duplicate_line_inspector)
     _duplicate_line_scanner = importlib.reload(_duplicate_line_scanner)
     _gicumbi_pamela_profile = importlib.reload(_gicumbi_pamela_profile)
+    _smart_query = importlib.reload(_smart_query)
+    _smart_query_runner = importlib.reload(_smart_query_runner)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -94,6 +98,7 @@ run_transformer_line_name_audit = _transformer_line_audit.run_transformer_line_n
 inspect_duplicate_line_globalid = _duplicate_line_inspector.inspect_duplicate_line_globalid
 scan_electric_line_duplicate_globalids = _duplicate_line_scanner.scan_electric_line_duplicate_globalids
 run_gicumbi_pamela_profile = _gicumbi_pamela_profile.run_gicumbi_pamela_profile
+run_smart_query = _smart_query_runner.run_smart_query
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -121,6 +126,7 @@ class Toolbox:
             InspectElectricLineGlobalID,
             ScanAllElectricLineDuplicates,
             ReviewGicumbiPamelaTeam,
+            AskReportApp,
         ]
 
 
@@ -1137,6 +1143,113 @@ class WatchLVPoleQuality(_AssetQualityTool):
 
 
 
+
+
+
+class AskReportApp:
+    """Simple-language read-only attribute/spatial queries from ArcGIS Pro."""
+    label = "Ask REPORTAPP - Query and Filter Attributes"
+    description = (
+        "Type a plain-language query about LV lines, LV poles, or "
+        "distribution transformers. The tool validates live field names "
+        "and previews a filtered count. Optionally make a local feature "
+        "class containing matches and add it to the current map. "
+        "No edits are made to the REG FeatureServer. For example: "
+        "'Show LV poles in Gicumbi with missing manufacturer' or "
+        "'Find transformers in Burera with protection switch is unknown'. "
+        "This is a bounded interpreter, not an unrestricted AI chatbot."
+    )
+    canRunInBackground = False
+
+    @_log_tool_open_errors
+    def getParameterInfo(self):
+        query = arcpy.Parameter(
+            displayName="Tell REPORTAPP what to find",
+            name="natural_language_query",
+            datatype="GPString",
+            parameterType="Required", direction="Input",
+        )
+        query.value = "Show LV poles in Gicumbi with missing manufacturer"
+        mode = arcpy.Parameter(
+            displayName="Action (preview first recommended)",
+            name="query_mode",
+            datatype="GPString",
+            parameterType="Required", direction="Input",
+        )
+        mode.filter.type = "ValueList"
+        mode.filter.list = [
+            "Preview query and count only (read-only)",
+            "Create local filtered layer and add to map (read-only source)",
+        ]
+        mode.value = mode.filter.list[0]
+        report = arcpy.Parameter(
+            displayName="Output query interpretation (JSON)",
+            name="output_query_log",
+            datatype="DEFile",
+            parameterType="Required", direction="Output",
+        )
+        report.filter.list = ["json"]
+        report.value = str(
+            ROOT / "outputs" /
+            f"REPORTAPP_smart_query_{datetime.now():%Y%m%d_%H%M%S}.json"
+        )
+        service = arcpy.Parameter(
+            displayName="Utility Network FeatureServer URL",
+            name="service_url",
+            datatype="GPString", parameterType="Optional", direction="Input",
+        )
+        service.value = DEFAULT_LINE_SERVICE_URL
+        service.category = "Advanced"
+        boundary = arcpy.Parameter(
+            displayName="Administrative Boundary FeatureServer URL",
+            name="boundary_service_url",
+            datatype="GPString", parameterType="Optional", direction="Input",
+        )
+        boundary.value = DEFAULT_BOUNDARY_SERVICE_URL
+        boundary.category = "Advanced"
+        return [query, mode, report, service, boundary]
+
+    def updateMessages(self, params):
+        if params[0].valueAsText:
+            try:
+                _smart_query.parse_request(params[0].valueAsText)
+            except ValueError as exc:
+                params[0].setErrorMessage(str(exc))
+
+    def execute(self, parameters, messages):
+        mode = (
+            "local_copy" if parameters[1].valueAsText.startswith(
+                "Create local filtered layer"
+            ) else "preview"
+        )
+        result = run_smart_query(
+            request=parameters[0].valueAsText,
+            mode=mode,
+            output_json=parameters[2].valueAsText,
+            service_url=parameters[3].valueAsText or None,
+            boundary_service_url=parameters[4].valueAsText or None,
+        )
+        arcpy.SetParameterAsText(2, result["audit_log"])
+        arcpy.AddMessage(
+            "REPORTAPP interpreted your request as:\n" +
+            json.dumps(result["interpreted"], indent=2)
+        )
+        arcpy.AddMessage("Verified SQL: " + result["attribute_sql"])
+        if result["spatial_boundary_sql"]:
+            arcpy.AddMessage("Administrative boundary SQL: " +
+                             result["spatial_boundary_sql"])
+        arcpy.AddMessage(
+            f"{result['matched_features']:,} matching "
+            f"{result['interpreted']['asset']} feature(s)."
+        )
+        if result["local_feature_class"]:
+            arcpy.AddMessage(
+                "Matching features copied locally to " +
+                result["local_feature_class"] +
+                " (source Utility Network unchanged)."
+            )
+        for caution in result["cautions"]:
+            arcpy.AddWarning(caution)
 
 
 class ReviewGicumbiPamelaTeam:
