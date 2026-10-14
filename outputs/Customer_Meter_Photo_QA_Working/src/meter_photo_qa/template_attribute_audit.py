@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 from .smart_query import _load_admin, ASSET_GROUPS, ASSET_LAYERS
-from .asset_quality import ASSETS
+from .asset_quality import ASSETS,resolve_fields
 
 ASSET_TERMS = {
     "pole": r"\b(?:lv\s+)?poles?\b",
@@ -246,6 +246,23 @@ def resolve_live_field(phrase,asset,fields):
             + ", ".join(sorted(str(f["name"]) for f in candidates))
             + ". Use its exact field name."
         )
+    # Where the historical asset template explicitly declares a synonym
+    # (e.g. Manufacturer vs live Manufacturers), use ONLY that verified
+    # mapping. This is not fuzzy matching against arbitrary fields.
+    if asset in ASSETS:
+        known=ASSETS[asset]["checks"]
+        lookup=resolve_fields(fields,asset)
+        recognized=set(_field_tokens(phrase,asset))
+        alias_keys=[
+            key for key,aliases in known.items()
+            if any(_canon(alias) in recognized for alias in aliases)
+        ]
+        selections={lookup.get(key) for key in alias_keys if lookup.get(key)}
+        if len(selections)==1:
+            selected=next(iter(selections))
+            return next(f for f in fields if str(f["name"]).casefold()==selected.casefold())
+        if len(selections)>1:
+            raise ValueError(f"Attribute '{phrase}' maps to multiple template fields; use exact live name.")
     valid=", ".join(sorted(str(f.get("alias") or f["name"]) for f in fields
                            if _canon(f.get("name")) not in RESERVED)[:28])
     raise ValueError(
