@@ -8,8 +8,8 @@
   "planned_start": "2026-09-14",
   "planned_end": "2026-09-16",
   "period_note": "September 14–16 is the work plan, not a restriction on when source data were created/edited. The tool permits wider review dates.",
-  "scope_note": "Team assignment is at sector level, not individual cell or transformer level. Kwizerwa Edison replaced Manzi Intime and now uses account maniraguhatheogene01; earlier source records from that account may predate the handover and cannot be personally attributed without a confirmed transition date.",
-  "mapping_source": "config/report_user_names.json",
+  "scope_note": "Six sectors assigned at sector level. Current roster confirmed by screenshot on 2026-10-14; username labels do not establish individual authorship of records created before unspecified account handovers.",
+  "mapping_source": "config/report_user_names.json (current roster updated from Gicumbi screenshot 2026-10-14)",
   "sectors": [
     {
       "sector": "Muko",
@@ -106,15 +106,18 @@
       "surveyors": [
         {
           "name_in_plan": "Kwizerwa Edison",
-          "username": "maniraguhatheogene01",
+          "username": "ninamenye9683",
           "mapped_full_name": "Kwizerwa Edison",
-          "note": "Confirmed account transfer: Kwizerwa Edison replaced Manzi Intime and currently uses maniraguhatheogene01. Historical records created before handover cannot be attributed to Edison solely from this account.",
-          "replaces": "Manzi Intime"
+          "note": "Current Gicumbi portal username from surveyor roster screenshot on 2026-10-14. Previous username mapping retained only as historical context, not proof of who created earlier records.",
+          "replaces": "Manzi Intime",
+          "previous_verified_username": "maniraguhatheogene01"
         },
         {
           "name_in_plan": "Ringuyeneza Frederic",
-          "username": "etienne2020",
-          "mapped_full_name": "Ringuyeneza Frederic"
+          "username": "maniraguhatheogene01",
+          "mapped_full_name": "Ringuyeneza Frederic",
+          "previous_verified_username": "etienne2020",
+          "note": "Current Gicumbi portal username from surveyor roster screenshot on 2026-10-14. Previous username mapping retained only as historical context, not proof of who created earlier records."
         },
         {
           "name_in_plan": "Bizimana Jean de Dieu",
@@ -134,8 +137,10 @@
       "surveyors": [
         {
           "name_in_plan": "Usabyeyezu Jean Dieu",
-          "username": "jeandedieujadomax123",
-          "mapped_full_name": "Usabyeyezu Jean De Dieu"
+          "username": "janviersafari515",
+          "mapped_full_name": "Usabyeyezu Jean Dieu",
+          "previous_verified_username": "jeandedieujadomax123",
+          "note": "Current Gicumbi portal username from surveyor roster screenshot on 2026-10-14. Previous username mapping retained only as historical context, not proof of who created earlier records."
         },
         {
           "name_in_plan": "Ntwari Rwabizi Yves",
@@ -160,10 +165,30 @@
       "outgoing": "Manzi Intime",
       "incoming": "Kwizerwa Edison",
       "sector": "Rukomo",
-      "portal_username_status": "Confirmed by team: incoming Kwizerwa Edison now uses outgoing Manzi Intime's account maniraguhatheogene01; handover date not provided",
-      "portal_username": "maniraguhatheogene01",
-      "handover_date": null,
-      "historical_attribution_caution": "Data created before handover may belong to Manzi Intime; account-level dates do not prove individual authorship."
+      "note": "Personnel replacement remains confirmed; historical maniraguhatheogene01 account was previously used by Manzi Intime and later associated with Edison; current screenshot now lists Ringuyeneza Frederic under that account. Dates of account handovers unknown."
     }
-  ]
+  ],
+  "account_mapping_history": {
+    "source": "User-supplied Gicumbi roster screenshot, 2026-10-14",
+    "note": "Mappings below describe CURRENT account holders; prior labels were present in REPORTAPP before the supplied roster. They are not authenticated historic login/session records.",
+    "changed_logins": [
+      {
+        "username": "ninamenye9683",
+        "previous_label": "Nshimiyimana Jean Baptiste",
+        "current_label": "Kwizerwa Edison"
+      },
+      {
+        "username": "maniraguhatheogene01",
+        "previous_label": "Kwizerwa Edison",
+        "current_label": "Ringuyeneza Frederic",
+        "earlier_label": "Manzi Intime"
+      },
+      {
+        "username": "janviersafari515",
+        "previous_label": "Nkubana Guillaume",
+        "current_label": "Usabyeyezu Jean Dieu"
+      }
+    ],
+    "transition_dates_known": false
+  }
 }
