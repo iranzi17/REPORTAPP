@@ -205,6 +205,8 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
             if isinstance(raw, str) and raw.strip() == "0":
                 domain_value = next((label for code, label in coded_domain.items()
                                      if str(code).strip() == "0"), None)
+                if domain_value is not None:
+                    values["append_cable"] = str(domain_value)
                 missing_append = (not domain_value or
                                   str(domain_value).strip().casefold() in UNKNOWN)
             else:
