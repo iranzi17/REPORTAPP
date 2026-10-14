@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import json
 import importlib
 import sys
@@ -59,6 +60,8 @@ try:
     from meter_photo_qa import smart_query_runner as _smart_query_runner
     from meter_photo_qa import lv_feeder_report as _lv_feeder_report
     from meter_photo_qa import combined_qa_report as _combined_qa_report
+    from meter_photo_qa import template_attribute_audit as _template_attribute_audit
+    from meter_photo_qa import template_audit_runner as _template_audit_runner
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -76,6 +79,8 @@ try:
     _smart_query_runner = importlib.reload(_smart_query_runner)
     _lv_feeder_report = importlib.reload(_lv_feeder_report)
     _combined_qa_report = importlib.reload(_combined_qa_report)
+    _template_attribute_audit = importlib.reload(_template_attribute_audit)
+    _template_audit_runner = importlib.reload(_template_audit_runner)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -105,6 +110,7 @@ run_gicumbi_pamela_profile = _gicumbi_pamela_profile.run_gicumbi_pamela_profile
 run_smart_query = _smart_query_runner.run_smart_query
 run_lv_feeder_report = _lv_feeder_report.run_lv_feeder_report
 run_combined_qa_report = _combined_qa_report.run_combined_qa_report
+run_template_surveyor_audit = _template_audit_runner.run_template_surveyor_audit
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -1156,7 +1162,8 @@ class AskReportApp:
     """Simple-language read-only attribute/spatial queries from ArcGIS Pro."""
     label = "Ask REPORTAPP - Query and Filter Attributes"
     description = (
-        "Type a plain-language query or 'Prepare LV Lines Report for "
+        "Type a plain-language query, ask which surveyors have template " 
+        "gaps or unusual field values, or 'Prepare LV Lines Report for "
         "Kwizerwa Edison in Gicumbi' to create a consolidated original "
         "LV Lines, Distribution Transformer and LV Pole QA Excel report. "
         "The tool validates live field names "
@@ -1216,7 +1223,7 @@ class AskReportApp:
         boundary.value = DEFAULT_BOUNDARY_SERVICE_URL
         boundary.category = "Advanced"
         destination = arcpy.Parameter(
-            displayName="Destination folder for requested LV Lines Report",
+            displayName="Destination folder for Excel reports and surveyor audits",
             name="report_destination", datatype="DEFolder",
             parameterType="Optional", direction="Input",
         )
@@ -1260,6 +1267,10 @@ class AskReportApp:
                     ("prepare ", "create ", "generate ", "make ")
                 ):
                     _smart_query.parse_lv_report_request(params[0].valueAsText)
+                elif re.search(r"\bsurveyors?\b", params[0].valueAsText, re.I):
+                    _template_attribute_audit.parse_surveyor_template_request(
+                        params[0].valueAsText
+                    )
                 else:
                     _smart_query.parse_request(params[0].valueAsText)
             except ValueError as exc:
@@ -1319,6 +1330,36 @@ class AskReportApp:
                 f"All three mandatory QA checks completed. "
                 f"Scope {report['district']} from {report['start_date']} "
                 f"to {report['end_date']}."
+            )
+            return
+        if re.search(r"\bsurveyors?\b", request, re.I):
+            arcpy.AddMessage(
+                "Running a read-only surveyor audit against the live asset "
+                "template and authoritative geographic boundaries."
+            )
+            report = run_template_surveyor_audit(
+                request=request,
+                output_folder=parameters[5].valueAsText,
+                output_json=parameters[2].valueAsText,
+                service_url=parameters[3].valueAsText or None,
+                boundary_service_url=parameters[4].valueAsText or None,
+            )
+            arcpy.SetParameterAsText(2, report["output_json"])
+            arcpy.AddMessage(
+                "Verified template conditions: " +
+                json.dumps(report["resolved_criteria"],indent=2)
+            )
+            arcpy.AddMessage(
+                f"{report['matching_features']:,} matching features from "
+                f"{report['matching_surveyors']:,} surveyor account(s)."
+            )
+            arcpy.AddMessage(
+                "Surveyor template audit Excel: " + report["output_xlsx"]
+            )
+            arcpy.AddWarning(
+                "Source GIS data were not edited. No notifications have been "
+                "sent. Recorded user is an account, not proof of historical "
+                "personal authorship when accounts were transferred."
             )
             return
         mode = (
