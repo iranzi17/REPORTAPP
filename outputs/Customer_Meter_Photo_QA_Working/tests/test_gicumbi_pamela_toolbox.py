@@ -29,7 +29,7 @@ class FakeParameter:
 
 
 class ProfileToolUiTests(unittest.TestCase):
-    def test_profile_has_explicit_asset_scope_and_username_override(self):
+    def test_profile_has_all_twelve_confirmed_users_without_override(self):
         fake=SimpleNamespace(
             Parameter=FakeParameter,
             AddMessage=lambda *_args: None,
@@ -41,17 +41,17 @@ class ProfileToolUiTests(unittest.TestCase):
             qa=runpy.run_path(str(ROOT/"CustomerMeterPhotoQA.pyt"))
             tool=qa["ReviewGicumbiPamelaTeam"]()
             params=tool.getParameterInfo()
-            self.assertEqual(len(params),9)
+            self.assertEqual(len(params),8)
             self.assertEqual(params[3].valueAsText,
                 "All: LV Lines, Distribution Transformers and LV Poles")
             self.assertEqual(params[4].valueAsText,
-                "Mapped Pamela team accounts only (11 verified)")
-            self.assertEqual(params[5].name,"kwizerwa_username")
+                "Mapped Pamela team accounts only (12 confirmed)")
+            self.assertEqual(params[5].name,"service_url")
             self.assertEqual(params[1].value.year,2026)
             self.assertEqual(params[1].value.month,9)
             self.assertEqual(params[1].value.day,14)
 
-    def test_execute_propagates_scope_and_explicit_username_without_guessing(self):
+    def test_execute_propagates_scope_and_warns_of_historical_shared_account(self):
         messages=[]
         fake=SimpleNamespace(
             Parameter=FakeParameter,
@@ -66,7 +66,6 @@ class ProfileToolUiTests(unittest.TestCase):
             params[0].value="/tmp"
             params[3].value="Distribution Transformers only"
             params[4].value="All accounts in the six sectors (find missing usernames)"
-            params[5].value=None
             with patch.dict(qa,{}):
                 # The execute method resolves its top-level globals, so
                 # replace the function's global runner (not the runpy dict).
@@ -88,8 +87,8 @@ class ProfileToolUiTests(unittest.TestCase):
                     run_fn["run_gicumbi_pamela_profile"]=original
             self.assertEqual(observed["assets"],"transformer")
             self.assertEqual(observed["scope"],"all_in_assigned_sectors")
-            self.assertIsNone(observed["kwizerwa_username"])
-            self.assertTrue(any("Kwizerwa Edison" in text
+            self.assertNotIn("kwizerwa_username",observed)
+            self.assertTrue(any("Kwizerwa Edison" in text and "handover date" in text
                                 for category,text in messages if category=="warning"))
 
 
