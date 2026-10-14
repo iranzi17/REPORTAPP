@@ -698,3 +698,75 @@ needs confirmation of the exact source field name.
   `Show LV poles in Gicumbi with missing append cable`.
 - Transformer historical seven mandatory correction categories and LV
   line rules are unaffected. All reads remain source read-only.
+
+
+## Dynamic Surveyor Template Attribute Audits (October 14, 2026)
+
+**New Ask REPORTAPP capability**: user can ask which surveyor accounts
+recorded out-of-range values or left one or several requested attributes
+incomplete, using live template field names or aliases instead of hard-coded
+checklists. The audit is intentionally a *bounded natural-language interpreter*,
+not an unrestricted LLM or arbitrary user-provided SQL.
+
+Supported examples in the existing **Ask REPORTAPP – Query and Filter
+Attributes** tool (select **Destination folder**):
+- `Give me surveyors who recorded pole height greater than 12 in Gicumbi`
+- `Give me surveyors who are filling the height of pole with the values greater than 12 in Gicumbi`
+- `Show surveyors missing manufacturer and append cable on LV poles in Gicumbi sector Muko`
+- `Find surveyors missing any of manufacturer or append cable on LV poles in Gicumbi`
+- `Find surveyors with number of LV feeders > 5 on distribution transformers in Gicumbi`
+- `Find surveyors missing transformer name on LV lines in Gicumbi`
+
+**Operation:** the interpreter determines one asset class (eligible LV poles,
+distribution transformers or LV lines), one known district with optional
+sector/cell, one numeric comparison or up to six missing-field conditions.
+Missing field A **and** field B means all conditions apply to each record;
+`any of` / `or` explicitly means either field may be missing. It resolves
+the actual live FeatureServer field/alias; known legacy template spelling
+variants such as `Manufacturer` versus `Manufacturers` may use established,
+explicit field mappings. A field that is absent or ambiguous **stops the
+query**: no guessed fields or dropped conditions.
+
+Checks permit greater/less/equal numeric comparisons *only* when the
+live type is numeric. Numeric comparisons use the **stored field unit**;
+`height > 12` is **not** asserted to mean twelve metres unless actual
+schema units are verified. Requests explicitly using metres/feet are rejected
+rather than silently converted. Missing means NULL, empty text, or
+explicit Unknown/N/A coded-domain options; coded numerical zero remains
+valid unless its actual domain label is Unknown. No formula evaluation or
+unrestricted SQL is accepted.
+
+The audit creates a read-only selected FeatureServer view and intersects it
+with authoritative administrative boundary polygons. It exports a
+**Surveyor_Template_Audit_...xlsx** with **Audit Summary, Surveyors,
+Matching Records, Resolved Template Criteria, Data Quality Warnings,
+Notification Readiness**. The record register provides OBJECTID, GlobalID,
+`created_user`, the current display name (where mapped), the resolved field
+values and duplicate-identifier warnings. A corresponding JSON log records
+the exact interpreted predicates, source and matched counts. Maximum
+25,000 matching features; more than that is rejected rather than
+producing a truncated/inaccurate result. Count inconsistency, missing
+boundaries, schema drift and other service failures abort the report.
+
+**Interpretation:** these are account-level attribute snapshots, **not
+conclusive individual negligence**. Multiple Gicumbi portal usernames
+changed holders without verified handover dates, and records may have been
+edited after original collection. Source Utility Network remains
+unmodified. **No notifications are sent yet.**
+
+**Notification future stage:** the exported `Notification Readiness`
+worksheet records potential violation identifiers with status
+`NOT_SENT`. Before enabling alerts, implement explicit opt-in recipients,
+confirmed mandatory-rule catalog, a persisted last-seen snapshot keyed
+by GlobalID/OBJECTID/rule, periodic read-only checks, duplicate
+suppression, service-rate controls, and change confirmation (new or
+meaningfully modified violations only). An automation must distinguish
+new omissions from known legacy outstanding gaps, and any historical
+account transfer before notifying individuals.
+
+Implementation: `template_attribute_audit.py` (pure parsing/schema
+compiler), `template_audit_runner.py` (ArcGIS selected view + XLSX),
+`CustomerMeterPhotoQA.pyt::AskReportApp` (tool routing); tests are
+`test_template_attribute_audit.py`,
+`test_template_audit_runner.py`, and `test_smart_query_toolbox.py`.
+Live REG service verification remains necessary before relying on output.
