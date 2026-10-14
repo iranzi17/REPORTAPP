@@ -38,6 +38,7 @@ jobs:
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_gicumbi_pamela_profile.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_gicumbi_pamela_toolbox.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_smart_query.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_template_attribute_audit.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_smart_query_runner.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_smart_query_toolbox.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_lv_feeder_report_prompt.py' -v
