@@ -140,7 +140,11 @@
           "username": "janviersafari515",
           "mapped_full_name": "Usabyeyezu Jean Dieu",
           "previous_verified_username": "jeandedieujadomax123",
-          "note": "Current Gicumbi portal username from surveyor roster screenshot on 2026-10-14. Previous username mapping retained only as historical context, not proof of who created earlier records."
+          "note": "Current Gicumbi portal username from surveyor roster screenshot on 2026-10-14. Previous username mapping retained only as historical context, not proof of who created earlier records.",
+          "display_aliases": [
+            "Usabyezu Jean Dieu",
+            "Usabyeyezu Jean De Dieu"
+          ]
         },
         {
           "name_in_plan": "Ntwari Rwabizi Yves",
@@ -170,7 +174,7 @@
   ],
   "account_mapping_history": {
     "source": "User-supplied Gicumbi roster screenshot, 2026-10-14",
-    "note": "Mappings below describe CURRENT account holders; prior labels were present in REPORTAPP before the supplied roster. They are not authenticated historic login/session records.",
+    "note": "Mappings below describe CURRENT account holders; prior labels were present in REPORTAPP before the supplied roster. They are not authenticated historic login/session records. Display name aliases accommodate the screenshot spelling for Usabyezu Jean Dieu; portal user is janviersafari515.",
     "changed_logins": [
       {
         "username": "ninamenye9683",
