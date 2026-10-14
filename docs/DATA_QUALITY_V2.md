@@ -341,13 +341,26 @@ person within a multi-person team.
 **12 planned surveyors; all 12 have confirmed current portal accounts**
 in `config/report_user_names.json`. A work-plan spelling variation for
 Bimenyimana Emmauel corresponds to configured Bimenyimana Emmanuel.
-**Kwizerwa Edison** replaced **Manzi Intime** in Rukomo and, as confirmed
-by the user, now uses the former account `maniraguhatheogene01`.
-The current username-to-name mapping now reads **Kwizerwa Edison**.
-The exact handover date was not provided: historic records saved under this
-shared account may have been created by **Manzi Intime**, and must not be
-personally attributed to Edison solely from `created_user`.
-The replacement and this caveat are preserved in the roster and manifest.
+**Updated Gicumbi account roster, 14 October 2026 (user screenshot):**
+
+| Current portal username | Current surveyor name | Previous REPORTAPP account label |
+|---|---|---|
+| `ninamenye9683` | Kwizerwa Edison | Nshimiyimana Jean Baptiste |
+| `maniraguhatheogene01` | Ringuyeneza Frederic | Kwizerwa Edison (and earlier Manzi Intime) |
+| `janviersafari515` | Usabyeyezu Jean Dieu (screenshot spelling: Usabyezu) | Nkubana Guillaume |
+
+The 12-person Pamela field roster now uses these three updated usernames.
+Personnel change **Kwizerwa Edison replacing Manzi Intime** remains
+recorded, but the latest screenshot supersedes the former
+`maniraguhatheogene01` **current** assignment. Exact portal-account
+handover dates were not provided; previous holder labels are retained
+as a **historical attribution caution**, not asserted historical
+session ownership. Existing legacy usernames `etienne2020` and
+`jeandedieujadomax123` are no longer the active Pamela assignments
+for Ringuyeneza and Usabyeyezu, respectively; they are retained in
+the broad user-name map pending a historical data review. For records
+created across account changes, prefer a dated handover register or
+independent survey attribution over current account labels.
 
 The profile configuration is
 `outputs/Customer_Meter_Photo_QA_Working/config/gicumbi_pamela_team.json`.
@@ -416,17 +429,25 @@ fail if any substantive part of the request cannot be interpreted.
 - `Count LV lines in Gicumbi sector Muko with missing transformer name`
 - `Filter LV lines in Gasabo with voltage = 400`
 - `Show LV poles in Pamela team with missing notes`
+- `Show LV poles in Gicumbi by Kwizerwa Edison with missing manufacturer`
+- `Count LV lines in Gicumbi by Ringuyeneza Frederic`
+- `Find distribution transformers in Gicumbi by Usabyezu Jean Dieu`
 - `Show LV poles in Gicumbi by maniraguhatheogene01`
 - `Find LV poles in Gicumbi sector Muko cell Mwendo`
 
 The first release supports exactly one asset category per request
 (LV poles, distribution transformers, LV lines), one administrative
 district with optional **explicit** sector/cell, a username
-(`by <portal_account>`) or the special 12-account Pamela team,
+(`by <portal_account>`) or one full surveyor name resolved against
+the current user mapping (e.g. `by Kwizerwa Edison`), or the special
+12-account Pamela team,
 and simple verified-field missing/equals comparisons. A request
 mentioning Pamela resolves to Gicumbi and the six planned sectors;
-data captured under the transferred username `maniraguhatheogene01`
-may predate Edison's account transfer.
+data captured under the three reassigned usernames may predate
+their most recent holder changes. Full-name lookup in Gicumbi
+prioritizes the active Pamela profile, including the screenshot
+spelling variant `Usabyezu Jean Dieu`, and rejects ambiguous
+names rather than guessing.
 
 Attribute names are resolved **against the live FeatureServer fields**.
 Pole manufacturer resolves to `Manufacturers` (plural).
