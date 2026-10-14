@@ -35,6 +35,7 @@ FIELDS = {
     "pole": {
         "manufacturer": (r"manufacturers?|make", "manufacturer"),
         "notes": (r"notes?|remarks?", "notes"),
+        "append_cable": (r"append\s+cables?|append_cable|appendcable", "append_cable"),
     },
     "transformer": {
         "name": (r"transformer\s+name|name", "name"),
