@@ -520,7 +520,7 @@ def _build_connected_transformer_groups(
         result = trace_results[object_id]
         display_name = " ".join(str(point.get(TRANSFORMER_POINT_NAME_FIELD) or "").split())
         transformer_ids = result["connected_transformer_objectids"]
-        safe = transformer_ids == {object_id}
+        safe = (transformer_ids == {object_id}) and not bool(result.get("warnings"))
         groups.append({
             "key": str(object_id),
             "transformer_name": display_name or "[Unnamed distribution transformer]",
@@ -528,8 +528,10 @@ def _build_connected_transformer_groups(
             "trace_line_objectids": set(result["line_objectids"]),
             "trackable": safe,
             "match_basis": (
-                "Connected trace; one transformer point"
+                "Connected trace; one transformer point; no warnings"
                 if safe else
+                "Connected trace reported warnings; review source"
+                if result.get("warnings") else
                 f"Connected trace reaches {len(transformer_ids)} transformer points; review"
             ),
             "network_element_count": result["network_element_count"],
@@ -1105,6 +1107,7 @@ def _create_workbook(
     localization_warnings: Sequence[dict[str, Any]] | None = None,
     connected_name_review: Sequence[dict[str, Any]] | None = None,
     tracking_context: dict[str, Any] | None = None,
+    full_feeder_inventory: dict[str, Any] | None = None,
 ) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -1201,6 +1204,14 @@ def _create_workbook(
         )
     if connected_name_review:
         _create_connected_name_review_sheet(workbook, connected_name_review)
+    if full_feeder_inventory is not None:
+        from .feeder_inventory import add_feeder_inventory_sheets
+        add_feeder_inventory_sheets(
+            workbook,
+            full_feeder_inventory["rows"],
+            full_feeder_inventory["summaries"],
+            full_feeder_inventory["scope"],
+        )
 
     workbook.calculation.fullCalcOnLoad = True
     workbook.calculation.forceFullCalc = True
@@ -1223,8 +1234,9 @@ def generate_progress_report(
     version: str = "sde.DEFAULT",
     user_name_map_path: str | Path | None = None,
     gis: Any | None = None,
+    include_full_feeder_inventory: bool = False,
 ) -> dict[str, Any]:
-    """Create one Excel progress report for one or many selected surveyors."""
+    """Create selected-surveyor progress and optionally full trace-connected feeder evidence."""
     start = _as_date(start_date)
     end = _as_date(end_date)
     clean_users = list(dict.fromkeys(
@@ -1234,6 +1246,12 @@ def generate_progress_report(
         raise ValueError("Select at least one surveyor.")
     if end < start:
         raise ValueError("The end date cannot be earlier than the start date.")
+    if include_full_feeder_inventory and len(selected_districts(district)) != 1:
+        raise ValueError(
+            "A full-feeder report needs exactly one source-transformer district. "
+            "Select a district; the report will follow its traced LV lines "
+            "even when they cross outside that district."
+        )
 
     active_gis = _get_gis(gis)
     active_service_url = service_url or os.environ.get(
@@ -1261,6 +1279,7 @@ def generate_progress_report(
     line_areas: dict[int, dict[str, list[str]]] = {}
     all_period_records: dict[int, dict[str, Any]] = {}
     review_reason_by_id: dict[int, str] = {}
+    full_feeder_inventory = None
 
     if boundary_geometry is not None:
         transformer_layer = _transformer_layer(active_gis, active_service_url)
@@ -1276,6 +1295,38 @@ def generate_progress_report(
         transformer_groups, transformer_groups_by_key = _build_connected_transformer_groups(
             transformer_points, trace_results
         )
+        if include_full_feeder_inventory:
+            # Query ALL traced LV sections by source OBJECTID, independently
+            # of selected surveyors and report dates. Do not spatially clip
+            # to the origin district; geometry is looked up afterwards.
+            from .transformer_line_audit import _fetch_line_attributes_by_ids
+            from .feeder_inventory import assess_source_feeder_inventory
+
+            traced_line_ids = sorted({
+                int(oid) for group in transformer_groups
+                for oid in group["trace_line_objectids"]
+            })
+            all_connected_attributes = _fetch_line_attributes_by_ids(
+                line_layer, traced_line_ids, version, [
+                    "OBJECTID","GLOBALID","ASSETGROUP","ASSETTYPE",
+                    "Transformer_Name","created_user","Shape__Length",
+                ],
+            )
+            traced_geometries = _query_line_geometries(
+                line_layer, traced_line_ids, version
+            )
+            if set(traced_geometries) != set(traced_line_ids):
+                raise RuntimeError(
+                    "Full-feeder geometry retrieval is incomplete. "
+                    "Cannot publish a false cross-district report."
+                )
+            geographic_areas = _administrative_areas_for_lines(
+                cell_layer, traced_geometries
+            )
+            full_feeder_inventory = {
+                "all_connected_attributes": all_connected_attributes,
+                "geographic_areas": geographic_areas,
+            }
         intersect_records = _query_lines(
             line_layer,
             where,
@@ -1548,6 +1599,25 @@ def generate_progress_report(
             "surveyors_followed": len(reported_users),
         }
 
+    if full_feeder_inventory is not None:
+        # "records" is the surveyor/date-matched subset. The new feeder
+        # sheet is complete across source transformer topology regardless.
+        full_rows, full_summaries, full_stats = assess_source_feeder_inventory(
+            transformer_groups,
+            full_feeder_inventory["all_connected_attributes"],
+            full_feeder_inventory["geographic_areas"],
+            selected_districts(district)[0],
+            set(records),
+        )
+        full_feeder_inventory = {
+            "rows":full_rows,
+            "summaries":full_summaries,
+            "scope":{
+                **full_stats,
+                "district":selected_districts(district)[0],
+                "version":version,
+            },
+        }
     output_path = Path(output_xlsx).expanduser().resolve()
     _create_workbook(
         output_path,
@@ -1558,6 +1628,7 @@ def generate_progress_report(
         localization_warnings=localization_warnings,
         connected_name_review=connected_name_review,
         tracking_context=tracking_context,
+        full_feeder_inventory=full_feeder_inventory,
     )
 
     return {
@@ -1575,6 +1646,13 @@ def generate_progress_report(
         ),
         "selected_users": clean_users,
         "reported_users": reported_users,
+        "full_feeder_inventory": (
+            full_feeder_inventory["scope"] if full_feeder_inventory is not None
+            else None
+        ),
+        "full_feeder_sheet": (
+            "Full Feeder Segments" if full_feeder_inventory is not None else ""
+        ),
         "matched_line_records": len(records),
         "localized_transformers": len(transformer_groups),
         "ambiguous_connected_transformers": sum(
