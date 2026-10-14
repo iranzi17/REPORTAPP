@@ -338,18 +338,16 @@ live REGUN completions**. Assignment is *by sector*; the work plan does
 not attribute specific cells or individual line segments to a particular
 person within a multi-person team.
 
-**12 planned surveyors**, of which 11 have identifiable portal usernames
+**12 planned surveyors; all 12 have confirmed current portal accounts**
 in `config/report_user_names.json`. A work-plan spelling variation for
 Bimenyimana Emmauel corresponds to configured Bimenyimana Emmanuel.
-**Kwizerwa Edison**, assigned to Rukomo, **replaced Manzi Intime**
-(personnel correction confirmed October 14, 2026). The replacement is now
-recorded in the team profile and roster. His ArcGIS portal username remains
-unverified: the historical `maniraguhatheogene01` account is mapped to
-Manzi Intime and must NOT be reassigned to Edison based only on a staff
-replacement statement.
-
-Kwizerwa Edison is not in the user-name map.
-Never guess a portal login or silently conclude Kwizerwa has no data.
+**Kwizerwa Edison** replaced **Manzi Intime** in Rukomo and, as confirmed
+by the user, now uses the former account `maniraguhatheogene01`.
+The current username-to-name mapping now reads **Kwizerwa Edison**.
+The exact handover date was not provided: historic records saved under this
+shared account may have been created by **Manzi Intime**, and must not be
+personally attributed to Edison solely from `created_user`.
+The replacement and this caveat are preserved in the roster and manifest.
 
 The profile configuration is
 `outputs/Customer_Meter_Photo_QA_Working/config/gicumbi_pamela_team.json`.
@@ -359,10 +357,10 @@ before querying REG.
 
 ### Modes
 
-- **Mapped Pamela team accounts only** (default): includes 11 verified
-  portal accounts. Kwizerwa remains explicitly UNMAPPED unless a user
-  manually provides a real portal username, which is noted as
-  *USER SUPPLIED / REQUIRES PORTAL VERIFICATION*.
+- **Mapped Pamela team accounts only** (default): includes all **12**
+  confirmed current account logins; the former Intime login is now
+  assigned to Edison for current QA routing. Records predating the
+  staff handover require separate attribution review.
 - **All accounts in the six sectors:** useful for identifying unmapped
   users and records made by accounts not in the plan. Such accounts
   must **not** be claimed as Pamela's team members without review.
