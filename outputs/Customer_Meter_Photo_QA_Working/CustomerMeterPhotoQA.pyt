@@ -1146,8 +1146,9 @@ class ReviewGicumbiPamelaTeam:
         "Read-only Gicumbi QA for Senior Supervisor Pamela / Supervisor Derrick. "
         "Applies the six planned sectors from September 2026 to LV lines, "
         "distribution transformers and LV poles consistently. The first "
-        "mode restricts to 11 mapped surveyor accounts; the missing account "
-        "for Kwizerwa Edison is never silently guessed. "
+        "team mode includes all 12 mapped surveyor accounts, including "
+        "Kwizerwa Edison using the transferred Manzi Intime portal account. "
+        "Older records on that account require separate authorship review. "
         "Outputs three QA workbooks, roster CSV and an audit manifest."
     )
     canRunInBackground = False
@@ -1190,15 +1191,10 @@ class ReviewGicumbiPamelaTeam:
         )
         scope.filter.type = "ValueList"
         scope.filter.list = [
-            "Mapped Pamela team accounts only (11 verified)",
+            "Mapped Pamela team accounts only (12 confirmed)",
             "All accounts in the six sectors (find missing usernames)",
         ]
         scope.value = scope.filter.list[0]
-        kwizerwa = arcpy.Parameter(
-            displayName="Kwizerwa Edison portal username (if confirmed)",
-            name="kwizerwa_username", datatype="GPString",
-            parameterType="Optional", direction="Input",
-        )
         service = arcpy.Parameter(
             displayName="Utility Network FeatureServer URL",
             name="service_url", datatype="GPString",
@@ -1221,20 +1217,13 @@ class ReviewGicumbiPamelaTeam:
         version.value = "sde.DEFAULT"
         version.category = "Advanced"
         return [
-            output_folder,start,end,assets,scope,kwizerwa,
+            output_folder,start,end,assets,scope,
             service,boundaries,version,
         ]
 
     def updateMessages(self, parameters):
         if parameters[1].value and parameters[2].value and parameters[2].value < parameters[1].value:
             parameters[2].setErrorMessage("The end date cannot precede the start date.")
-        if parameters[5].valueAsText:
-            try:
-                import re as _re
-                if not _re.fullmatch(r"[A-Za-z0-9._-]{3,80}",parameters[5].valueAsText.strip()):
-                    raise ValueError("Use the real ArcGIS portal username (letters, digits, _ . -).")
-            except ValueError as exc:
-                parameters[5].setErrorMessage(str(exc))
 
     def execute(self, parameters, messages):
         choices = {
@@ -1255,22 +1244,19 @@ class ReviewGicumbiPamelaTeam:
             "Nyankenke, Rukomo, Rushaki. Supervisor Derrick. "
             "All source edits are disabled."
         )
-        if not parameters[5].valueAsText:
-            arcpy.AddWarning(
-                "Kwizerwa Edison is listed in the work plan but has NO "
-                "verified portal username in the REPORTAPP mapping. "
-                "His data may be omitted in team-only mode. "
-                "Use the all-accounts mode to identify unmatched accounts."
-            )
+        arcpy.AddWarning(
+            "Kwizerwa Edison now uses the account formerly held by Manzi Intime "
+            "(maniraguhatheogene01). The handover date is unknown; do not "
+            "attribute older records to either individual without other evidence."
+        )
         summary = run_gicumbi_pamela_profile(
             output_folder=parameters[0].valueAsText,
             start_date=parameters[1].value,
             end_date=parameters[2].value,
             assets=asset,scope=scope,
-            kwizerwa_username=parameters[5].valueAsText or None,
-            service_url=parameters[6].valueAsText or None,
-            boundary_service_url=parameters[7].valueAsText or None,
-            version=parameters[8].valueAsText or "sde.DEFAULT",
+            service_url=parameters[5].valueAsText or None,
+            boundary_service_url=parameters[6].valueAsText or None,
+            version=parameters[7].valueAsText or "sde.DEFAULT",
         )
         for report in summary["reports"]:
             arcpy.AddMessage(
