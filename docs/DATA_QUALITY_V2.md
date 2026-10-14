@@ -341,7 +341,14 @@ person within a multi-person team.
 **12 planned surveyors**, of which 11 have identifiable portal usernames
 in `config/report_user_names.json`. A work-plan spelling variation for
 Bimenyimana Emmauel corresponds to configured Bimenyimana Emmanuel.
-**Kwizerwa Edison**, assigned to Rukomo, is not in the user-name map.
+**Kwizerwa Edison**, assigned to Rukomo, **replaced Manzi Intime**
+(personnel correction confirmed October 14, 2026). The replacement is now
+recorded in the team profile and roster. His ArcGIS portal username remains
+unverified: the historical `maniraguhatheogene01` account is mapped to
+Manzi Intime and must NOT be reassigned to Edison based only on a staff
+replacement statement.
+
+Kwizerwa Edison is not in the user-name map.
 Never guess a portal login or silently conclude Kwizerwa has no data.
 
 The profile configuration is
