@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 from .smart_query import _load_admin, ASSET_GROUPS, ASSET_LAYERS
+from .asset_quality import ASSETS
 
 ASSET_TERMS = {
     "pole": r"\b(?:lv\s+)?poles?\b",
@@ -289,6 +290,11 @@ def compile_template_filter(plan, fields, domains=None):
         })
     joiner=" OR " if plan.condition_mode=="any" else " AND "
     sql="ASSETGROUP IN ("+",".join(map(str,ASSET_GROUPS[plan.asset]))+")"
+    if plan.asset in ASSETS:
+        if "ASSETTYPE" not in {str(f["name"]).upper() for f in fields}:
+            raise ValueError("The live template lacks ASSETTYPE required to identify eligible assets.")
+        allowed=sorted(ASSETS[plan.asset]["types"])
+        sql+=" AND ASSETTYPE IN ("+",".join(map(str,allowed))+")"
     if terms:
         sql+=" AND ("+joiner.join(terms)+")"
     return sql,tuple(dict.fromkeys(x["live_field"] for x in resolved)),resolved
