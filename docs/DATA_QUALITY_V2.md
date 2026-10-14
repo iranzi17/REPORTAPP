@@ -395,3 +395,81 @@ available; the tool never falsely reports full completion.
 - Geographical filtering uses chosen administrative polygons; source
   District/Sector/Cell attributes on poles may be absent. No editing
   or Utility Network topology validation is performed.
+
+
+## Ask REPORTAPP: plain-language query and filter (Oct 14, 2026)
+
+**New tool:** `Ask REPORTAPP - Query and Filter Attributes` in
+`outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt`.
+
+This is the first **controlled natural-language interpreter**, not an
+unrestricted LLM or conversational agent. It converts only recognized
+instructions to a whitelisted attribute SQL expression and (when
+provided) a spatial selection against official district/sector/cell
+boundaries. It **does not** execute SQL supplied by the user and will
+fail if any substantive part of the request cannot be interpreted.
+
+**Examples to paste:**
+
+- `Show LV poles in Gicumbi with missing manufacturer`
+- `Find distribution transformers in Burera with protection switch is unknown`
+- `Count LV lines in Gicumbi sector Muko with missing transformer name`
+- `Filter LV lines in Gasabo with voltage = 400`
+- `Show LV poles in Pamela team with missing notes`
+- `Show LV poles in Gicumbi by maniraguhatheogene01`
+- `Find LV poles in Gicumbi sector Muko cell Mwendo`
+
+The first release supports exactly one asset category per request
+(LV poles, distribution transformers, LV lines), one administrative
+district with optional **explicit** sector/cell, a username
+(`by <portal_account>`) or the special 12-account Pamela team,
+and simple verified-field missing/equals comparisons. A request
+mentioning Pamela resolves to Gicumbi and the six planned sectors;
+data captured under the transferred username `maniraguhatheogene01`
+may predate Edison's account transfer.
+
+Attribute names are resolved **against the live FeatureServer fields**.
+Pole manufacturer resolves to `Manufacturers` (plural).
+Transformer original correction fields use exact/unique known aliases,
+and LV line fields use the existing REG layer spellings (such as
+`CondustorSize` and `Voltage_Level_kV`). The interpreter refuses
+unrecognized fields, operators, places and any write/delete requests.
+
+**Two modes:**
+
+1. **Preview query and count only (default).** Displays parsed query,
+   generated SQL, spatial boundary criteria and matching feature count.
+   Saves a JSON interpretation/audit log.
+2. **Create local filtered layer and add to map.** Selects matching
+   features from the configured services, copies them **only to the
+   ArcGIS scratch geodatabase**, confirms copied count, and adds that
+   local feature class to the current map. Refuses copies above 25,000
+   features until the query is narrowed. Network source features,
+   fields, associations and topology remain unchanged.
+
+**Important limitations:**
+- Live ArcGIS Pro test of REST-service layer and selection functionality
+  is still required; unit tests use simulated ArcPy.
+- The ArcPy FeatureServer layer connection is not an explicit
+  `gdb_version` override; compare the map's connected service version.
+  For branch-version-aware filtering, build a separate authenticated
+  feature layer workflow in a future release.
+- This tool filters **records based on attributes**. It does not yet
+  hide/show individual attribute columns or provide a persistent
+  multi-turn chat. Natural language involving tracing, feeder voltage
+  drop, between-pole connectivity, fuzzy names or complex formulas
+  should fail closed, then be implemented as separate verified actions.
+- `missing manufacturer` queries find blank manufacturer fields;
+  they include poles documented as having **no nameplate**. For the
+  true manufacturer *QA gap* excluding verified no-nameplate exceptions,
+  use `Watch LV Pole Data Quality`, which checks `Notes`.
+- Administrative boundaries are spatially intersected, so border
+  features may be present in multiple areas; exact district labels are
+  never guessed from surveyor names.
+- FeatureServer query access depends on ArcGIS Pro being signed into
+  an account with permission for the REG Utility Network service.
+
+**Next iteration:** add history-based dialogue, safe column projection,
+filter conjunctions and a schema-aware local LLM (optional). Require
+explicit confirmation for anything changing live GIS; future
+conversational interpretation does not bypass technical validation.
