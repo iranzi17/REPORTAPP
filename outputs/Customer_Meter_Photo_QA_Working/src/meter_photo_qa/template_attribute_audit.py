@@ -98,10 +98,17 @@ def parse_surveyor_template_request(request):
         raise ValueError("Start with 'Show surveyors...' or 'Give me surveyors...'.")
     if not re.search(r"\bsurveyors?\b",raw,re.I):
         raise ValueError("This audit summarizes affected surveyors. Include the word 'surveyors'.")
-    assets=[]
+    # An explicit 'on LV lines' context takes precedence over 'transformer
+    # name', which is a line attribute and not a second asset category.
+    explicit=[]
     for key,pattern in ASSET_TERMS.items():
-        if re.search(pattern,raw,re.I):
-            assets.append(key)
+        if re.search(r"\b(?:on|for)\s+(?:the\s+)?"+pattern+
+                     r"\s+in\s+",raw,re.I):
+            explicit.append(key)
+    assets=explicit or [
+        key for key,pattern in ASSET_TERMS.items()
+        if re.search(pattern,raw,re.I)
+    ]
     if len(assets)!=1:
         raise ValueError("Specify one asset category: LV poles, distribution transformers or LV lines.")
     asset=assets[0]
@@ -190,6 +197,7 @@ def parse_surveyor_template_request(request):
         )
     key,matched=sorted(matches,key=lambda t:t[1].start())[0]
     field_raw=main[:matched.start()].strip()
+    field_raw=re.sub(r"^(?:with|where|that\s+have)\s+","",field_raw,flags=re.I)
     field_raw=re.sub(r"\s+(?:with\s+)?(?:the\s+)?values?$","",field_raw,flags=re.I).strip()
     field=_strip_field_phrase(field_raw,asset)
     if not field:
