@@ -23,14 +23,28 @@ from .transformer_line_names import assess_line_transformer_names
 def run_lv_feeder_report(output_folder, district, usernames=None,
                          service_url=None, boundary_service_url=None,
                          version="sde.DEFAULT", gis=None,
-                         progress=None, transformer_asset_types=(1,2,3,4,5,6)):
-    """All line segments connected to district-starting transformers, across borders.
+                         progress=None, transformer_asset_types=(1,2,3,4,5,6),
+                         method="geometry", endpoint_tolerance=1.5,
+                         seed_tolerance=7.0):
+    """LV feeder report: provisional geometry by default, topology by choice.
 
     Username filters select report rows, NEVER trace seeds or topology extent.
     Date filters are intentionally not applied to avoid truncating feeders.
     """
     if not district:
         raise ValueError("Starting-transformer district is required.")
+    if method == "geometry":
+        from .geometry_feeder_runner import run_provisional_geometry_feeder_report
+        return run_provisional_geometry_feeder_report(
+            output_folder, district, usernames=usernames,
+            service_url=service_url,
+            boundary_service_url=boundary_service_url,
+            version=version, gis=gis, progress=progress,
+            endpoint_tolerance=endpoint_tolerance,
+            seed_tolerance=seed_tolerance,
+        )
+    if method != "topology":
+        raise ValueError("Feeder report method must be geometry or topology.")
     from arcgis.features import FeatureLayer
     active=_get_gis(gis)
     service=str(service_url or DEFAULT_LINE_SERVICE_URL).rstrip("/")
