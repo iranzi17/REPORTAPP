@@ -83,7 +83,7 @@ class FeederWorkflowTests(unittest.TestCase):
             self.assertEqual(wb["Engineering Review"].max_row,2)
             self.assertEqual(wb["Connected LV Lines"]["B2"].value,"{L1}")
             self.assertEqual(wb["Connected LV Lines"]["B3"].value,"{L3}")
-            self.assertIn("across",result["boundary_rule"])
+            self.assertIn("cross borders",result["boundary_rule"])
             wb.close()
 
     def test_empty_destination_fails_explicitly(self):
