@@ -67,6 +67,58 @@ class AssetQualityTests(unittest.TestCase):
             self.assertEqual(result["values"]["manufacturer_status"],
                              "DOCUMENTED_NO_NAMEPLATE")
 
+    def test_live_reg_pole_schema_uses_plural_manufacturers(self):
+        # Actual Structure Junction layer 12 fields verified against the
+        # first 66,915-pole QA report.
+        fields = [
+            {"name": "Manufacturers", "alias": "Manufacturers"},
+            {"name": "CountryOfManufacturer", "alias": "Country Of Manufacturer"},
+            {"name": "Notes", "alias": "Notes"},
+        ]
+        mapping = resolve_fields(fields, "pole")
+        self.assertEqual(mapping, {
+            "manufacturer": "Manufacturers",
+            "notes": "Notes",
+        })
+        for pole_type in (1, 2, 3):
+            good = evaluate_asset({
+                "GLOBALID": "{POLE}", "OBJECTID": 15,
+                "ASSETGROUP": 7, "ASSETTYPE": pole_type,
+                "Manufacturers": "Company X", "Notes": "",
+            }, "pole", mapping)
+            self.assertEqual(good["status"], "NO_GAPS_FOUND")
+            self.assertEqual(good["values"]["manufacturer_status"], "RECORDED")
+
+            wrong = evaluate_asset({
+                "GLOBALID": "{POLE}", "OBJECTID": 16,
+                "ASSETGROUP": 7, "ASSETTYPE": pole_type,
+                "Manufacturers": None, "Notes": "Name plate not clear",
+            }, "pole", mapping)
+            self.assertEqual(wrong["status"], "GAP")
+
+    def test_kinyarwanda_explicit_absence_of_pole_nameplate(self):
+        fields = {"manufacturer": "Manufacturers", "notes": "Notes"}
+        for note in ("Nta name plate iriho", "Nta nameplate iriho"):
+            with self.subTest(note=note):
+                result = evaluate_asset({
+                    "GLOBALID": "{POLE}", "OBJECTID": 123,
+                    "ASSETGROUP": 7, "ASSETTYPE": 1,
+                    "Manufacturers": None, "Notes": note,
+                }, "pole", fields)
+                self.assertEqual(result["status"], "NO_GAPS_FOUND")
+                self.assertEqual(
+                    result["values"]["manufacturer_status"],
+                    "DOCUMENTED_NO_NAMEPLATE",
+                )
+        for note in ("Name plate not clear", "Nameplate is not clear",
+                     "I could not read the nameplate", "Nta name plate irimo?"):
+            result = evaluate_asset({
+                "GLOBALID": "{POLE}", "OBJECTID": 124,
+                "ASSETGROUP": 7, "ASSETTYPE": 1,
+                "Manufacturers": None, "Notes": note,
+            }, "pole", fields)
+            self.assertEqual(result["status"], "GAP", note)
+
     def test_absent_notes_field_blocks_complete_result(self):
         result = evaluate_asset({
             "ASSETGROUP":7, "ASSETTYPE":2, "GLOBALID":"P3",
