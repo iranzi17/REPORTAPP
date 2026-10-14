@@ -10,6 +10,7 @@ from collections import Counter,defaultdict
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 
 from .asset_quality import domain_map
 from .progress_report import (
@@ -259,7 +260,6 @@ def run_template_surveyor_audit(
                 except Exception: pass
     stamp=f"{datetime.now():%Y%m%d_%H%M%S_%f}"
     location=re.sub(r"[^A-Za-z0-9_-]+","_",plan.district)
-    from re import sub as re_sub
     destination=output/f"Surveyor_Template_Audit_{plan.asset}_{location}_{stamp}.xlsx"
     metrics=_excel(destination,plan,criteria,records,sql,geographic,asset_url,"ArcPy selected FeatureServer view")
     result={
