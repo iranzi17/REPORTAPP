@@ -41,6 +41,7 @@ jobs:
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_smart_query_runner.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_smart_query_toolbox.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_lv_feeder_report_prompt.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_lv_feeder_report_workflow.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_progress_report.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_transformer_line_names.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_transformer_line_audit_workflow.py' -v
