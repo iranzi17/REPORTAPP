@@ -75,12 +75,42 @@ class SmartQueryParserTests(unittest.TestCase):
         ])
         self.assertIn("'maniraguhatheogene01'",where)
 
+    def test_current_gicumbi_human_names_are_resolved_to_exact_accounts(self):
+        cases = [
+            ("Kwizerwa Edison", "ninamenye9683"),
+            ("Ringuyeneza Frederic", "maniraguhatheogene01"),
+            ("Usabyezu Jean Dieu", "janviersafari515"),
+            ("Usabyeyezu Jean Dieu", "janviersafari515"),
+        ]
+        for person, username in cases:
+            with self.subTest(person=person):
+                plan = parse_request(
+                    f"Show LV poles in Gicumbi by {person} with missing manufacturer"
+                )
+                self.assertEqual(plan.surveyors,(username,))
+                self.assertEqual(plan.conditions[0].key,"manufacturer")
+                sql = compile_attribute_where(plan,[
+                    {"name":"ASSETGROUP","type":"esriFieldTypeInteger"},
+                    {"name":"created_user","type":"esriFieldTypeString"},
+                    {"name":"Manufacturers","type":"esriFieldTypeString"},
+                ])
+                self.assertIn(f"'{username}'",sql)
+                self.assertIn("Manufacturers IS NULL",sql)
+
+    def test_surveyor_name_not_in_current_roster_is_not_guessed(self):
+        with self.assertRaisesRegex(ValueError,"Cannot verify surveyor"):
+            parse_request("Show LV poles in Gicumbi by Random Fake Surveyor")
+        with self.assertRaises(ValueError):
+            parse_request("Show LV poles in Gicumbi by Edison")
+
     def test_pamela_team_has_six_sectors_and_current_12_accounts(self):
         plan=parse_request("Show LV poles in Pamela team with missing manufacturer")
         self.assertEqual(plan.district,"Gicumbi")
         self.assertTrue(plan.pamela_team)
         self.assertEqual(len(plan.surveyors),12)
         self.assertIn("maniraguhatheogene01",plan.surveyors)
+        self.assertIn("ninamenye9683",plan.surveyors)
+        self.assertIn("janviersafari515",plan.surveyors)
         where=boundary_where(plan)
         self.assertIn("'MUKO'",where)
         self.assertIn("'RUSH AKI'".replace(" ",""),where)
