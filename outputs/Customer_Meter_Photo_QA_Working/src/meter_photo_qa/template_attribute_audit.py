@@ -188,8 +188,9 @@ def parse_surveyor_template_request(request):
             "'height of pole greater than 12'. Unsupported expressions are not ignored."
         )
     key,matched=sorted(matches,key=lambda t:t[1].start())[0]
-    field=_strip_field_phrase(main[:matched.start()],asset)
-    field=re.sub(r"\s+(?:with\s+)?(?:the\s+)?values?$","",field,flags=re.I).strip()
+    field_raw=main[:matched.start()].strip()
+    field_raw=re.sub(r"\s+(?:with\s+)?(?:the\s+)?values?$","",field_raw,flags=re.I).strip()
+    field=_strip_field_phrase(field_raw,asset)
     if not field:
         raise ValueError("Numeric comparison is missing the field name.")
     unit=(matched.groupdict().get("unit") or "").lower()
