@@ -1358,9 +1358,11 @@ class ReviewGicumbiPamelaTeam:
             "All source edits are disabled."
         )
         arcpy.AddWarning(
-            "Kwizerwa Edison now uses the account formerly held by Manzi Intime "
-            "(maniraguhatheogene01). The handover date is unknown; do not "
-            "attribute older records to either individual without other evidence."
+            "Gicumbi roster updated: Kwizerwa Edison uses ninamenye9683, "
+            "Ringuyeneza Frederic uses maniraguhatheogene01 and "
+            "Usabyeyezu Jean Dieu uses janviersafari515. "
+            "Earlier account-holder labels may describe older records; "
+            "handover dates are not confirmed."
         )
         summary = run_gicumbi_pamela_profile(
             output_folder=parameters[0].valueAsText,
