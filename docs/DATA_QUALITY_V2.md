@@ -604,3 +604,63 @@ it still requires its first live REG query. Large national requests
 may be slower and need a targeted surveyor. The tool does not yet do
 authoritative spatial attribution of every downstream segment to its
 district/sector/cell, nor estimate conductor loading or voltage drop.
+
+
+## Consolidated "Prepare Report" replaces geometry-only output (Oct 14, 2026)
+
+**User correction:** the earlier
+`Prepare LV Lines Report for ninamenye9683 in Gicumbi` command
+created only `LV_Geometry_Continuity_Gicumbi_....xlsx` with 1,755
+nationwide same-creator LV line candidates, 123 provisionally
+associated LV line segments, and 1,632 unassociated candidates.
+That file is a topology-independent *continuity aid*, **not** the
+full asset QA report the user had been receiving.
+
+**Changed behavior:** the existing **Ask REPORTAPP** command now runs
+**all three original QA audit engines** using the same district,
+surveyor account(s) and user-selectable created/edited period:
+
+1. `run_quality_watcher` — LV lines including outstanding priority
+   gap categories, completion score, surveyor summary and review queue.
+2. `run_asset_quality(asset="transformer")` — distribution
+   transformers, seven historical attribute correction categories and
+   duplicate GlobalID register.
+3. `run_asset_quality(asset="pole")` — LV Pole checks, including
+   the live `Manufacturers` (plural) field, missing-nameplate
+   documented `Notes` exception and duplicate GlobalID register.
+
+Output is **one consolidated Excel workbook** with
+`Combined Summary`, `Surveyor Comparison`, `Reporting Rules`,
+`Sheet Index`, and renamed prefixed copies of all component
+worksheets (e.g. `LV Line Details`, `LV Outstanding LV Gaps`,
+`LV Review Queue`, `DT Asset Details`, `Pole Asset Details`,
+and duplicate/source metadata worksheets). An accompanying
+`Components` folder contains the **unchanged original workbooks**
+for users requiring native formatting, data-validation controls,
+existing review workbooks or other source-specific functionality.
+All original audit tests/rules remain active.
+
+The report has visible QA From/To date controls, defaulting to
+1 January 2026 and today's date (inclusive). Users can change them.
+The chosen destination folder receives a single timestamped
+`REG_Combined_LV_Quality_<district>_<timestamp>.xlsx` inside an
+organizing subfolder. Source GIS data are never edited.
+
+**Cross-district feeders are an optional, separately labeled
+geometry-continuity appendix**, not a replacement for QA. Main
+attribute QA is scoped spatially to the requested district;
+the appendix searches the chosen collector's LV lines nationally
+from starting distribution transformers in the district without
+clipping at district boundaries. Inaccurate or dirty topology is
+not required. Predictions remain provisional: same creator and
+endpoint continuity do not verify source, energized paths or phases.
+When the optional appendix fails or cannot run (e.g. national data
+limit), the mandatory three original QA audits can still finish.
+`Combined Summary` explicitly labels the appendix unavailable,
+preventing the absence of geometry evidence from appearing clean.
+
+**Failure protection:** if *any* of the three mandatory original QA
+audits fails, the consolidated report is not reported as complete.
+Earlier successful original component workbooks are preserved with
+an `INCOMPLETE` manifest. The backend never fabricates missing
+surveyors, transformer origins or gap counts.
