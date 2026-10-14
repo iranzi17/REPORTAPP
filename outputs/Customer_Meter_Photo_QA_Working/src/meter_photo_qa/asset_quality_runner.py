@@ -374,6 +374,15 @@ def run_asset_quality(
         )
     results.sort(key=lambda x: (x["status"] != "GAP", x["username"].casefold(), x["objectid"]))
     counts = summarize_assets(results)
+    surveyor_rows = defaultdict(list)
+    for row in results:
+        surveyor_rows[row["username"]].append(row)
+    per_surveyor = [
+        {"username": username, **summarize_assets(records)}
+        for username, records in sorted(
+            surveyor_rows.items(), key=lambda item: item[0].casefold()
+        )
+    ]
     selected = selected_districts(district)
     selected_users = sorted({str(user).strip() for user in (usernames or [])
                              if str(user).strip()}, key=str.casefold)
@@ -385,6 +394,7 @@ def run_asset_quality(
         "date_end": end.isoformat(), **counts,
         "surveyor_filter": selected_users,
         "returned_surveyor_count": len({item["username"].casefold() for item in results}),
+        "per_surveyor": per_surveyor,
         "incomplete_recorded_locations": sum(
             not (item["recorded_district"] and item["recorded_sector"] and item["recorded_cell"])
             for item in results
