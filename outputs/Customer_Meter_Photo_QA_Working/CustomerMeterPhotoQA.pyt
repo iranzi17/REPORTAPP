@@ -58,6 +58,7 @@ try:
     from meter_photo_qa import smart_query as _smart_query
     from meter_photo_qa import smart_query_runner as _smart_query_runner
     from meter_photo_qa import lv_feeder_report as _lv_feeder_report
+    from meter_photo_qa import combined_qa_report as _combined_qa_report
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -74,6 +75,7 @@ try:
     _smart_query = importlib.reload(_smart_query)
     _smart_query_runner = importlib.reload(_smart_query_runner)
     _lv_feeder_report = importlib.reload(_lv_feeder_report)
+    _combined_qa_report = importlib.reload(_combined_qa_report)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -102,6 +104,7 @@ scan_electric_line_duplicate_globalids = _duplicate_line_scanner.scan_electric_l
 run_gicumbi_pamela_profile = _gicumbi_pamela_profile.run_gicumbi_pamela_profile
 run_smart_query = _smart_query_runner.run_smart_query
 run_lv_feeder_report = _lv_feeder_report.run_lv_feeder_report
+run_combined_qa_report = _combined_qa_report.run_combined_qa_report
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -1153,8 +1156,10 @@ class AskReportApp:
     """Simple-language read-only attribute/spatial queries from ArcGIS Pro."""
     label = "Ask REPORTAPP - Query and Filter Attributes"
     description = (
-        "Type a plain-language query about LV lines, LV poles, or "
-        "distribution transformers. The tool validates live field names "
+        "Type a plain-language query or 'Prepare LV Lines Report for "
+        "Kwizerwa Edison in Gicumbi' to create a consolidated original "
+        "LV Lines, Distribution Transformer and LV Pole QA Excel report. "
+        "The tool validates live field names "
         "and previews a filtered count. Optionally make a local feature "
         "class containing matches and add it to the current map. "
         "No edits are made to the REG FeatureServer. For example: "
@@ -1233,8 +1238,20 @@ class AskReportApp:
             parameterType="Required", direction="Input",
         )
         endpoint_gap.value = 1.5
+        qa_start = arcpy.Parameter(
+            displayName="QA from date (created or last edited)",
+            name="qa_start_date", datatype="GPDate",
+            parameterType="Required", direction="Input",
+        )
+        qa_start.value = datetime(2026, 1, 1)
+        qa_end = arcpy.Parameter(
+            displayName="QA to date (inclusive)",
+            name="qa_end_date", datatype="GPDate",
+            parameterType="Required", direction="Input",
+        )
+        qa_end.value = datetime.combine(datetime.now().date(), datetime.min.time())
         return [query, mode, report, service, boundary, destination,
-                feeder_method, endpoint_gap]
+                feeder_method, endpoint_gap, qa_start, qa_end]
 
     def updateMessages(self, params):
         if params[0].valueAsText:
@@ -1266,23 +1283,42 @@ class AskReportApp:
             )
             if method == "geometry":
                 arcpy.AddWarning(
-                    "PROVISIONAL GEOMETRY MODE: does NOT verify energized "
-                    "connectivity or network topology. Matching endpoints "
-                    "and created_user can suggest feeder continuity but "
-                    "must not be treated as an engineering-certified source."
+                    "Cross-district continuity will be an OPTIONAL PROVISIONAL "
+                    "APPENDIX. The three original QA audits are mandatory and "
+                    "their gap counts are not replaced by geometric estimates."
                 )
-            report = run_lv_feeder_report(
+            arcpy.AddMessage(
+                "Preparing the ORIGINAL three-asset QA checks in one Excel workbook: "
+                "LV Lines, Distribution Transformers, and LV Poles."
+            )
+            report = run_combined_qa_report(
                 output_folder=destination,
                 district=parsed["district"],
                 usernames=parsed["usernames"] or None,
+                start_date=parameters[8].value,
+                end_date=parameters[9].value,
                 service_url=parameters[3].valueAsText or None,
                 boundary_service_url=parameters[4].valueAsText or None,
+                include_continuity=(method=="geometry"),
                 progress=arcpy.AddMessage,
-                method=method,
-                endpoint_tolerance=float(parameters[7].value or 1.5),
             )
-            arcpy.AddMessage(json.dumps(report, indent=2, default=str))
-            arcpy.AddMessage("LV Lines report saved: " + report["output_xlsx"])
+            arcpy.AddMessage(
+                "Combined QA report saved: " + report["output_xlsx"]
+            )
+            arcpy.AddMessage(
+                "Unmodified original component workbooks: " +
+                report["components_folder"]
+            )
+            if report["geometry"]["status"] != "COMPLETE":
+                arcpy.AddWarning(
+                    "Provisional cross-district continuity NOT included: " +
+                    str(report["geometry"].get("reason",report["geometry"]["status"]))
+                )
+            arcpy.AddMessage(
+                f"All three mandatory QA checks completed. "
+                f"Scope {report['district']} from {report['start_date']} "
+                f"to {report['end_date']}."
+            )
             return
         mode = (
             "local_copy" if parameters[1].valueAsText.startswith(
