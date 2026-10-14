@@ -45,8 +45,10 @@ ASSETS = {
         "checks": {
             "manufacturer": ["Manufacturers", "Manufacturer", "Pole_Manufacturer", "Manufacturer_Name", "ManufacturerName", "Make"],
             "notes": ["Notes", "Remarks", "Pole_Notes"],
+            "append_cable": ["Append_Cable", "AppendCable", "Append Cable",
+                             "Append_Cables", "AppendCables"],
         },
-        "priority": ("manufacturer", "notes"),
+        "priority": ("manufacturer", "notes", "append_cable"),
     },
 }
 UNKNOWN = {"", "unknown", "select value", "select", "n/a", "na", "null", "none", "-", "not known", "not recorded"}
@@ -190,6 +192,28 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
         # installations, but 0 can be an intentional future/unused asset.
         # Never infer missing from numerical zero without an agreed business rule.
     else:
+        append_field = mapping.get("append_cable")
+        if not append_field:
+            values["append_cable_status"] = "NOT_VERIFIED_FIELD"
+        else:
+            raw = attributes.get(append_field)
+            coded_domain = (domains or {}).get(append_field, {})
+            # ArcGIS may return a coded zero either as integer 0 or as
+            # the text "0". A coded "No" is an explicit response, not
+            # an incomplete value. An unmapped text zero is not assumed
+            # to mean No.
+            if isinstance(raw, str) and raw.strip() == "0":
+                domain_value = next((label for code, label in coded_domain.items()
+                                     if str(code).strip() == "0"), None)
+                missing_append = (not domain_value or
+                                  str(domain_value).strip().casefold() in UNKNOWN)
+            else:
+                missing_append = missing_value(raw, coded_domain)
+            if missing_append:
+                values["append_cable_status"] = "MISSING_OR_UNKNOWN"
+                issues.append("Append Cable missing/unknown (mandatory LV pole field)")
+            else:
+                values["append_cable_status"] = "RECORDED"
         field = mapping.get("manufacturer")
         if field and missing_value(attributes.get(field), (domains or {}).get(field)):
             if has_explicit_no_nameplate_note(note):
