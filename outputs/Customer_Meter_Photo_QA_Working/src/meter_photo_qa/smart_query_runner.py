@@ -115,10 +115,18 @@ def run_smart_query(
                 "Manufacturer missing means the attribute is blank: a documented no-nameplate exception is evaluated by Watch LV Pole Data Quality.",
             ],
         }
-        if plan.pamela_team:
+        if plan.pamela_team or any(
+            user.casefold() in {
+                "ninamenye9683", "maniraguhatheogene01", "janviersafari515"
+            } for user in plan.surveyors
+        ):
             result["cautions"].append(
-                "Kwizerwa Edison now uses maniraguhatheogene01; earlier activity "
-                "may belong to the prior account holder Manzi Intime."
+                "Gicumbi roster updated on 2026-10-14: ninamenye9683 = "
+                "Kwizerwa Edison; maniraguhatheogene01 = Ringuyeneza Frederic; "
+                "janviersafari515 = Usabyeyezu Jean Dieu. Previous holder "
+                "labels are preserved in the Pamela profile; transfer dates "
+                "are unknown. Do not attribute older records to current "
+                "holders solely from created_user."
             )
         if mode == "local_copy":
             if count > MAX_COPY:
