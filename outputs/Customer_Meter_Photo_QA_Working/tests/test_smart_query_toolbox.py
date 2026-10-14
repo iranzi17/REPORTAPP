@@ -169,7 +169,7 @@ class SmartToolUiTests(unittest.TestCase):
             self.assertEqual(captured["request"],params[0].value)
             self.assertTrue(any("14 matching features" in str(message)
                                 for message in self.output))
-            self.assertTrue(any("surveyor template audit Excel" in str(message).lower()
+            self.assertTrue(any("surveyor template audit excel" in str(message).lower()
                                 for message in self.output))
 
 if __name__=="__main__":
