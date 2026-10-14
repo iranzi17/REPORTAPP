@@ -119,7 +119,7 @@ def _surveyor_rollup(line_result, transformer_result, pole_result):
             continue
         # May have difference in shape across watcher versions;
         # detailed outstanding totals are derived from watcher report.
-        for possible in ("outstanding_lines","with_gaps","lines_with_gaps"):
+        for possible in ("affected_lines","outstanding_lines","with_gaps","lines_with_gaps"):
             if possible in item:
                 records[key]["lv_outstanding"]=int(item[possible] or 0)
                 break
@@ -130,7 +130,7 @@ def _surveyor_rollup(line_result, transformer_result, pole_result):
         records[key]["lv_checked"]=int(item.get("total_lines") or 0)
         records[key]["lv_outstanding"]=max(
             records[key]["lv_outstanding"],
-            int(item.get("outstanding_lines") or item.get("priority_gap_lines") or 0),
+            int(item.get("affected_lines") or item.get("outstanding_lines") or item.get("priority_gap_lines") or 0),
         )
     for source,prefix in ((transformer_result,"dt"),(pole_result,"pole")):
         for item in source.get("per_surveyor",[]):
