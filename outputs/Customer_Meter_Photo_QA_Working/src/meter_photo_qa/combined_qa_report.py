@@ -278,7 +278,7 @@ def run_combined_qa_report(
     output_folder, district, usernames=None,
     start_date="2026-01-01",end_date=None,
     include_continuity=True,service_url=None,boundary_service_url=None,
-    version="sde.DEFAULT",gis=None,progress=None,
+    version="sde.DEFAULT",gis=None,progress=None,endpoint_tolerance=1.5,
 ):
     """Build one master workbook and retain the original QA reports.
 
@@ -364,7 +364,7 @@ def run_combined_qa_report(
                     usernames=users,service_url=service_url,
                     boundary_service_url=boundary_service_url,
                     version=version,gis=gis,progress=progress,
-                    method="geometry",
+                    method="geometry",endpoint_tolerance=endpoint_tolerance,
                 )
                 geometry["status"]="COMPLETE"
                 outcome["components"]["geometry"]=geometry["output_xlsx"]
