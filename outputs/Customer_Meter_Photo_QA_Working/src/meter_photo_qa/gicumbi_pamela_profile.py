@@ -71,7 +71,7 @@ def load_pamela_profile(path: str | Path | None = None, user_map_path: str | Pat
     return profile, sorted(mapped, key=str.casefold), unresolved
 
 
-def _roster_csv(path, profile, override_username):
+def _roster_csv(path, profile):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w",encoding="utf-8-sig",newline="") as fh:
         writer=csv.writer(fh)
@@ -83,12 +83,10 @@ def _roster_csv(path, profile, override_username):
         ])
         for sector in profile["sectors"]:
             for person in sector["surveyors"]:
-                username = person.get("username") or (
-                    override_username if person["name_in_plan"] == "Kwizerwa Edison" else ""
-                )
+                username = person.get("username") or ""
                 status = (
-                    "VERIFIED EXISTING USER MAP" if person.get("username")
-                    else "USER SUPPLIED / REQUIRES PORTAL VERIFICATION" if username
+                    "CONFIRMED CURRENT USER - PRIOR ACCOUNT HOLDER" if person.get("replaces") and username
+                    else "VERIFIED EXISTING USER MAP" if username
                     else "UNMAPPED - NOT INCLUDED IN TEAM-ONLY FILTER"
                 )
                 writer.writerow([
@@ -101,8 +99,9 @@ def _roster_csv(path, profile, override_username):
                 ])
 
 
-def _brief_asset_result(asset, result, members):
+def _brief_asset_result(asset, result, members, transferred_accounts=None):
     known = {member.casefold() for member in members}
+    shared = {member.casefold() for member in (transferred_accounts or [])}
     if asset == "lv_line":
         by_user = result.get("user_summary", [])
         user_rows = [{
@@ -134,6 +133,10 @@ def _brief_asset_result(asset, result, members):
             "KNOWN_PAMELA_ACCOUNT" if row["username"].casefold() in known
             else "UNMAPPED_OR_OTHER_ACCOUNT_IN_AREA"
         )
+        row["historical_attribution"] = (
+            "ACCOUNT_TRANSFER_DATE_UNKNOWN: cannot establish personal authorship of older records"
+            if row["username"].casefold() in shared else ""
+        )
     return {
         "asset": asset, "file":result.get("output_xlsx",""),
         **metrics,
@@ -151,7 +154,6 @@ def run_gicumbi_pamela_profile(
     end_date,
     assets: str = "all",
     scope: str = "team_only",
-    kwizerwa_username: str | None = None,
     service_url: str | None = None,
     boundary_service_url: str | None = None,
     version: str = "sde.DEFAULT",
@@ -168,15 +170,13 @@ def run_gicumbi_pamela_profile(
     start, end = _as_date(start_date), _as_date(end_date)
     if end < start:
         raise ValueError("End date precedes start date.")
-    override = str(kwizerwa_username or "").strip()
-    if override:
-        if not USERNAME_PATTERN.fullmatch(override):
-            raise ValueError("Kwizerwa Edison portal username must contain only letters, digits, _, . or -.")
-        if override.casefold() in {u.casefold() for u in accounts}:
-            raise ValueError("Kwizerwa username duplicates another mapped team member.")
-        accounts.append(override)
-    # Team-only reports show verified accounts (plus explicitly supplied
-    # override). All-in-area reports preserve accounts NOT on the roster.
+    # Team-only reports use all currently verified portal accounts.
+    # An account transferred between people does not establish the true
+    # author of older records without a documented handover date.
+    transferred_accounts = {
+        item["portal_username"] for item in profile.get("staff_replacements", [])
+        if item.get("portal_username")
+    }
     filtered_users = accounts if scope == "team_only" else None
 
     requested = ASSETS if assets == "all" else (assets,)
@@ -185,7 +185,7 @@ def run_gicumbi_pamela_profile(
     run_dir.mkdir(parents=True, exist_ok=False)
     roster_path = run_dir / "Pamela_Team_Roster.csv"
     manifest_path = run_dir / "Pamela_Review_Manifest.json"
-    _roster_csv(roster_path, profile, override)
+    _roster_csv(roster_path, profile)
     manifest: dict[str, Any] = {
         "status":"IN_PROGRESS","profile_id":profile["profile_id"],
         "senior_supervisor":"Pamela","field_supervisor":"Derrick",
@@ -198,17 +198,16 @@ def run_gicumbi_pamela_profile(
         "date_rule":"created OR last edited in review period",
         "scope":scope,
         "scope_note":(
-            "Team-only selects 11 verified portal usernames plus any provided "
-            "Kwizerwa override; missing user cannot be assumed absent from GIS."
+            f"Team-only selects all {len(accounts)} confirmed current portal accounts. "
+            "The transferred account may contain records created by its previous user."
             if scope=="team_only" else
             "All creator accounts in the six sectors are included. Non-roster "
             "accounts are NOT automatically Pamela staff."
         ),
         "verified_usernames":accounts[:],
-        "unresolved_planned_surveyors":unresolved if not override else [],
-        "unverified_username_overrides":[
-            {"name":"Kwizerwa Edison","username":override}
-        ] if override else [],
+        "unresolved_planned_surveyors":unresolved,
+        "account_transfers":profile.get("staff_replacements", []),
+        "transferred_accounts_need_historical_review":sorted(transferred_accounts),
         "roster_csv":str(roster_path),
         "requested_assets":list(requested),
         "completed_assets":[],
@@ -216,7 +215,7 @@ def run_gicumbi_pamela_profile(
         "limitations":[
             "Sector-level assignment only; the plan does not assign individual cells to surveyors.",
             "Surveyor attribution uses created_user; a different last_edited_user may have corrected the record.",
-            "Kwizerwa Edison replaced Manzi Intime in the staffing plan; no reuse of Intime's portal username is assumed without confirmation.",
+            "Confirmed: Kwizerwa Edison uses previous holder Manzi Intime's portal account maniraguhatheogene01. Do not attribute historical activity to Edison without a known handover date.",
             "Planned transformer totals are work-plan targets, not counts of GIS features.",
             "A QA run is not proof that work occurred only on the planned 14–16 Sep dates.",
             "Pole district/sector/cell may be missing from source attributes; geometry is scoped spatially.",
@@ -254,7 +253,7 @@ def run_gicumbi_pamela_profile(
                     boundary_service_url=boundary_service_url,
                     version=version,gis=gis,
                 )
-            brief=_brief_asset_result(asset,result,accounts)
+            brief=_brief_asset_result(asset,result,accounts,transferred_accounts)
             manifest["reports"].append(brief)
             manifest["completed_assets"].append(asset)
             save()
