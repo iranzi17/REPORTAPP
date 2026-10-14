@@ -227,7 +227,7 @@ def parse_request(message: str) -> QueryPlan:
         patterns = [
             (r"\b(?:missing|blank|empty|unknown|without|no)\s+(?P<field>"+field_pat+r")\b", "missing"),
             (r"\b(?P<field>"+field_pat+r")\s+(?:is\s+)?(?:missing|blank|empty|null|unknown|not\s+recorded)\b", "missing"),
-            (r"\b(?P<field>"+field_pat+r")\s*(?:equals|is\s+equal\s+to|=|is)\s+(?P<value>\"[^\"]{1,90}\"|'[^']{1,90}'|[A-Za-z0-9._\-]{1,90}(?:\s*[Vv])?)\b?", "equals"),
+            (r"\b(?P<field>"+field_pat+r")\s*(?:equals|is\s+equal\s+to|=|is)\s+(?P<value>\"[^\"]{1,90}\"|'[^']{1,90}'|[A-Za-z0-9._\-]{1,90}(?:\s*[Vv])?)", "equals"),
         ]
         matches=[]
         for ptn,op in patterns:
