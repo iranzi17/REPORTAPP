@@ -35,10 +35,14 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
                       for person in sector["surveyors"]
                       if person["name_in_plan"] == "Kwizerwa Edison")
         self.assertEqual(edison["replaces"], "Manzi Intime")
-        self.assertEqual(edison["username"], "maniraguhatheogene01")
+        self.assertEqual(edison["username"], "ninamenye9683")
         self.assertEqual(edison["mapped_full_name"], "Kwizerwa Edison")
+        self.assertIn("ninamenye9683", users)
         self.assertIn("maniraguhatheogene01", users)
-        self.assertIsNone(data["staff_replacements"][0]["handover_date"])
+        self.assertIn("janviersafari515", users)
+        self.assertNotIn("etienne2020", users)
+        self.assertNotIn("jeandedieujadomax123", users)
+        self.assertFalse(data["account_mapping_history"]["transition_dates_known"])
         self.assertIn("martinnzubahimana", users)
         self.assertIn("julesmugae72", users)
         self.assertIn("thomascyiza", users)
@@ -115,7 +119,8 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
                              "UNMAPPED_OR_OTHER_ACCOUNT_IN_AREA")
             self.assertEqual(manifest["unresolved_planned_surveyors"], [])
             self.assertEqual(manifest["verified_usernames"], users)
-            self.assertEqual(manifest["transferred_accounts_need_historical_review"], ["maniraguhatheogene01"])
+            self.assertEqual(manifest["transferred_accounts_need_historical_review"],
+                ["janviersafari515", "maniraguhatheogene01", "ninamenye9683"])
             self.assertEqual(manifest["account_transfers"][0]["incoming"], "Kwizerwa Edison")
             with open(result["roster_csv"],newline="",encoding="utf-8-sig") as fh:
                 roster=list(csv.DictReader(fh))
@@ -125,9 +130,9 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
             record=next(item for item in roster
                         if item["Planned Surveyor"]=="Kwizerwa Edison")
             self.assertEqual(record["Replaces"],"Manzi Intime")
-            self.assertEqual(record["Portal Username"],"maniraguhatheogene01")
-            self.assertIn("ACCOUNT HOLDER",record["Mapping Status"])
-            self.assertIn("confirmed account transfer",record["Staffing Change Note"].casefold())
+            self.assertEqual(record["Portal Username"],"ninamenye9683")
+            self.assertIn("HISTORIC ACCOUNT",record["Mapping Status"])
+            self.assertIn("current gicumbi portal username",record["Staffing Change Note"].casefold())
 
     def test_all_accounts_mode_must_not_label_outside_username_as_team(self):
         calls=[]
@@ -175,8 +180,12 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
             with open(result["roster_csv"],newline="",encoding="utf-8-sig") as fh:
                 rows=list(csv.DictReader(fh))
             edison=next(r for r in rows if r["Planned Surveyor"]=="Kwizerwa Edison")
-            self.assertEqual(edison["Portal Username"],"maniraguhatheogene01")
+            self.assertEqual(edison["Portal Username"],"ninamenye9683")
             self.assertEqual(edison["Replaces"],"Manzi Intime")
+            ring=next(r for r in rows if r["Planned Surveyor"]=="Ringuyeneza Frederic")
+            self.assertEqual(ring["Portal Username"],"maniraguhatheogene01")
+            us=next(r for r in rows if r["Planned Surveyor"]=="Usabyeyezu Jean Dieu")
+            self.assertEqual(us["Portal Username"],"janviersafari515")
 
     def test_failure_writes_incomplete_manifest_and_preserves_roster(self):
         def fails(**kwargs):
