@@ -57,6 +57,7 @@ try:
     from meter_photo_qa import gicumbi_pamela_profile as _gicumbi_pamela_profile
     from meter_photo_qa import smart_query as _smart_query
     from meter_photo_qa import smart_query_runner as _smart_query_runner
+    from meter_photo_qa import lv_feeder_report as _lv_feeder_report
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -72,6 +73,7 @@ try:
     _gicumbi_pamela_profile = importlib.reload(_gicumbi_pamela_profile)
     _smart_query = importlib.reload(_smart_query)
     _smart_query_runner = importlib.reload(_smart_query_runner)
+    _lv_feeder_report = importlib.reload(_lv_feeder_report)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -99,6 +101,7 @@ inspect_duplicate_line_globalid = _duplicate_line_inspector.inspect_duplicate_li
 scan_electric_line_duplicate_globalids = _duplicate_line_scanner.scan_electric_line_duplicate_globalids
 run_gicumbi_pamela_profile = _gicumbi_pamela_profile.run_gicumbi_pamela_profile
 run_smart_query = _smart_query_runner.run_smart_query
+run_lv_feeder_report = _lv_feeder_report.run_lv_feeder_report
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -1207,16 +1210,48 @@ class AskReportApp:
         )
         boundary.value = DEFAULT_BOUNDARY_SERVICE_URL
         boundary.category = "Advanced"
-        return [query, mode, report, service, boundary]
+        destination = arcpy.Parameter(
+            displayName="Destination folder for requested LV Lines Report",
+            name="report_destination", datatype="DEFolder",
+            parameterType="Optional", direction="Input",
+        )
+        destination.value = str(ROOT / "outputs")
+        return [query, mode, report, service, boundary, destination]
 
     def updateMessages(self, params):
         if params[0].valueAsText:
             try:
-                _smart_query.parse_request(params[0].valueAsText)
+                if params[0].valueAsText.strip().lower().startswith(
+                    ("prepare ", "create ", "generate ", "make ")
+                ):
+                    _smart_query.parse_lv_report_request(params[0].valueAsText)
+                else:
+                    _smart_query.parse_request(params[0].valueAsText)
             except ValueError as exc:
                 params[0].setErrorMessage(str(exc))
 
     def execute(self, parameters, messages):
+        request = parameters[0].valueAsText or ""
+        if request.strip().lower().startswith(("prepare ", "create ", "generate ", "make ")):
+            parsed = _smart_query.parse_lv_report_request(request)
+            destination = parameters[5].valueAsText
+            if not destination:
+                raise ValueError("Choose the Destination folder for the LV Lines report.")
+            arcpy.AddMessage(
+                "Starting transformers in " + parsed["district"] +
+                "; including connected LV feeder segments even beyond district boundaries."
+            )
+            report = run_lv_feeder_report(
+                output_folder=destination,
+                district=parsed["district"],
+                usernames=parsed["usernames"] or None,
+                service_url=parameters[3].valueAsText or None,
+                boundary_service_url=parameters[4].valueAsText or None,
+                progress=arcpy.AddMessage,
+            )
+            arcpy.AddMessage(json.dumps(report, indent=2, default=str))
+            arcpy.AddMessage("LV Lines report saved: " + report["output_xlsx"])
+            return
         mode = (
             "local_copy" if parameters[1].valueAsText.startswith(
                 "Create local filtered layer"
