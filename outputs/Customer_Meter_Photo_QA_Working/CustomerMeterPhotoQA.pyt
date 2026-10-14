@@ -54,6 +54,7 @@ try:
     from meter_photo_qa import transformer_line_audit as _transformer_line_audit
     from meter_photo_qa import duplicate_line_inspector as _duplicate_line_inspector
     from meter_photo_qa import duplicate_line_scanner as _duplicate_line_scanner
+    from meter_photo_qa import gicumbi_pamela_profile as _gicumbi_pamela_profile
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -66,6 +67,7 @@ try:
     _transformer_line_audit = importlib.reload(_transformer_line_audit)
     _duplicate_line_inspector = importlib.reload(_duplicate_line_inspector)
     _duplicate_line_scanner = importlib.reload(_duplicate_line_scanner)
+    _gicumbi_pamela_profile = importlib.reload(_gicumbi_pamela_profile)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -91,6 +93,7 @@ run_asset_quality = _asset_quality_runner.run_asset_quality
 run_transformer_line_name_audit = _transformer_line_audit.run_transformer_line_name_audit
 inspect_duplicate_line_globalid = _duplicate_line_inspector.inspect_duplicate_line_globalid
 scan_electric_line_duplicate_globalids = _duplicate_line_scanner.scan_electric_line_duplicate_globalids
+run_gicumbi_pamela_profile = _gicumbi_pamela_profile.run_gicumbi_pamela_profile
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -117,6 +120,7 @@ class Toolbox:
             CheckLVTransformerNames,
             InspectElectricLineGlobalID,
             ScanAllElectricLineDuplicates,
+            ReviewGicumbiPamelaTeam,
         ]
 
 
@@ -1132,6 +1136,152 @@ class WatchLVPoleQuality(_AssetQualityTool):
     label = "Watch LV Pole Data Quality"
 
 
+
+
+
+class ReviewGicumbiPamelaTeam:
+    """Focused regional team profile, using verified portal account mapping."""
+    label = "Review Gicumbi - Pamela Team (LV Lines, Transformers, Poles)"
+    description = (
+        "Read-only Gicumbi QA for Senior Supervisor Pamela / Supervisor Derrick. "
+        "Applies the six planned sectors from September 2026 to LV lines, "
+        "distribution transformers and LV poles consistently. The first "
+        "mode restricts to 11 mapped surveyor accounts; the missing account "
+        "for Kwizerwa Edison is never silently guessed. "
+        "Outputs three QA workbooks, roster CSV and an audit manifest."
+    )
+    canRunInBackground = False
+
+    @_log_tool_open_errors
+    def getParameterInfo(self):
+        output_folder = arcpy.Parameter(
+            displayName="Output parent folder (one timestamped subfolder created)",
+            name="output_folder", datatype="DEFolder",
+            parameterType="Required", direction="Input",
+        )
+        output_folder.value = str(ROOT / "outputs")
+        start = arcpy.Parameter(
+            displayName="Review from (created or last edited)",
+            name="start_date", datatype="GPDate",
+            parameterType="Required", direction="Input",
+        )
+        start.value = datetime(2026, 9, 14)
+        end = arcpy.Parameter(
+            displayName="Review to (inclusive)",
+            name="end_date", datatype="GPDate",
+            parameterType="Required", direction="Input",
+        )
+        end.value = datetime.combine(datetime.now().date(), datetime.min.time())
+        assets = arcpy.Parameter(
+            displayName="Asset classes to review",
+            name="assets", datatype="GPString",
+            parameterType="Required", direction="Input",
+        )
+        assets.filter.type = "ValueList"
+        assets.filter.list = [
+            "All: LV Lines, Distribution Transformers and LV Poles",
+            "LV Lines only", "Distribution Transformers only", "LV Poles only",
+        ]
+        assets.value = assets.filter.list[0]
+        scope = arcpy.Parameter(
+            displayName="Account scope",
+            name="account_scope", datatype="GPString",
+            parameterType="Required", direction="Input",
+        )
+        scope.filter.type = "ValueList"
+        scope.filter.list = [
+            "Mapped Pamela team accounts only (11 verified)",
+            "All accounts in the six sectors (find missing usernames)",
+        ]
+        scope.value = scope.filter.list[0]
+        kwizerwa = arcpy.Parameter(
+            displayName="Kwizerwa Edison portal username (if confirmed)",
+            name="kwizerwa_username", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        service = arcpy.Parameter(
+            displayName="Utility Network FeatureServer URL",
+            name="service_url", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        service.value = DEFAULT_LINE_SERVICE_URL
+        service.category = "Advanced"
+        boundaries = arcpy.Parameter(
+            displayName="Administrative Boundary FeatureServer URL",
+            name="boundary_service_url", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        boundaries.value = DEFAULT_BOUNDARY_SERVICE_URL
+        boundaries.category = "Advanced"
+        version = arcpy.Parameter(
+            displayName="Utility Network Version",
+            name="gdb_version", datatype="GPString",
+            parameterType="Optional", direction="Input",
+        )
+        version.value = "sde.DEFAULT"
+        version.category = "Advanced"
+        return [
+            output_folder,start,end,assets,scope,kwizerwa,
+            service,boundaries,version,
+        ]
+
+    def updateMessages(self, parameters):
+        if parameters[1].value and parameters[2].value and parameters[2].value < parameters[1].value:
+            parameters[2].setErrorMessage("The end date cannot precede the start date.")
+        if parameters[5].valueAsText:
+            try:
+                import re as _re
+                if not _re.fullmatch(r"[A-Za-z0-9._-]{3,80}",parameters[5].valueAsText.strip()):
+                    raise ValueError("Use the real ArcGIS portal username (letters, digits, _ . -).")
+            except ValueError as exc:
+                parameters[5].setErrorMessage(str(exc))
+
+    def execute(self, parameters, messages):
+        choices = {
+            "All: LV Lines, Distribution Transformers and LV Poles": "all",
+            "LV Lines only": "lv_line",
+            "Distribution Transformers only": "transformer",
+            "LV Poles only": "pole",
+        }
+        asset = choices[parameters[3].valueAsText]
+        scope = (
+            "all_in_assigned_sectors"
+            if parameters[4].valueAsText ==
+            "All accounts in the six sectors (find missing usernames)"
+            else "team_only"
+        )
+        arcpy.AddMessage(
+            "Gicumbi Pamela profile: Muko, Mutete, Nyamiyaga, "
+            "Nyankenke, Rukomo, Rushaki. Supervisor Derrick. "
+            "All source edits are disabled."
+        )
+        if not parameters[5].valueAsText:
+            arcpy.AddWarning(
+                "Kwizerwa Edison is listed in the work plan but has NO "
+                "verified portal username in the REPORTAPP mapping. "
+                "His data may be omitted in team-only mode. "
+                "Use the all-accounts mode to identify unmatched accounts."
+            )
+        summary = run_gicumbi_pamela_profile(
+            output_folder=parameters[0].valueAsText,
+            start_date=parameters[1].value,
+            end_date=parameters[2].value,
+            assets=asset,scope=scope,
+            kwizerwa_username=parameters[5].valueAsText or None,
+            service_url=parameters[6].valueAsText or None,
+            boundary_service_url=parameters[7].valueAsText or None,
+            version=parameters[8].valueAsText or "sde.DEFAULT",
+        )
+        for report in summary["reports"]:
+            arcpy.AddMessage(
+                f"{report['asset']} QA completed: {report['checked']} records; "
+                f"{report['outstanding_features']} feature(s) with gaps. "
+                f"Excel: {report['file']}"
+            )
+        arcpy.AddMessage(
+            "Pamela profile complete; manifest/roster: " +
+            summary["manifest_json"] + " ; " + summary["roster_csv"]
+        )
 
 
 class ScanAllElectricLineDuplicates:
