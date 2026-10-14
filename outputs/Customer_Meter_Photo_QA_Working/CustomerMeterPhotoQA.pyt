@@ -1216,7 +1216,25 @@ class AskReportApp:
             parameterType="Optional", direction="Input",
         )
         destination.value = str(ROOT / "outputs")
-        return [query, mode, report, service, boundary, destination]
+        feeder_method = arcpy.Parameter(
+            displayName="LV feeder continuity mode (for Prepare LV Lines Report)",
+            name="lv_feeder_method", datatype="GPString",
+            parameterType="Required", direction="Input",
+        )
+        feeder_method.filter.type = "ValueList"
+        feeder_method.filter.list = [
+            "Geometry continuity - no Utility Network trace required",
+            "Validated Utility Network connectivity trace (strict)",
+        ]
+        feeder_method.value = feeder_method.filter.list[0]
+        endpoint_gap = arcpy.Parameter(
+            displayName="Maximum LV endpoint gap (metres; geometry mode)",
+            name="endpoint_tolerance", datatype="GPDouble",
+            parameterType="Required", direction="Input",
+        )
+        endpoint_gap.value = 1.5
+        return [query, mode, report, service, boundary, destination,
+                feeder_method, endpoint_gap]
 
     def updateMessages(self, params):
         if params[0].valueAsText:
@@ -1241,6 +1259,18 @@ class AskReportApp:
                 "Starting transformers in " + parsed["district"] +
                 "; including connected LV feeder segments even beyond district boundaries."
             )
+            method = (
+                "topology" if parameters[6].valueAsText.startswith(
+                    "Validated Utility Network"
+                ) else "geometry"
+            )
+            if method == "geometry":
+                arcpy.AddWarning(
+                    "PROVISIONAL GEOMETRY MODE: does NOT verify energized "
+                    "connectivity or network topology. Matching endpoints "
+                    "and created_user can suggest feeder continuity but "
+                    "must not be treated as an engineering-certified source."
+                )
             report = run_lv_feeder_report(
                 output_folder=destination,
                 district=parsed["district"],
@@ -1248,6 +1278,8 @@ class AskReportApp:
                 service_url=parameters[3].valueAsText or None,
                 boundary_service_url=parameters[4].valueAsText or None,
                 progress=arcpy.AddMessage,
+                method=method,
+                endpoint_tolerance=float(parameters[7].value or 1.5),
             )
             arcpy.AddMessage(json.dumps(report, indent=2, default=str))
             arcpy.AddMessage("LV Lines report saved: " + report["output_xlsx"])
