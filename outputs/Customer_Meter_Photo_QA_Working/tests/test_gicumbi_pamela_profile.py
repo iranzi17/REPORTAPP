@@ -150,7 +150,7 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
                              "UNMAPPED_OR_OTHER_ACCOUNT_IN_AREA")
 
     def test_transferred_username_is_team_member_but_historical_authorship_unproven(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder, \\
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder, \
              patch("meter_photo_qa.gicumbi_pamela_profile.run_asset_quality",
                    return_value={
                        "output_xlsx":"report.xlsx","total":1,"with_gaps":1,
