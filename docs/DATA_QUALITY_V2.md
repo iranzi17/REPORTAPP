@@ -494,3 +494,51 @@ unrecognized fields, operators, places and any write/delete requests.
 filter conjunctions and a schema-aware local LLM (optional). Require
 explicit confirmation for anything changing live GIS; future
 conversational interpretation does not bypass technical validation.
+
+## Ask REPORTAPP — prepare LV feeder report by surveyor and source district (Oct 2026)
+
+New supported commands in the existing **Ask REPORTAPP - Query and Filter Attributes** tool:
+
+- `Prepare LV Lines Report for Kwizerwa Edison in Gicumbi`
+- `Prepare LV Lines Report for ninamenye9683 in Gicumbi`
+- `Prepare LV Lines Report for Ringuyeneza Frederic in Gicumbi`
+- `Prepare LV Lines Report in Burera` (all surveyors)
+
+Choose the separate **Destination folder for requested LV Lines Report**
+control in ArcGIS Pro. The output is a timestamped Excel workbook in that
+folder (Summary, Connected LV Lines, Engineering Review, Starting Transformers,
+Method and Caveats). The command does not interpret arbitrary embedded
+filesystem paths: the ArcGIS folder picker determines the output location.
+
+### Feeder origin and border rule — essential
+
+**A district is a transformer-source selection boundary, NOT a line clipping
+boundary.** Find distribution-transformer points located in the specified
+district, then perform **Utility Network connected traces from each
+secondary terminal**. Retrieve all LV line ObjectIDs returned by each trace
+independently of their administrative location, surveyor, creation date or
+last-edit date. Do not stop at a sector, district, or provincial border.
+Apply any requested `created_user` filter only to the *reported line rows*
+**after** obtaining complete connected-component membership. The Summary
+provides separate totals before/after the surveyor filter.
+
+This is a **connected-network report**, not a verified **energized-direction
+feeder** determination. Where a trace includes multiple distribution
+transformers or topology warnings, classify supply as engineering review;
+never invent a unique source or automatically rename lines. `validateConsistency`
+is kept enabled; dirty-area and trace failures block the report rather than
+produce incomplete or unreliable source attribution.
+
+The report includes line GlobalIDs, OBJECTIDs, creator, recorded transformer
+name, unique connected-source name when supported, name disagreement, asset
+group/type and selected conductor/voltage/phase attributes. A known limitation
+is that the default output does not independently calculate the exact district,
+sector or cell of every segment; **do not infer that downstream segments remain
+in the source district**. To assign each segment's administrative location,
+add a separate geometry-to-boundaries intersection step, and distinguish
+cross-boundary membership from electrical topology.
+
+Read-only implementation is in
+`src/meter_photo_qa/lv_feeder_report.py`; prompt parser is
+`src/meter_photo_qa/smart_query.py::parse_lv_report_request`. A live REG
+Utility Network run is necessary before using outputs operationally.
