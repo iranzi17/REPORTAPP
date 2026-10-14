@@ -35,6 +35,7 @@ jobs:
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_quality_query_batches.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_asset_quality.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_asset_quality_workflow.py' -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_gicumbi_pamela_profile.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_progress_report.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_transformer_line_names.py' -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p 'test_transformer_line_audit_workflow.py' -v
