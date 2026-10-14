@@ -163,6 +163,7 @@ class AssetQualityTests(unittest.TestCase):
             "Append_Cable":"0",
         },"pole",fields,{"Append_Cable":{0:"No",1:"Yes"}})
         self.assertEqual(coded_text["status"],"NO_GAPS_FOUND")
+        self.assertEqual(coded_text["values"]["append_cable"],"No")
         ambiguous_zero = evaluate_asset({
             "GLOBALID":"{A}", "OBJECTID":1,
             "ASSETGROUP":7,"ASSETTYPE":2,
