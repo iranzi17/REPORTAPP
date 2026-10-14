@@ -43,7 +43,7 @@ ASSETS = {
         "layer_id": 12, "asset_group": 7,
         "types": {1:"Wooden", 2:"Concrete", 3:"Steel Pole"},
         "checks": {
-            "manufacturer": ["Manufacturer", "Pole_Manufacturer", "Manufacturer_Name", "ManufacturerName", "Make"],
+            "manufacturer": ["Manufacturers", "Manufacturer", "Pole_Manufacturer", "Manufacturer_Name", "ManufacturerName", "Make"],
             "notes": ["Notes", "Remarks", "Pole_Notes"],
         },
         "priority": ("manufacturer", "notes"),
@@ -56,6 +56,19 @@ NO_NAMEPLATE = re.compile(
     r"|\b(?:name\s*plate|nameplate)\s+(?:missing|absent|not\s+(?:present|available|visible|found))\b",
     re.IGNORECASE,
 )
+# Explicit Kinyarwanda statements mean that the pole has no nameplate.
+# Deliberately do not accept "not clear" or "illegible": those say the
+# nameplate may exist and warrant a different data-collection review.
+NO_NAMEPLATE_RW = re.compile(
+    r"\\bnta\\s+(?:name\\s*plate|nameplate)\\s+(?:iriho|ibaho|igaragara|yabonetse)\\b"
+    r"|\\b(?:name\\s*plate|nameplate)\\s+ntayiriho\\b",
+    re.IGNORECASE,
+)
+
+
+def has_explicit_no_nameplate_note(note):
+    return bool(NO_NAMEPLATE.search(str(note or "")) or
+                NO_NAMEPLATE_RW.search(str(note or "")))
 
 
 def resolve_fields(layer_fields, asset):
@@ -179,7 +192,7 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
     else:
         field = mapping.get("manufacturer")
         if field and missing_value(attributes.get(field), (domains or {}).get(field)):
-            if NO_NAMEPLATE.search(note):
+            if has_explicit_no_nameplate_note(note):
                 values["manufacturer_status"] = "DOCUMENTED_NO_NAMEPLATE"
             else:
                 values["manufacturer_status"] = "MISSING_MANUFACTURER_EXPLANATION"
