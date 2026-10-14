@@ -319,3 +319,74 @@ requires authoritative point-in-polygon spatial attribution from
 feature geometry against the hosted administrative boundaries.
 No district or cell was inferred from surveyor name or selection
 without spatial evidence.
+
+
+## Senior Supervisor Pamela — Gicumbi team profile (Oct 14, 2026)
+
+The Working ArcGIS Pro toolbox now contains
+**Review Gicumbi - Pamela Team (LV Lines, Transformers, Poles)**.
+
+The source is `Detailed plan for Gicumbi district revised 1(1).xlsx`,
+filtered strictly to work-plan entries whose **Senior Supervisor Name**
+is Pamela (field Supervisor Derrick). The plan's schedule is 14–16
+September 2026; QA date range is configurable.
+
+**Six sectors:** Muko, Mutete, Nyamiyaga, Nyankenke, Rukomo and Rushaki.
+The 32 enumerated plan cells, 95 planned transformers, and approximately
+196.85 km of planned LV lines are planning reference totals, **not actual
+live REGUN completions**. Assignment is *by sector*; the work plan does
+not attribute specific cells or individual line segments to a particular
+person within a multi-person team.
+
+**12 planned surveyors**, of which 11 have identifiable portal usernames
+in `config/report_user_names.json`. A work-plan spelling variation for
+Bimenyimana Emmauel corresponds to configured Bimenyimana Emmanuel.
+**Kwizerwa Edison**, assigned to Rukomo, is not in the user-name map.
+Never guess a portal login or silently conclude Kwizerwa has no data.
+
+The profile configuration is
+`outputs/Customer_Meter_Photo_QA_Working/config/gicumbi_pamela_team.json`.
+This file stores actual work-plan names, cells, sectors, and mapped
+portal account usernames. Source mapping changes fail verification
+before querying REG.
+
+### Modes
+
+- **Mapped Pamela team accounts only** (default): includes 11 verified
+  portal accounts. Kwizerwa remains explicitly UNMAPPED unless a user
+  manually provides a real portal username, which is noted as
+  *USER SUPPLIED / REQUIRES PORTAL VERIFICATION*.
+- **All accounts in the six sectors:** useful for identifying unmapped
+  users and records made by accounts not in the plan. Such accounts
+  must **not** be claimed as Pamela's team members without review.
+
+Asset selection can run all three modules or one selected module.
+Each run creates a uniquely timestamped output subfolder with existing
+read-only QA workbooks:
+- `Pamela_Pole_*.xlsx`
+- `Pamela_Transformer_*.xlsx`
+- `Pamela_LV_Lines_*.xlsx`
+
+It also writes `Pamela_Team_Roster.csv` and
+`Pamela_Review_Manifest.json`. The manifest records exact sector,
+surveyors, date range, profile scope, QA metrics and status. If one
+module fails (e.g. FeatureServer 503), the manifest is marked
+**INCOMPLETE** and any earlier successful asset reports remain
+available; the tool never falsely reports full completion.
+
+### Review caveats
+
+- A field `created_user` is surveyor attribution for these reports.
+  The person who last edited a feature may be different.
+- LV line priority gaps and General Completeness are distinct.
+- Distribution-transformer original seven missing-attribute checks
+  are distinct from repeated GlobalID source integrity issues.
+- LV pole manufacturer field is actually `Manufacturers` (plural);
+  a missing manufacturer requires a genuine `Notes` statement that
+  the nameplate is absent.
+- Planned assignments do not prove the individual field collector
+  worked in every cell of their sector; do not blame surveyors for
+  edited/legacy records without further evidence.
+- Geographical filtering uses chosen administrative polygons; source
+  District/Sector/Cell attributes on poles may be absent. No editing
+  or Utility Network topology validation is performed.
