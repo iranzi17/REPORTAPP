@@ -542,3 +542,65 @@ Read-only implementation is in
 `src/meter_photo_qa/lv_feeder_report.py`; prompt parser is
 `src/meter_photo_qa/smart_query.py::parse_lv_report_request`. A live REG
 Utility Network run is necessary before using outputs operationally.
+
+
+## Dirty-topology-tolerant LV feeder report — geometry continuity mode (Oct 2026)
+
+The user requested LV Lines Reports to remain usable even when
+Electric Utility Network dirty areas cannot all be validated.
+
+**New default in Ask REPORTAPP -> Prepare LV Lines Report:** 
+`Geometry continuity - no Utility Network trace required`.
+The earlier strict `Validated Utility Network connectivity trace (strict)`
+remains available by choice. The provisional geometry mode **never**
+invokes the Utility Network trace or validates dirty areas.
+
+- District selects **starting distribution-transformer points only**,
+  by authoritative spatial boundary. Neither LV candidate query nor
+  graph traversal is clipped at district/sector borders.
+- With a surveyor name or login, retrieve **all LV lines in Rwanda**
+  created under that login, without date filters. The caller's
+  `created_user` is used to group candidate line continuity; a
+  transformer account does *not* have to equal the line creator.
+- Request all users without specifying a surveyor only when source
+  candidate count is below the safe **25,000-feature limit**, otherwise
+  narrow by surveyor. The tool fails rather than silently report a
+  truncated dataset.
+- Project fetched point/polyline geometry to EPSG:3857; reject missing
+  or mismatched spatial reference rather than apply metres to degrees.
+- Build a geometry graph from endpoint pairs within **1.5 m**
+  (configurable 0.05–5 m). Continue only along the **same created_user**.
+  Transformer point proximity within **7 m** identifies a *possible*
+  source connection, not an electrically verified source.
+- Near-endpoint pairs outside the primary tolerance but within 3 m
+  are exported to **Suggested Endpoint Gaps**, *not automatically joined*.
+  Crossings midspan, T-junctions without split points and different
+  surveyor accounts are *not* traversed; real feeder branches can be
+  undercounted. This is a deliberate fail-conservative rule, not proof
+  of absence of connectivity.
+- Where multiple starting transformers could match a component,
+  do not choose one arbitrarily. Flag
+  `MULTIPLE_TRANSFORMERS_NEAR_COMPONENT`.
+  Transformer-name disagreement is labelled
+  `NAME_DIFFERENCE_PROVISIONAL` rather than verified error.
+- Review workbook includes **Summary**, **Provisional Connected Lines**,
+  **Unassociated Candidate Lines**, **Starting Transformers**,
+  **Suggested Endpoint Gaps**, **Repeated Source GlobalIDs** and
+  **Method and Limitations**. Duplicate source identifiers remain in
+  counts as distinct ObjectIDs, with explicit duplicate warnings.
+- The same destination-folder control in ArcGIS Pro saves the Excel.
+  The tool reads only the FeatureServer; it does not alter utility
+  network topology, line attributes or device associations.
+
+**Engineering interpretation:** a geometric chain, matching collector
+login and nearby transformer are evidence for prioritizing inspection,
+not energized feeder connectivity, electrical source direction,
+switching state, phase continuity or current load. For engineering
+signoff, obtain validated trace, as-built/circuit verification or a
+field-confirmed path. `Rated_Current` remains **conductor ampacity**.
+
+The geometry algorithm has unit and mock ArcGIS FeatureServer tests;
+it still requires its first live REG query. Large national requests
+may be slower and need a targeted surveyor. The tool does not yet do
+authoritative spatial attribution of every downstream segment to its
+district/sector/cell, nor estimate conductor loading or voltage drop.
