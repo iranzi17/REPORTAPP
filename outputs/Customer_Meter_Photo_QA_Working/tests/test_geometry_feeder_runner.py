@@ -115,7 +115,7 @@ class GeometryFeederRunnerTests(unittest.TestCase):
             self.assertEqual(len(connected),3)
             self.assertEqual({connected[1][1],connected[2][1]},{1,2})
             self.assertEqual(
-                wb["Other Surveyor Lines"].max_row,2,
+                wb["Unassociated Candidate Lines"].max_row,2,
             )
             self.assertIn("NO UTILITY NETWORK TRACE",wb["Summary"]["B2"].value)
             self.assertIn("Suggested Endpoint Gaps",wb.sheetnames)
