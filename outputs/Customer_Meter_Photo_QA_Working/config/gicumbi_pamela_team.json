@@ -8,7 +8,7 @@
   "planned_start": "2026-09-14",
   "planned_end": "2026-09-16",
   "period_note": "September 14–16 is the work plan, not a restriction on when source data were created/edited. The tool permits wider review dates.",
-  "scope_note": "Team assignment is at sector level, not individual cell or transformer level. Do not infer individual cell assignments from the plan.",
+  "scope_note": "Team assignment is at sector level, not individual cell or transformer level. Do not infer individual cell assignments from the plan. Kwizerwa Edison replaced Manzi Intime; this personnel change does not by itself authorize attributing the prior user's GIS records to Edison.",
   "mapping_source": "config/report_user_names.json",
   "sectors": [
     {
@@ -108,7 +108,8 @@
           "name_in_plan": "Kwizerwa Edison",
           "username": null,
           "mapped_full_name": null,
-          "note": "Username not present in existing REPORTAPP roster mapping; requires manual confirmation"
+          "note": "Replaced Manzi Intime in the Gicumbi field team. Confirm whether his portal username is maniraguhatheogene01 or a different account before attributing records.",
+          "replaces": "Manzi Intime"
         },
         {
           "name_in_plan": "Ringuyeneza Frederic",
@@ -152,6 +153,14 @@
           "mapped_full_name": "Maniraguha Ishimwe Fabrice"
         }
       ]
+    }
+  ],
+  "staff_replacements": [
+    {
+      "outgoing": "Manzi Intime",
+      "incoming": "Kwizerwa Edison",
+      "sector": "Rukomo",
+      "portal_username_status": "Not confirmed; replacement of staff does not prove transfer of the outgoing account"
     }
   ]
 }
