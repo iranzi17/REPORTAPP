@@ -1,0 +1,157 @@
+{
+  "profile_id": "GICUMBI_PAMELA_2026_09",
+  "title": "Gicumbi — Senior Supervisor Pamela",
+  "district": "Gicumbi",
+  "senior_supervisor": "Pamela",
+  "field_supervisor": "Derrick",
+  "source_plan": "Detailed plan for Gicumbi district revised 1(1).xlsx",
+  "planned_start": "2026-09-14",
+  "planned_end": "2026-09-16",
+  "period_note": "September 14–16 is the work plan, not a restriction on when source data were created/edited. The tool permits wider review dates.",
+  "scope_note": "Team assignment is at sector level, not individual cell or transformer level. Do not infer individual cell assignments from the plan.",
+  "mapping_source": "config/report_user_names.json",
+  "sectors": [
+    {
+      "sector": "Muko",
+      "cells": [
+        "Cyamuhinda",
+        "Kigoma",
+        "Mwendo",
+        "Ngange",
+        "Rebero"
+      ],
+      "planned_transformers": 13,
+      "surveyors": [
+        {
+          "name_in_plan": "Bimenyimana Emmauel",
+          "username": "eliashagenimana26",
+          "mapped_full_name": "Bimenyimana Emmanuel",
+          "note": "Plan has a spelling variation; confirm with senior supervisor"
+        }
+      ]
+    },
+    {
+      "sector": "Mutete",
+      "cells": [
+        "Gaseke",
+        "Kabeza",
+        "Musenyi",
+        "Mutandi",
+        "Nyarubuye"
+      ],
+      "planned_transformers": 22,
+      "surveyors": [
+        {
+          "name_in_plan": "Ishimwe Cedric",
+          "username": "martinnzubahimana",
+          "mapped_full_name": "Ishimwe Cedric"
+        },
+        {
+          "name_in_plan": "Mwiseneza Isaac",
+          "username": "nshimast",
+          "mapped_full_name": "MWISENEZA Isaac"
+        }
+      ]
+    },
+    {
+      "sector": "Nyamiyaga",
+      "cells": [
+        "Gahumuliza",
+        "Jamba",
+        "Kabeza",
+        "Kabuga",
+        "Karambo",
+        "Kiziba",
+        "Mataba"
+      ],
+      "planned_transformers": 12,
+      "surveyors": [
+        {
+          "name_in_plan": "Ngurinzira J.D'Amour",
+          "username": "jeandamourngurinzira22",
+          "mapped_full_name": "Ngurinzira J.D'Amour"
+        }
+      ]
+    },
+    {
+      "sector": "Nyankenke",
+      "cells": [
+        "Butare",
+        "Kigogo",
+        "Rusasa",
+        "Rutete",
+        "Rwagihura",
+        "Yaramba"
+      ],
+      "planned_transformers": 9,
+      "surveyors": [
+        {
+          "name_in_plan": "Mugabe Jules",
+          "username": "julesmugae72",
+          "mapped_full_name": "Mugabe Jules"
+        }
+      ]
+    },
+    {
+      "sector": "Rukomo",
+      "cells": [
+        "Cyeya",
+        "Cyuru",
+        "Gisiza",
+        "Kinyami",
+        "Mabare",
+        "Munyinya"
+      ],
+      "planned_transformers": 17,
+      "surveyors": [
+        {
+          "name_in_plan": "Kwizerwa Edison",
+          "username": null,
+          "mapped_full_name": null,
+          "note": "Username not present in existing REPORTAPP roster mapping; requires manual confirmation"
+        },
+        {
+          "name_in_plan": "Ringuyeneza Frederic",
+          "username": "etienne2020",
+          "mapped_full_name": "Ringuyeneza Frederic"
+        },
+        {
+          "name_in_plan": "Bizimana Jean de Dieu",
+          "username": "nambajimana281",
+          "mapped_full_name": "BIZIMANA Jean de Dieu"
+        }
+      ]
+    },
+    {
+      "sector": "Rushaki",
+      "cells": [
+        "Gitega",
+        "Kamutora",
+        "Karurama"
+      ],
+      "planned_transformers": 22,
+      "surveyors": [
+        {
+          "name_in_plan": "Usabyeyezu Jean Dieu",
+          "username": "jeandedieujadomax123",
+          "mapped_full_name": "Usabyeyezu Jean De Dieu"
+        },
+        {
+          "name_in_plan": "Ntwari Rwabizi Yves",
+          "username": "shemajeanclaude1",
+          "mapped_full_name": "NTWARI Rwabizi Yves"
+        },
+        {
+          "name_in_plan": "Nzabonimpa Vital",
+          "username": "ndikubwayo1997",
+          "mapped_full_name": "Nzabonimpa Vital"
+        },
+        {
+          "name_in_plan": "Maniraguha Ishimwe Fabrice",
+          "username": "thomascyiza",
+          "mapped_full_name": "Maniraguha Ishimwe Fabrice"
+        }
+      ]
+    }
+  ]
+}
