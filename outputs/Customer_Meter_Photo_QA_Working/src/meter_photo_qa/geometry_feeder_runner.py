@@ -147,7 +147,7 @@ def _write_geometry_report(
     book=Workbook()
     summary=book.active;summary.title="Summary"
     connected=book.create_sheet("Provisional Connected Lines")
-    unattached=book.create_sheet("Other Surveyor Lines")
+    unattached=book.create_sheet("Unassociated Candidate Lines")
     sources=book.create_sheet("Starting Transformers")
     gaps=book.create_sheet("Suggested Endpoint Gaps")
     cautions=book.create_sheet("Method and Limitations")
@@ -161,7 +161,7 @@ def _write_geometry_report(
         ("Surveyor account(s)","; ".join(usernames) if usernames else "All (within maximum record limit)"),
         ("National LV line candidates scanned",len(lines)),
         ("Provisional connected line OBJECTIDs",len(in_scope)),
-        ("Other surveyor line OBJECTIDs, not linked to local starts",len(out_scope)),
+        ("Nationwide candidate lines not linked to local transformer starts",len(out_scope)),
         ("Geometric line components",checked["components"]),
         ("Potential endpoint gaps for review",len(checked["suggested_gaps"])),
         ("Source transformers evaluated",len(checked["source_details"])),
@@ -309,6 +309,11 @@ def run_provisional_geometry_feeder_report(
     )
     for v in transformers:
         v["attributes"]["Transfomer_name_"]=v["attributes"].get(name_field)
+    if not transformers:
+        raise RuntimeError(
+            f"No distribution transformers were found inside the {district} "
+            "starting boundary. No nationwide continuity scan was attempted."
+        )
     notify(
         f"Selected {len(transformers)} starting distribution transformers in {district}. "
         "No Utility Network traces or dirty-area checks will be performed."
