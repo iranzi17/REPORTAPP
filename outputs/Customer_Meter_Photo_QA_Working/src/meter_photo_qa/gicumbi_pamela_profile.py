@@ -79,6 +79,7 @@ def _roster_csv(path, profile, override_username):
             "Senior Supervisor","Field Supervisor","District","Sector",
             "Planned Surveyor","Portal Username","Mapping Status",
             "Planned Sector Cells","Planned Transformer Count","Planned Dates",
+            "Replaces", "Staffing Change Note",
         ])
         for sector in profile["sectors"]:
             for person in sector["surveyors"]:
@@ -95,6 +96,8 @@ def _roster_csv(path, profile, override_username):
                     person["name_in_plan"],username,status,
                     "; ".join(sector["cells"]),sector["planned_transformers"],
                     profile["planned_start"]+" to "+profile["planned_end"],
+                    person.get("replaces", ""),
+                    person.get("note", ""),
                 ])
 
 
@@ -213,6 +216,7 @@ def run_gicumbi_pamela_profile(
         "limitations":[
             "Sector-level assignment only; the plan does not assign individual cells to surveyors.",
             "Surveyor attribution uses created_user; a different last_edited_user may have corrected the record.",
+            "Kwizerwa Edison replaced Manzi Intime in the staffing plan; no reuse of Intime's portal username is assumed without confirmation.",
             "Planned transformer totals are work-plan targets, not counts of GIS features.",
             "A QA run is not proof that work occurred only on the planned 14–16 Sep dates.",
             "Pole district/sector/cell may be missing from source attributes; geometry is scoped spatially.",
