@@ -380,7 +380,7 @@ def parse_lv_report_request(message: str) -> dict:
         raise ValueError("Enter a short LV Lines Report instruction.")
     pat=(
         r"^(?:prepare|create|generate|make)\s+(?:an?\s+)?"
-        r"(?:lv\s+lines?|low\s+voltage\s+lines?)\s+report"
+        r"(?:(?:lv\s+lines?|low\s+voltage\s+lines?|combined\s+qa|combined|qa|asset\s+quality|data\s+quality)\s+)?report"
         r"(?:\s+(?:for|of)\s+(?P<person>.+?))?"
         r"\s+in\s+(?P<district>[a-zA-Z][a-zA-Z ]+?)"
         r"(?:\s+district)?\s*[.!]?$"
@@ -388,7 +388,7 @@ def parse_lv_report_request(message: str) -> dict:
     match=re.fullmatch(pat,raw,re.I)
     if not match:
         raise ValueError(
-            "Use 'Prepare LV Lines Report for Kwizerwa Edison in Gicumbi'. "
+            "Use 'Prepare Combined QA Report for Kwizerwa Edison in Gicumbi'. "
             "Choose the output folder in the separate Destination Folder control."
         )
     district_name=" ".join(match.group("district").split())
@@ -401,7 +401,7 @@ def parse_lv_report_request(message: str) -> dict:
     if person and re.search(r"\b(?:and|or|where|with|outside|within)\b",person,re.I):
         raise ValueError("Specify one surveyor per report; complex conditions are not supported.")
     user=resolve_surveyor_name(person,district) if person else None
-    return {"action":"lv_feeder_report","district":district,
+    return {"action":"combined_qa_report","district":district,
             "usernames":[user] if user else [],
             "requested_name":person or None,
             "trace_rule":"Select starting transformers in district; trace all connected LV lines across borders"}
