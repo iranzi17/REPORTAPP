@@ -1229,7 +1229,7 @@ class AskReportApp:
         feeder_method.filter.type = "ValueList"
         feeder_method.filter.list = [
             "Geometry continuity - no Utility Network trace required",
-            "Validated Utility Network connectivity trace (strict)",
+            "Skip optional continuity appendix - three-asset QA only",
         ]
         feeder_method.value = feeder_method.filter.list[0]
         endpoint_gap = arcpy.Parameter(
@@ -1277,8 +1277,8 @@ class AskReportApp:
                 "; including connected LV feeder segments even beyond district boundaries."
             )
             method = (
-                "topology" if parameters[6].valueAsText.startswith(
-                    "Validated Utility Network"
+                "none" if parameters[6].valueAsText.startswith(
+                    "Skip optional continuity"
                 ) else "geometry"
             )
             if method == "geometry":
@@ -1300,6 +1300,7 @@ class AskReportApp:
                 service_url=parameters[3].valueAsText or None,
                 boundary_service_url=parameters[4].valueAsText or None,
                 include_continuity=(method=="geometry"),
+                endpoint_tolerance=float(parameters[7].value or 1.5),
                 progress=arcpy.AddMessage,
             )
             arcpy.AddMessage(
