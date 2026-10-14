@@ -73,20 +73,24 @@ def load_pamela_profile(path: str | Path | None = None, user_map_path: str | Pat
 
 def _roster_csv(path, profile):
     path.parent.mkdir(parents=True, exist_ok=True)
+    previous_holders = {
+        item["username"].casefold(): item["previous_label"]
+        for item in profile.get("account_mapping_history", {}).get("changed_logins", [])
+    }
     with path.open("w",encoding="utf-8-sig",newline="") as fh:
         writer=csv.writer(fh)
         writer.writerow([
             "Senior Supervisor","Field Supervisor","District","Sector",
             "Planned Surveyor","Portal Username","Mapping Status",
             "Planned Sector Cells","Planned Transformer Count","Planned Dates",
-            "Replaces", "Staffing Change Note",
+            "Replaces", "Staffing Change Note", "Previously Verified Username", "Prior Holder Label For Current Username",
         ])
         for sector in profile["sectors"]:
             for person in sector["surveyors"]:
                 username = person.get("username") or ""
                 status = (
-                    "CONFIRMED CURRENT USER - PRIOR ACCOUNT HOLDER" if person.get("replaces") and username
-                    else "VERIFIED EXISTING USER MAP" if username
+                    "CURRENT USER - HISTORIC ACCOUNT LABELS" if username.casefold() in previous_holders
+                    else "VERIFIED CURRENT USER MAP" if username
                     else "UNMAPPED - NOT INCLUDED IN TEAM-ONLY FILTER"
                 )
                 writer.writerow([
@@ -96,6 +100,8 @@ def _roster_csv(path, profile):
                     profile["planned_start"]+" to "+profile["planned_end"],
                     person.get("replaces", ""),
                     person.get("note", ""),
+                    person.get("previous_verified_username", ""),
+                    previous_holders.get(username.casefold(), ""),
                 ])
 
 
@@ -174,8 +180,9 @@ def run_gicumbi_pamela_profile(
     # An account transferred between people does not establish the true
     # author of older records without a documented handover date.
     transferred_accounts = {
-        item["portal_username"] for item in profile.get("staff_replacements", [])
-        if item.get("portal_username")
+        item["username"]
+        for item in profile.get("account_mapping_history", {}).get("changed_logins", [])
+        if item.get("username")
     }
     filtered_users = accounts if scope == "team_only" else None
 
@@ -199,7 +206,8 @@ def run_gicumbi_pamela_profile(
         "scope":scope,
         "scope_note":(
             f"Team-only selects all {len(accounts)} confirmed current portal accounts. "
-            "The transferred account may contain records created by its previous user."
+            "Three accounts were reassigned in the 2026-10-14 Gicumbi roster; "
+            "individual authorship of older records cannot be verified."
             if scope=="team_only" else
             "All creator accounts in the six sectors are included. Non-roster "
             "accounts are NOT automatically Pamela staff."
@@ -207,6 +215,7 @@ def run_gicumbi_pamela_profile(
         "verified_usernames":accounts[:],
         "unresolved_planned_surveyors":unresolved,
         "account_transfers":profile.get("staff_replacements", []),
+        "account_mapping_history":profile.get("account_mapping_history", {}),
         "transferred_accounts_need_historical_review":sorted(transferred_accounts),
         "roster_csv":str(roster_path),
         "requested_assets":list(requested),
@@ -215,7 +224,7 @@ def run_gicumbi_pamela_profile(
         "limitations":[
             "Sector-level assignment only; the plan does not assign individual cells to surveyors.",
             "Surveyor attribution uses created_user; a different last_edited_user may have corrected the record.",
-            "Confirmed: Kwizerwa Edison uses previous holder Manzi Intime's portal account maniraguhatheogene01. Do not attribute historical activity to Edison without a known handover date.",
+            "Latest Gicumbi roster (2026-10-14): ninamenye9683 is Kwizerwa Edison; maniraguhatheogene01 is Ringuyeneza Frederic; janviersafari515 is Usabyeyezu Jean Dieu. Prior account-holder labels and handover dates are unverified for historical personal attribution.",
             "Planned transformer totals are work-plan targets, not counts of GIS features.",
             "A QA run is not proof that work occurred only on the planned 14–16 Sep dates.",
             "Pole district/sector/cell may be missing from source attributes; geometry is scoped spatially.",
