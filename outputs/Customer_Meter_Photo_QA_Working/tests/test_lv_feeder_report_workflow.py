@@ -70,7 +70,7 @@ class FeederWorkflowTests(unittest.TestCase):
             side_effect=fetch,
         ):
             result=run_lv_feeder_report(folder,"Gicumbi",
-                         usernames=["ninamenye9683"],gis=object())
+                         usernames=["ninamenye9683"],gis=object(),method="topology")
             self.assertEqual(result["starting_transformers"],1)
             self.assertEqual(result["connected_lv_line_ids"],3)
             self.assertEqual(result["surveyed_connected_lines"],2)
