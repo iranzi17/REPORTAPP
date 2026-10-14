@@ -278,3 +278,44 @@ Utility Network associations are compared in this watcher.
 
 Source query failure or missing requested OBJECTIDs still cancels the
 run—do not produce misleading partial reports.
+
+
+## First live LV pole audit — corrected live manufacturer field (October 14, 2026)
+
+Uploaded `pole_quality_20261013_172719_20261013_172807.xlsx`
+covers Burera, Gakenke and Rulindo, 29 Aug–13 Oct 2026 with 64
+surveyor accounts selected (42 returned). It contains 66,915
+Structure Junction LV Pole records: 63,664 wooden, 2,534 steel,
+702 concrete, and 15 with an unrecognized asset type.
+
+The **original** manufacturer QA result is INVALID as a completeness
+claim: the tool was matching singular `Manufacturer`, but the actual
+Structure Junction layer has `Manufacturers` (plural, string) and
+`Notes`. Thus 66,443 records were classified NOT_VERIFIED, while
+472 were GAP principally because the report also found 229 duplicate
+GlobalID groups / 458 distinct records. There were 15 original
+attribute-type issues, but the manufacturer completeness rule was not
+run on any source record. Do not interpret 0 NO_GAPS_FOUND as evidence
+that all poles are incomplete.
+
+Corrected the pole field lookup to resolve **`Manufacturers`**, without
+confusing it with `CountryOfManufacturer`. The Notes exception
+recognizes explicit English and Kinyarwanda absence statements (e.g.,
+`No name plate`, `Nta name plate iriho`). Notes such as
+`Name plate not clear` remain REVIEW/GAP when manufacturer is blank:
+they do not confirm a missing nameplate.
+
+Approximately 5,343 Notes entries explicitly describe no nameplate
+(English or Kinyarwanda), while about 479 report an unclear plate.
+These counts are based on Notes only; the first workbook **did not
+retrieve Manufacturers**, so neither the actual manufacturer-gap total
+nor the intersection of missing manufacturer values and qualifying
+Notes can yet be reported. Re-run with the corrected toolbox.
+
+The Structure Junction layer's live schema in this workbook has
+**no District, Sector or Cell attributes**. Every recorded-location
+field was therefore blank; assigning administrative locations to poles
+requires authoritative point-in-polygon spatial attribution from
+feature geometry against the hosted administrative boundaries.
+No district or cell was inferred from surveyor name or selection
+without spatial evidence.
