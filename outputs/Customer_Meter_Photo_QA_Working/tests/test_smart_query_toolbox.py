@@ -45,7 +45,7 @@ class SmartToolUiTests(unittest.TestCase):
             tool=app["AskReportApp"]()
             self.assertIn(app["AskReportApp"],app["Toolbox"]().tools)
             params=tool.getParameterInfo()
-            self.assertEqual(len(params),5)
+            self.assertEqual(len(params),6)
             self.assertEqual(params[0].name,"natural_language_query")
             self.assertIn("Preview query and count only (read-only)",params[1].filter.list)
             self.assertEqual(params[2].name,"output_query_log")
