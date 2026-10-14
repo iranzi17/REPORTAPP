@@ -21,6 +21,7 @@ from .progress_report import LINE_LAYER_ID
 CONFIG_ROOT = Path(__file__).resolve().parents[2] / "config"
 INDEX_PATH = CONFIG_ROOT / "rwanda_district_sectors.json"
 ROSTER_PATH = CONFIG_ROOT / "gicumbi_pamela_team.json"
+USER_NAMES_PATH = CONFIG_ROOT / "report_user_names.json"
 
 ASSET_PATTERNS = (
     ("pole", r"\b(?:lv\s+)?poles?\b"),
@@ -126,6 +127,52 @@ def _consume(remaining: str, match: re.Match) -> str:
     return remaining[:match.start()] + " " * (match.end()-match.start()) + remaining[match.end():]
 
 
+def resolve_surveyor_name(text: str, district: str | None) -> str:
+    """Resolve a complete display name to one current portal username.
+
+    In Gicumbi, prefer the explicitly updated six-sector Pamela roster
+    (incl. name spelling variants). Outside that context, ambiguous
+    names with multiple logins fail instead of selecting an arbitrary user.
+    """
+    normalized = " ".join(str(text or "").casefold().split())
+    if not normalized:
+        raise ValueError("Provide the surveyor's full name or portal username.")
+    all_names = json.loads(USER_NAMES_PATH.read_text(encoding="utf-8"))
+    matching_login = [user for user in all_names if user.casefold() == normalized]
+    if matching_login:
+        return matching_login[0]
+    if district and district.casefold() == "gicumbi":
+        profile = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
+        possible = set()
+        for sector in profile["sectors"]:
+            for surveyor in sector["surveyors"]:
+                aliases = [
+                    surveyor.get("mapped_full_name", ""),
+                    surveyor.get("name_in_plan", ""),
+                    *surveyor.get("display_aliases", []),
+                ]
+                if any(" ".join(str(a).casefold().split()) == normalized
+                       for a in aliases if a):
+                    possible.add(surveyor["username"])
+        if len(possible) == 1:
+            return next(iter(possible))
+        if len(possible) > 1:
+            raise ValueError("Ambiguous surveyor full name in Gicumbi team roster.")
+    possible = {login for login,full_name in all_names.items()
+                if " ".join(str(full_name).casefold().split()) == normalized}
+    if len(possible) == 1:
+        return next(iter(possible))
+    if len(possible) > 1:
+        raise ValueError(
+            f"'{text}' matches more than one portal username. "
+            "Specify the district or use the exact portal username."
+        )
+    raise ValueError(
+        f"Cannot verify surveyor '{text}'. Use the full name from the "
+        "current roster or a portal username."
+    )
+
+
 def parse_request(message: str) -> QueryPlan:
     """Interpret an intentionally finite query grammar; reject extra claims."""
     raw = str(message or "").strip()
@@ -200,10 +247,15 @@ def parse_request(message: str) -> QueryPlan:
         raise ValueError("Pamela team means six assigned sectors; omit the additional sector condition.")
 
     surveyors: tuple[str,...] = ()
-    user_m = re.search(r"\b(?:by|surveyor(?:\s+username)?|created\s+by)\s+([A-Za-z0-9._\-]{3,80})\b",remaining,re.I)
+    user_m = re.search(
+        r"\b(?:created\s+by|by|surveyor(?:\s+username)?)\s+"
+        r"(?P<person>[A-Za-z][A-Za-z0-9._'\-\s]{2,95}?)"
+        r"(?=\s+(?:with|where|and)\b|[,.!?;:]|$)",
+        remaining, re.I,
+    )
     if user_m:
-        username=user_m.group(1)
-        surveyors=(username,)
+        person=user_m.group("person").strip()
+        surveyors=(resolve_surveyor_name(person,district),)
         remaining=_consume(remaining,user_m)
     if pamela:
         if surveyors:
@@ -333,4 +385,7 @@ EXAMPLES = (
     "Count LV lines in Gicumbi sector Muko with missing transformer name",
     "Filter LV lines in Gasabo with voltage = 400",
     "Show LV poles in Pamela team with missing notes",
+    "Show LV poles in Gicumbi by Kwizerwa Edison with missing manufacturer",
+    "Count LV lines in Gicumbi by Ringuyeneza Frederic",
+    "Find distribution transformers in Gicumbi by Usabyezu Jean Dieu",
 )
