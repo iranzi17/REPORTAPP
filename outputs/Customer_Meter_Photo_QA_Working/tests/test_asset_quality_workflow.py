@@ -23,6 +23,7 @@ class FakeLayer:
                  "Phase_Normal", "Transformer_Protection_Switch",
                  "Transformer_mounting_support", "Number_of_Low_Voltage_feeders",
                  "Manufacturer", "Serial_No", "Rated_kVA", "Notes",
+                 "Append_Cable",
                  "District", "Sector", "Cell"]
         self.properties = SimpleNamespace(
             fields=[{"name": x, "alias": x, "type": "esriFieldTypeString"} for x in names],
@@ -57,12 +58,14 @@ def transformer(gid, oid, **values):
     }
 
 
-def pole(gid, oid, note="", manufacturer=None, atype=1):
+def pole(gid, oid, note="", manufacturer=None, atype=1,
+         append_cable="No"):
     return {
         "OBJECTID": oid, "GLOBALID": gid, "ASSETGROUP": 7,
         "ASSETTYPE": atype, "created_user": "pole.user",
         "created_date": 1789420000000, "last_edited_date": 1789420000000,
         "Manufacturer": manufacturer, "Notes": note,
+        "Append_Cable": append_cable,
         "District": "Rulindo", "Sector": "Buyoga", "Cell": "Munyana",
     }
 
@@ -141,6 +144,41 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertEqual(sheets["By Recorded Location"][1][:5],
                          ("Rulindo", "Buyoga", "Munyana", 3, 1))
         self.assertTrue(any("Manufacturer missing" in str(row[8]) for row in rows[1:]))
+        self.assertIn("Append_Cable", requests[1]["out_fields"])
+        self.assertEqual(rows[0][-2:], ("Append Cable", "Append Cable QA"))
+        self.assertEqual(
+            [row[-1] for row in rows[1:]], ["RECORDED", "RECORDED", "RECORDED"]
+        )
+        self.assertTrue(any(
+            row[0] == "append_cable" and row[1] == "Append_Cable"
+            for row in sheets["Schema Verification"]
+        ))
+
+    def test_missing_append_cable_in_pole_report_is_mandatory_issue(self):
+        report, sheets, _ = self.run_fake(
+            "pole", [
+                pole("{P1}", 101, "No name plate", append_cable=None),
+                pole("{P2}", 102, "No name plate", append_cable="No"),
+                pole("{P3}", 103, "No name plate", append_cable="Unknown"),
+            ],
+        )
+        self.assertEqual(report["with_gaps"], 2)
+        self.assertEqual(report["original_attribute_gap_records"], 2)
+        self.assertEqual(report["original_attribute_issue_count"], 2)
+        details=sheets["Asset Details"]
+        self.assertEqual(details[0][-2:], ("Append Cable", "Append Cable QA"))
+        self.assertEqual(
+            sum("Append Cable missing/unknown" in str(row[8])
+                for row in details[1:]), 2
+        )
+        summary=dict((row[0],row[1]) for row in sheets["Summary"]
+                     if row[0] and len(row)>1)
+        self.assertEqual(summary["Append Cable (mandatory) — missing/unknown"], 2)
+        self.assertEqual(summary["Append Cable — schema not verified"], 0)
+        self.assertTrue(any(
+            "Append Cable" in str(row[1])
+            for row in sheets["Rules"]
+        ))
 
     def test_duplicate_transformer_ids_across_multiple_attribute_batches_are_reported(self):
         # Distinct OBJECTIDs with one repeated GlobalID must not stop the QA.
