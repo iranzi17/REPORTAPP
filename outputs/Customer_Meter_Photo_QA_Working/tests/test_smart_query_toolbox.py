@@ -88,5 +88,50 @@ class SmartToolUiTests(unittest.TestCase):
             self.assertTrue(any("13 matching pole" in m for m in self.output))
             self.assertTrue(any("OUTPUT 2" in m for m in self.output))
 
+    def test_prepare_lv_lines_routes_to_original_three_asset_combined_qa(self):
+        from datetime import datetime
+        with patch.dict(sys.modules,{"arcpy":self.fake}):
+            app=self.toolbox()
+            tool=app["AskReportApp"]()
+            params=tool.getParameterInfo()
+            params[0].value="Prepare LV Lines Report for Kwizerwa Edison in Gicumbi"
+            params[5].value="C:/ReportDestination"
+            params[6].value="Geometry continuity - no Utility Network trace required"
+            params[7].value=1.5
+            params[8].value=datetime(2026,9,14)
+            params[9].value=datetime(2026,10,14)
+            globals_=tool.execute.__globals__
+            original_combined=globals_["run_combined_qa_report"]
+            original_feeder=globals_["run_lv_feeder_report"]
+            captured={}
+            def combined(**kwargs):
+                captured.update(kwargs)
+                return {
+                    "status":"COMPLETE","district":"Gicumbi",
+                    "output_xlsx":"C:/ReportDestination/Combined/QA.xlsx",
+                    "components_folder":"C:/ReportDestination/Combined/Components",
+                    "date_start":"2026-09-14","date_end":"2026-10-14",
+                    "start_date":"2026-09-14","end_date":"2026-10-14",
+                    "geometry":{"status":"COMPLETE"},
+                }
+            try:
+                globals_["run_combined_qa_report"]=combined
+                globals_["run_lv_feeder_report"]=lambda **kwargs: (
+                    (_ for _ in ()).throw(AssertionError(
+                        "Old standalone geometry report MUST NOT replace combined QA."
+                    ))
+                )
+                tool.execute(params,None)
+            finally:
+                globals_["run_combined_qa_report"]=original_combined
+                globals_["run_lv_feeder_report"]=original_feeder
+            self.assertEqual(captured["district"],"Gicumbi")
+            self.assertEqual(captured["usernames"],["ninamenye9683"])
+            self.assertEqual(captured["output_folder"],"C:/ReportDestination")
+            self.assertTrue(captured["include_continuity"])
+            self.assertEqual(captured["start_date"].date().isoformat(),"2026-09-14")
+            self.assertEqual(captured["end_date"].date().isoformat(),"2026-10-14")
+            self.assertTrue(any("Combined QA report saved" in m for m in self.output))
+
 if __name__=="__main__":
     unittest.main()
