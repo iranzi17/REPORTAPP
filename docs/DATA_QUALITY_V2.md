@@ -664,3 +664,37 @@ audits fails, the consolidated report is not reported as complete.
 Earlier successful original component workbooks are preserved with
 an `INCOMPLETE` manifest. The backend never fabricates missing
 surveyors, transformer origins or gap counts.
+
+
+## LV Pole mandatory field: Append Cable (October 14, 2026)
+
+The live Structure Junction LV Pole QA (asset group 7, types 1–3) now
+requires **Append Cable** in addition to the existing **Manufacturers**
+and **Notes**/no-nameplate rule. Candidate live field names are
+`Append_Cable`, `AppendCable`, `Append Cable`,
+`Append_Cables`, and `AppendCables`, resolved against actual live
+field names or unique exact aliases. The current runtime schema still
+needs confirmation of the exact source field name.
+
+- Each eligible pole requires a **known response**. Explicit
+  `Yes` and `No` are both valid; blank, NULL, `Unknown`, `N/A`
+  and similar unselected values are gaps.
+- Numeric coded values such as `0` are valid when the **actual
+  ArcGIS coded domain** resolves to a known choice such as `No`.
+  A string `"0"` without verified domain mapping is not
+  silently assumed to be a `No`.
+- Unlike manufacturer, this field has **no nameplate Notes exception**.
+  A pole with no manufacturer nameplate still needs Append Cable
+  recorded.
+- If the source layer does not provide a unique matching field,
+  QA displays **NOT_VERIFIED** and shows the unmapped field under
+  **Schema Verification**. It must not call poles complete.
+- Standalone `Watch LV Pole Data Quality` reports add `Append Cable`
+  and `Append Cable QA` columns, a dedicated summary issue count,
+  and a Rule-sheet description. The combined
+  `Prepare Combined QA Report` inherits these checks and shows
+  the updated pole results in its prefixed sheets.
+- `Ask REPORTAPP` now supports explicit missing/equal filtering, e.g.
+  `Show LV poles in Gicumbi with missing append cable`.
+- Transformer historical seven mandatory correction categories and LV
+  line rules are unaffected. All reads remain source read-only.
