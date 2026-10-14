@@ -133,5 +133,44 @@ class SmartToolUiTests(unittest.TestCase):
             self.assertEqual(captured["end_date"].date().isoformat(),"2026-10-14")
             self.assertTrue(any("Combined QA report saved" in m for m in self.output))
 
+    def test_surveyor_template_query_uses_live_schema_excel_audit(self):
+        with patch.dict(sys.modules,{"arcpy":self.fake}):
+            app=self.toolbox()
+            tool=app["AskReportApp"]()
+            params=tool.getParameterInfo()
+            params[0].value=(
+                "Give me surveyors who are filling the height of pole "
+                "with the values greater than 12 in Gicumbi"
+            )
+            params[2].value="C:/ReportDestination/Query_Height.json"
+            params[5].value="C:/ReportDestination"
+            tool.updateMessages(params)
+            self.assertIsNone(params[0].error)
+            backend=tool.execute.__globals__
+            original=backend["run_template_surveyor_audit"]
+            captured={}
+            def audit(**kw):
+                captured.update(kw)
+                return {
+                    "output_xlsx":"C:/ReportDestination/surveyors.xlsx",
+                    "output_json":"C:/ReportDestination/Query_Height.json",
+                    "resolved_criteria":[{
+                        "live_field":"Pole_Height","operator":"gt","value":12,
+                    }],
+                    "matching_features":14,
+                    "matching_surveyors":3,
+                }
+            backend["run_template_surveyor_audit"]=audit
+            try:
+                tool.execute(params,None)
+            finally:
+                backend["run_template_surveyor_audit"]=original
+            self.assertEqual(captured["output_folder"],"C:/ReportDestination")
+            self.assertEqual(captured["request"],params[0].value)
+            self.assertTrue(any("14 matching features" in str(message)
+                                for message in self.output))
+            self.assertTrue(any("surveyor template audit Excel" in str(message).lower()
+                                for message in self.output))
+
 if __name__=="__main__":
     unittest.main()
