@@ -29,6 +29,14 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
         self.assertEqual(sum(len(s["surveyors"]) for s in data["sectors"]), 12)
         self.assertEqual(len(users), 11)
         self.assertEqual(unknown, [{"name":"Kwizerwa Edison","sector":"Rukomo"}])
+        self.assertEqual(data["staff_replacements"][0]["incoming"],"Kwizerwa Edison")
+        self.assertEqual(data["staff_replacements"][0]["outgoing"],"Manzi Intime")
+        edison = next(person for sector in data["sectors"]
+                      for person in sector["surveyors"]
+                      if person["name_in_plan"] == "Kwizerwa Edison")
+        self.assertEqual(edison["replaces"], "Manzi Intime")
+        self.assertIsNone(edison["username"])
+        self.assertNotIn("maniraguhatheogene01", users)
         self.assertIn("martinnzubahimana", users)
         self.assertIn("julesmugae72", users)
         self.assertIn("thomascyiza", users)
@@ -110,6 +118,11 @@ class GicumbiPamelaProfileTests(unittest.TestCase):
             self.assertEqual(len(roster),12)
             self.assertEqual(sum(r["Mapping Status"].startswith("UNMAPPED")
                                  for r in roster),1)
+            record=next(item for item in roster
+                        if item["Planned Surveyor"]=="Kwizerwa Edison")
+            self.assertEqual(record["Replaces"],"Manzi Intime")
+            self.assertEqual(record["Portal Username"],"")
+            self.assertIn("confirm",record["Staffing Change Note"].casefold())
 
     def test_all_accounts_mode_must_not_label_outside_username_as_team(self):
         calls=[]
