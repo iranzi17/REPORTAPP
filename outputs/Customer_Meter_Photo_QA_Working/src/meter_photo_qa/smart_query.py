@@ -140,7 +140,7 @@ def parse_request(message: str) -> QueryPlan:
     remaining = raw[command.end():]
     found = []
     for asset, regex in ASSET_PATTERNS:
-        match = re.search(regex, remaining, flags=re.IGNORECASE)
+        match = re.match(r"^\\s*" + regex, remaining, flags=re.IGNORECASE)
         if match:
             found.append((asset, match))
     if len(found) != 1:
