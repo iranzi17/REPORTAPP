@@ -11,6 +11,7 @@ class SurveyorTemplateAuditTests(unittest.TestCase):
         {"name":"GLOBALID","type":"esriFieldTypeGlobalID"},
         {"name":"created_user","type":"esriFieldTypeString"},
         {"name":"ASSETGROUP","type":"esriFieldTypeInteger"},
+        {"name":"ASSETTYPE","type":"esriFieldTypeInteger"},
         {"name":"Pole_Height","alias":"Pole Height","type":"esriFieldTypeDouble"},
         {"name":"Manufacturers","alias":"Manufacturer","type":"esriFieldTypeString"},
         {"name":"Append_Cable","alias":"Append Cable","type":"esriFieldTypeSmallInteger"},
