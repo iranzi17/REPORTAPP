@@ -49,11 +49,11 @@ class AssetQualityTests(unittest.TestCase):
 
     def test_missing_manufacturer_must_have_specific_nameplate_note(self):
         mapping = {"manufacturer":"Manufacturer", "notes":"Notes",
-                   "append_cable":"Append_Cable"}
+                   "append_cable":"Append_Cable", "height":"Pole_Height"}
         for note in ("", "N/A", "Manufacturer unknown", "Pole inspected"):
             result = evaluate_asset({
                 "ASSETGROUP":7, "ASSETTYPE":1, "GLOBALID":"P1",
-                "Manufacturer":None, "Notes":note, "Append_Cable":"No",
+                "Manufacturer":None, "Notes":note, "Append_Cable":"No", "Pole_Height":10,
             }, "pole", mapping)
             self.assertEqual(result["status"], "GAP", note)
             self.assertIn("Manufacturer missing: Notes must state no name plate",
@@ -62,7 +62,7 @@ class AssetQualityTests(unittest.TestCase):
                      "No nameplate found"):
             result = evaluate_asset({
                 "ASSETGROUP":7, "ASSETTYPE":3, "GLOBALID":"P2",
-                "Manufacturer":None, "Notes":note, "Append_Cable":"No",
+                "Manufacturer":None, "Notes":note, "Append_Cable":"No", "Pole_Height":10,
             }, "pole", mapping)
             self.assertEqual(result["status"], "NO_GAPS_FOUND")
             self.assertEqual(result["values"]["manufacturer_status"],
@@ -76,18 +76,19 @@ class AssetQualityTests(unittest.TestCase):
             {"name": "CountryOfManufacturer", "alias": "Country Of Manufacturer"},
             {"name": "Notes", "alias": "Notes"},
             {"name": "Append_Cable", "alias": "Append Cable"},
+            {"name": "Pole_Height", "alias": "Pole Height"},
         ]
         mapping = resolve_fields(fields, "pole")
         self.assertEqual(mapping, {
             "manufacturer": "Manufacturers",
             "notes": "Notes",
-            "append_cable": "Append_Cable",
+            "append_cable": "Append_Cable", "height":"Pole_Height",
         })
         for pole_type in (1, 2, 3):
             good = evaluate_asset({
                 "GLOBALID": "{POLE}", "OBJECTID": 15,
                 "ASSETGROUP": 7, "ASSETTYPE": pole_type,
-                "Manufacturers": "Company X", "Notes": "", "Append_Cable": "No",
+                "Manufacturers": "Company X", "Notes": "", "Append_Cable": "No", "Pole_Height":10,
             }, "pole", mapping)
             self.assertEqual(good["status"], "NO_GAPS_FOUND")
             self.assertEqual(good["values"]["manufacturer_status"], "RECORDED")
@@ -96,19 +97,19 @@ class AssetQualityTests(unittest.TestCase):
                 "GLOBALID": "{POLE}", "OBJECTID": 16,
                 "ASSETGROUP": 7, "ASSETTYPE": pole_type,
                 "Manufacturers": None, "Notes": "Name plate not clear",
-                "Append_Cable": "Yes",
+                "Append_Cable": "Yes", "Pole_Height":10,
             }, "pole", mapping)
             self.assertEqual(wrong["status"], "GAP")
 
     def test_kinyarwanda_explicit_absence_of_pole_nameplate(self):
         fields = {"manufacturer": "Manufacturers", "notes": "Notes",
-                  "append_cable": "Append_Cable"}
+                  "append_cable": "Append_Cable", "height":"Pole_Height"}
         for note in ("Nta name plate iriho", "Nta nameplate iriho"):
             with self.subTest(note=note):
                 result = evaluate_asset({
                     "GLOBALID": "{POLE}", "OBJECTID": 123,
                     "ASSETGROUP": 7, "ASSETTYPE": 1,
-                    "Manufacturers": None, "Notes": note, "Append_Cable":"No",
+                    "Manufacturers": None, "Notes": note, "Append_Cable":"No", "Pole_Height":10,
                 }, "pole", fields)
                 self.assertEqual(result["status"], "NO_GAPS_FOUND")
                 self.assertEqual(
@@ -120,20 +121,20 @@ class AssetQualityTests(unittest.TestCase):
             result = evaluate_asset({
                 "GLOBALID": "{POLE}", "OBJECTID": 124,
                 "ASSETGROUP": 7, "ASSETTYPE": 1,
-                "Manufacturers": None, "Notes": note, "Append_Cable":"No",
+                "Manufacturers": None, "Notes": note, "Append_Cable":"No", "Pole_Height":10,
             }, "pole", fields)
             self.assertEqual(result["status"], "GAP", note)
 
     def test_append_cable_is_mandatory_even_with_documented_no_nameplate(self):
         fields = resolve_fields([
-            {"name":"Manufacturers"}, {"name":"Notes"}, {"name":"Append_Cable"}
+            {"name":"Manufacturers"}, {"name":"Notes"}, {"name":"Append_Cable"}, {"name":"Pole_Height"}
         ],"pole")
         for raw in (None, "", "Unknown", "N/A"):
             with self.subTest(value=raw):
                 pole = evaluate_asset({
                     "OBJECTID":5, "GLOBALID":"{P5}", "ASSETGROUP":7, "ASSETTYPE":1,
                     "Manufacturers":None, "Notes":"No name plate",
-                    "Append_Cable":raw,
+                    "Append_Cable":raw, "Pole_Height":10,
                 },"pole",fields)
                 self.assertEqual(pole["status"],"GAP")
                 self.assertIn(
@@ -145,14 +146,14 @@ class AssetQualityTests(unittest.TestCase):
 
     def test_append_cable_yes_and_no_are_valid_answers(self):
         fields = {"manufacturer":"Manufacturers", "notes":"Notes",
-                  "append_cable":"Append_Cable"}
+                  "append_cable":"Append_Cable", "height":"Pole_Height"}
         for answer in ("Yes", "No", 0, 1):
             with self.subTest(answer=answer):
                 value = evaluate_asset({
                     "GLOBALID":"{A}", "OBJECTID":1,
                     "ASSETGROUP":7,"ASSETTYPE":2,
                     "Manufacturers":"ABC", "Notes":"",
-                    "Append_Cable":answer,
+                    "Append_Cable":answer, "Pole_Height":10,
                 },"pole",fields,{"Append_Cable":{0:"No",1:"Yes"}})
                 self.assertEqual(value["status"],"NO_GAPS_FOUND")
                 self.assertEqual(value["values"]["append_cable_status"],"RECORDED")
@@ -160,7 +161,7 @@ class AssetQualityTests(unittest.TestCase):
             "GLOBALID":"{A}", "OBJECTID":1,
             "ASSETGROUP":7,"ASSETTYPE":2,
             "Manufacturers":"ABC", "Notes":"",
-            "Append_Cable":"0",
+            "Append_Cable":"0", "Pole_Height":10,
         },"pole",fields,{"Append_Cable":{0:"No",1:"Yes"}})
         self.assertEqual(coded_text["status"],"NO_GAPS_FOUND")
         self.assertEqual(coded_text["values"]["append_cable"],"No")
@@ -168,7 +169,7 @@ class AssetQualityTests(unittest.TestCase):
             "GLOBALID":"{A}", "OBJECTID":1,
             "ASSETGROUP":7,"ASSETTYPE":2,
             "Manufacturers":"ABC", "Notes":"",
-            "Append_Cable":"0",
+            "Append_Cable":"0", "Pole_Height":10,
         },"pole",fields)
         self.assertEqual(ambiguous_zero["status"],"GAP")
 
@@ -180,7 +181,7 @@ class AssetQualityTests(unittest.TestCase):
         unknown=evaluate_asset({
             "GLOBALID":"{P}", "OBJECTID":1,"ASSETGROUP":7,"ASSETTYPE":1,
             "Manufacturers":"ABC","Notes":"",
-            "Append Cable":0,
+            "Append Cable":0, "Pole_Height":10,
         },"pole",mapping,{"Append Cable":{0:"Unknown",1:"Yes",2:"No"}})
         self.assertEqual(unknown["status"],"GAP")
         missing_field = evaluate_asset({
@@ -188,7 +189,7 @@ class AssetQualityTests(unittest.TestCase):
             "ASSETGROUP":7,"ASSETTYPE":1,
             "Manufacturers":"ABC","Notes":"",
         },"pole",{"manufacturer":"Manufacturers","notes":"Notes",
-                  "append_cable":None})
+                  "append_cable":None,"height":"Pole_Height"})
         self.assertEqual(missing_field["status"],"NOT_VERIFIED")
         self.assertIn("append_cable", missing_field["unverified_checks"])
         self.assertEqual(missing_field["values"]["append_cable_status"],
@@ -201,6 +202,26 @@ class AssetQualityTests(unittest.TestCase):
         }, "pole", {"manufacturer":"Manufacturer", "notes":None})
         self.assertEqual(result["status"], "GAP")
         self.assertIn("notes", result["unverified_checks"])
+
+    def test_pole_height_above_12_requires_mv_hv_purpose_in_notes(self):
+        from meter_photo_qa.asset_quality import assess_pole_height,has_explicit_mv_hv_note
+        for note in (
+            "Pole for MV lines",
+            "The pole supports High Voltage Lines",
+            "HV tower",
+            "Used for medium voltage conductors",
+        ):
+            with self.subTest(note=note):
+                self.assertTrue(has_explicit_mv_hv_note(note))
+                self.assertEqual(assess_pole_height(13.2,note)[0],
+                                 "MV_HV_NOTES_DOCUMENTED")
+        for note in ("", "No nameplate", "not for MV lines",
+                     "No HV tower is installed", "LV only", "MV unknown"):
+            with self.subTest(note=note):
+                self.assertEqual(assess_pole_height(13,note)[0],
+                                 "MV_HV_NOTES_REQUIRED")
+        self.assertEqual(assess_pole_height(12,"")[0],"WITHIN_THRESHOLD")
+        self.assertEqual(assess_pole_height(None,"")[0],"UNRECORDED")
 
     def test_zero_phase_code_is_valid_when_domain_label_one(self):
         self.assertFalse(missing_value(0, {0:"1 phase", 1:"3 phases"}))
