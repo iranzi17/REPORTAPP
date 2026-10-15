@@ -7,3 +7,6 @@ __pycache__/
 
 # Generated QA reports: tracked historical pilot files remain tracked
 /outputs/Customer_Meter_Photo_QA_Working/outputs/*.xlsx
+
+# Selected surveyor monitoring contains local recipient settings and alert histories.
+/outputs/Customer_Meter_Photo_QA_Working/outputs/REPORTAPP_Surveyor_Notifications/
