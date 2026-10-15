@@ -1,9 +1,31 @@
 from __future__ import annotations
 import unittest
 from meter_photo_qa.asset_quality import (
-    ASSETS, NO_NAMEPLATE, domain_map, evaluate_asset, missing_value,
+    ASSETS, NO_NAMEPLATE, domain_map, evaluate_asset as evaluate_asset_raw, missing_value,
     resolve_fields, summarize_assets,
 )
+
+
+# Existing tests focus on individual legacy rules and supply valid values for
+# the four newly mandatory fields. Dedicated tests below invoke the raw engine.
+EXTRA_POLE_FIELDS = {
+    "service_pole":"Service_Pole", "structure":"PoleStructure",
+    "insulator_type":"InsulatorTypes", "number_of_circuit":"Number_Circuit",
+}
+EXTRA_POLE_VALUES = {
+    "Service_Pole":"No", "PoleStructure":1, "InsulatorTypes":1,
+    "Number_Circuit":1,
+}
+
+
+def evaluate_asset(attributes, asset, mapping, domains=None):
+    if asset == "pole":
+        mapping = dict(mapping)
+        for key, name in EXTRA_POLE_FIELDS.items():
+            if not mapping.get(key):
+                mapping[key] = name
+        attributes = {**EXTRA_POLE_VALUES, **attributes}
+    return evaluate_asset_raw(attributes, asset, mapping, domains)
 
 
 class AssetQualityTests(unittest.TestCase):
@@ -47,26 +69,33 @@ class AssetQualityTests(unittest.TestCase):
         self.assertEqual(result["status"], "NOT_VERIFIED")
         self.assertIn("name", result["unverified_checks"])
 
-    def test_missing_manufacturer_must_have_specific_nameplate_note(self):
+    def test_missing_manufacturer_flag_only_if_notes_empty(self):
         mapping = {"manufacturer":"Manufacturer", "notes":"Notes",
                    "append_cable":"Append_Cable", "height":"Pole_Height"}
-        for note in ("", "N/A", "Manufacturer unknown", "Pole inspected"):
-            result = evaluate_asset({
+        for note in ("", "  ", None):
+            result=evaluate_asset({
                 "ASSETGROUP":7, "ASSETTYPE":1, "GLOBALID":"P1",
-                "Manufacturer":None, "Notes":note, "Append_Cable":"No", "Pole_Height":10,
-            }, "pole", mapping)
-            self.assertEqual(result["status"], "GAP", note)
-            self.assertIn("Manufacturer missing: Notes must state no name plate",
-                          result["issues"])
-        for note in ("there is no name plate", "Nameplate missing",
-                     "No nameplate found"):
-            result = evaluate_asset({
-                "ASSETGROUP":7, "ASSETTYPE":3, "GLOBALID":"P2",
-                "Manufacturer":None, "Notes":note, "Append_Cable":"No", "Pole_Height":10,
-            }, "pole", mapping)
-            self.assertEqual(result["status"], "NO_GAPS_FOUND")
-            self.assertEqual(result["values"]["manufacturer_status"],
-                             "DOCUMENTED_NO_NAMEPLATE")
+                "Manufacturer":None, "Notes":note, "Append_Cable":"No",
+                "Pole_Height":10,
+            },"pole",mapping)
+            self.assertEqual(result["status"],"GAP")
+            self.assertIn("Manufacturer missing and Notes empty",result["issues"])
+        for note in ("N/A", "Manufacturer unknown", "Pole inspected",
+                     "Name plate is not clear", "No name plate"):
+            result=evaluate_asset({
+                "ASSETGROUP":7, "ASSETTYPE":1, "GLOBALID":"P2",
+                "Manufacturer":None, "Notes":note, "Append_Cable":"No",
+                "Pole_Height":10,
+            },"pole",mapping)
+            self.assertEqual(result["status"],"NO_GAPS_FOUND",note)
+            self.assertFalse(any("Manufacturer missing" in issue
+                                 for issue in result["issues"]))
+            if "No name plate" in note:
+                self.assertEqual(result["values"]["manufacturer_status"],
+                                 "DOCUMENTED_NO_NAMEPLATE")
+            else:
+                self.assertEqual(result["values"]["manufacturer_status"],
+                                 "NOTES_PRESENT")
 
     def test_live_reg_pole_schema_uses_plural_manufacturers(self):
         # Actual Structure Junction layer 12 fields verified against the
@@ -83,6 +112,8 @@ class AssetQualityTests(unittest.TestCase):
             "manufacturer": "Manufacturers",
             "notes": "Notes",
             "append_cable": "Append_Cable", "height":"Pole_Height",
+            "service_pole": None, "structure": None,
+            "insulator_type": None, "number_of_circuit": None,
         })
         for pole_type in (1, 2, 3):
             good = evaluate_asset({
@@ -124,7 +155,44 @@ class AssetQualityTests(unittest.TestCase):
                 "ASSETGROUP": 7, "ASSETTYPE": 1,
                 "Manufacturers": None, "Notes": note, "Append_Cable":"No", "Pole_Height":10,
             }, "pole", fields)
-            self.assertEqual(result["status"], "GAP", note)
+            self.assertEqual(result["status"], "NO_GAPS_FOUND", note)
+            self.assertEqual(result["values"]["manufacturer_status"], "NOTES_PRESENT")
+
+    def test_live_pole_mapping_and_four_additional_mandatory_values(self):
+        fields=[
+            {"name":"Manufacturers"},{"name":"Notes"},{"name":"AppendCable"},
+            {"name":"Height"},{"name":"Service_Pole"},{"name":"PoleStructure"},
+            {"name":"InsulatorTypes"},{"name":"Number_Circuit"},
+        ]
+        mapping=resolve_fields(fields,"pole")
+        self.assertEqual({k:mapping[k] for k in EXTRA_POLE_FIELDS},EXTRA_POLE_FIELDS)
+        complete={
+            "GLOBALID":"{POLE}","OBJECTID":150,"ASSETGROUP":7,"ASSETTYPE":2,
+            "Manufacturers":"A","Notes":"","AppendCable":"No","Height":11,
+            "Service_Pole":0,"PoleStructure":2,"InsulatorTypes":3,
+            "Number_Circuit":2,
+        }
+        good=evaluate_asset_raw(complete,"pole",mapping,{
+            "Service_Pole":{0:"No",1:"Yes"}
+        })
+        self.assertEqual(good["status"],"NO_GAPS_FOUND")
+        self.assertEqual(good["values"]["service_pole_status"],"RECORDED")
+        invalid=dict(complete,Manufacturers=None,Notes="Pole inspected",
+                     Service_Pole=None,PoleStructure="Unknown",
+                     InsulatorTypes=None,Number_Circuit=0)
+        result=evaluate_asset_raw(invalid,"pole",mapping)
+        self.assertEqual(result["status"],"GAP")
+        self.assertEqual(len(result["issues"]),4)
+        self.assertIn("Service Pole missing/unknown (mandatory LV pole field)",result["issues"])
+        self.assertIn("Structure missing/unknown (mandatory LV pole field)",result["issues"])
+        self.assertIn("Insulator Type missing/unknown (mandatory LV pole field)",result["issues"])
+        self.assertIn("Number of Circuit must be a positive whole number",result["issues"])
+        self.assertFalse(any("Manufacturer missing" in x for x in result["issues"]))
+        missing_map=resolve_fields(fields[:4],"pole")
+        incomplete=evaluate_asset_raw(complete,"pole",missing_map)
+        self.assertEqual(incomplete["status"],"NOT_VERIFIED")
+        for key in EXTRA_POLE_FIELDS:
+            self.assertIn(key,incomplete["unverified_checks"])
 
     def test_append_cable_is_mandatory_even_with_documented_no_nameplate(self):
         fields = resolve_fields([
