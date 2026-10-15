@@ -5,7 +5,7 @@
         defaultNamespace="ReportappNavigationBridge"
         xmlns="http://schemas.esri.com/DADF/Registry">
   <AddInInfo id="{B5ED8B73-4944-47D7-B8DF-A4EE9D75C9C2}"
-             version="0.1" desktopVersion="3.3">
+             version="0.1" desktopVersion="3.4">
     <Name>REPORTAPP Alert Zoom Bridge</Name>
     <Description>Read-only selection/zoom of REG alerts in the active map.</Description>
     <Author>REPORTAPP</Author>

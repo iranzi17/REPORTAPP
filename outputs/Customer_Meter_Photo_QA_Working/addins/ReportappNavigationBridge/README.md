@@ -1,6 +1,8 @@
 # REPORTAPP — clickable ArcGIS Pro notifications (SDK bridge)
 
 **Status: SDK source prototype. NOT compiled or installed on the user's machine.**
+
+**Verified user target: ArcGIS Pro 3.4.0.** Build against the ArcGIS Pro SDK for .NET 3.4, Microsoft .NET 8 and Visual Studio 2022. The SDK-generated project must use its 3.4 package references and `desktopVersion="3.4"`. The C# prototype is not yet compiled, installed or verified end-to-end.
 The existing Task Scheduler monitor remains unchanged.
 
 ## Why this is a separate add-in
