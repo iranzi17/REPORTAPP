@@ -279,6 +279,8 @@ class NotificationTests(unittest.TestCase):
             self.assertIn("New-ScheduledTaskTrigger",script)
             self.assertIn("RepetitionInterval",script)
             self.assertIn("Interactive",script)
+            self.assertIn("-RunLevel Limited",script)
+            self.assertNotIn("-RunLevel LeastPrivilege",script)
             self.assertIn(str(source),script)
             with self.assertRaises(FileExistsError):
                 configure_monitoring(["ninamenye9683"],folder,
