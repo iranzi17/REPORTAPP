@@ -801,8 +801,12 @@ New ArcGIS Pro tool: **Configure Surveyor Quality Notifications (5-minute)**.
 2. Choose LV Lines, Distribution Transformers, LV Poles or all three.
 3. Choose the notification output folder, and a delivery channel:
    Windows desktop (default) or SMTP email.
-4. Run the tool. It produces configuration and a local PowerShell
-   setup script, but DOES NOT start monitoring automatically.
+4. The tool creates configuration and a local PowerShell
+   installation script. Tick **Activate monitoring now** to explicitly
+   register the one-minute Windows task during setup, or leave it
+   unchecked and run the installation script manually after reviewing it.
+   Windows task registration success is not proof of REG authentication
+   or successful toast/email delivery.
 5. For Windows desktop notifications, install winotify into the
    ArcGIS Pro Python environment: python -m pip install winotify.
 6. Execute the generated PowerShell file
