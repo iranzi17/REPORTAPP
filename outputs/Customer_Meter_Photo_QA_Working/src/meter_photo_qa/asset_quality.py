@@ -47,6 +47,8 @@ ASSETS = {
             "notes": ["Notes", "Remarks", "Pole_Notes"],
             "append_cable": ["Append_Cable", "AppendCable", "Append Cable",
                              "Append_Cables", "AppendCables"],
+            "height": ["Pole_Height", "PoleHeight", "Height_of_Pole", "Height_Of_Pole",
+                       "Pole_Height_m", "Height_m", "Height", "Height of Pole"],
         },
         "priority": ("manufacturer", "notes", "append_cable"),
     },
@@ -72,6 +74,51 @@ def has_explicit_no_nameplate_note(note):
     return bool(NO_NAMEPLATE.search(str(note or "")) or
                 NO_NAMEPLATE_RW.search(str(note or "")))
 
+
+
+MV_HV_PURPOSE = re.compile(
+    r"\b(?:mv|hv|medium[\s-]*voltage|high[\s-]*voltage)\s+"
+    r"(?:lines?|poles?|towers?|conductors?)\b"
+    r"|\b(?:for|supports?|supporting|serves?|serving|carries?|carrying|"
+    r"used\s+for|belongs?\s+to)\s+(?:an?\s+)?"
+    r"(?:mv|hv|medium[\s-]*voltage|high[\s-]*voltage)\b",
+    re.IGNORECASE,
+)
+
+
+def has_explicit_mv_hv_note(note):
+    """Accept an affirmative MV/HV use description, not a negated mention."""
+    text=" ".join(str(note or "").split())
+    for found in MV_HV_PURPOSE.finditer(text):
+        previous=text[max(0,found.start()-32):found.start()]
+        if re.search(r"\b(?:not|no|without|never|isn't|isnt)\s+"
+                     r"(?:(?:used|designed)\s+)?(?:for\s+)?$", previous, re.I):
+            continue
+        if re.search(r"\b(?:not|no|without|never)\b.{0,16}$",previous,re.I):
+            continue
+        return True
+    return False
+
+
+def assess_pole_height(height, note, *, threshold=12.0):
+    """Compare raw stored pole height; value/unit not independently calibrated."""
+    if height is None or not str(height).strip():
+        return "UNRECORDED", None
+    try:
+        import math
+        value=float(height)
+        if not math.isfinite(value):
+            return "INVALID_NUMERIC", None
+    except (ValueError,TypeError):
+        return "INVALID_NUMERIC", None
+    if value<=threshold:
+        return "WITHIN_THRESHOLD", None
+    if has_explicit_mv_hv_note(note):
+        return "MV_HV_NOTES_DOCUMENTED", None
+    return (
+        "MV_HV_NOTES_REQUIRED",
+        "Pole height > 12: Notes must explicitly identify MV line or HV line/tower use",
+    )
 
 def resolve_fields(layer_fields, asset):
     """Match verified service field names or aliases; never fuzzy guess."""
@@ -147,6 +194,8 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
     notes_field = mapping.get("notes")
     note = str(attributes.get(notes_field) or "").strip() if notes_field else ""
     missing_checks = sorted(key for key in spec["priority"] if not mapping.get(key))
+    if asset=="pole" and not mapping.get("height"):
+        missing_checks.append("height_conditional_check")
     if not gid.strip():
         issues.append("GlobalID missing")
     try:
@@ -192,6 +241,14 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
         # installations, but 0 can be an intentional future/unused asset.
         # Never infer missing from numerical zero without an agreed business rule.
     else:
+        height_field = mapping.get("height")
+        if height_field:
+            height_status,height_issue=assess_pole_height(attributes.get(height_field),note)
+            values["height_status"]=height_status
+            if height_issue:
+                issues.append(height_issue)
+        else:
+            values["height_status"]="NOT_VERIFIED_FIELD"
         append_field = mapping.get("append_cable")
         if not append_field:
             values["append_cable_status"] = "NOT_VERIFIED_FIELD"
