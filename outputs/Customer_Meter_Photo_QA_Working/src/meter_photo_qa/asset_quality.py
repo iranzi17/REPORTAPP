@@ -49,8 +49,16 @@ ASSETS = {
                              "Append_Cables", "AppendCables"],
             "height": ["Pole_Height", "PoleHeight", "Height_of_Pole", "Height_Of_Pole",
                        "Pole_Height_m", "Height_m", "Height", "Height of Pole"],
+            # Exact field names confirmed in the Structure Junction pole schema.
+            "service_pole": ["Service_Pole", "ServicePole", "Service Pole"],
+            "structure": ["PoleStructure", "Pole_Structure", "Pole Structure"],
+            "insulator_type": ["InsulatorTypes", "Insulator_Types",
+                               "InsulatorType", "Insulator Type"],
+            "number_of_circuit": ["Number_Circuit", "NumberOfCircuit",
+                                  "Number_of_Circuit", "Number of Circuit"],
         },
-        "priority": ("manufacturer", "notes", "append_cable"),
+        "priority": ("manufacturer", "notes", "append_cable",
+                     "service_pole", "structure", "insulator_type", "number_of_circuit"),
     },
 }
 UNKNOWN = {"", "unknown", "select value", "select", "n/a", "na", "null", "none", "-", "not known", "not recorded"}
@@ -168,6 +176,20 @@ def missing_value(value, domain=None):
     return False
 
 
+def missing_pole_field_value(raw, domain=None):
+    """Honor coded text zero only when the verified domain defines it.
+
+    This preserves valid Yes/No answers while rejecting Unknown and blank.
+    """
+    if isinstance(raw, str) and raw.strip() == "0" and domain:
+        label = next(
+            (v for code, v in domain.items() if str(code).strip() == "0"),
+            None,
+        )
+        return label is None or str(label).strip().casefold() in UNKNOWN
+    return missing_value(raw, domain)
+
+
 def domain_map(layer_properties, group_code):
     """Read only subtype-coded domains for our asset group."""
     output = {}
@@ -278,13 +300,44 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
                 issues.append("Append Cable missing/unknown (mandatory LV pole field)")
             else:
                 values["append_cable_status"] = "RECORDED"
+        # Additional mandatory template fields for LV poles.
+        for key, label in (
+            ("service_pole", "Service Pole"),
+            ("structure", "Structure"),
+            ("insulator_type", "Insulator Type"),
+            ("number_of_circuit", "Number of Circuit"),
+        ):
+            source = mapping.get(key)
+            if not source:
+                values[key + "_status"] = "NOT_VERIFIED_FIELD"
+                continue
+            raw = attributes.get(source)
+            value_domain = (domains or {}).get(source, {})
+            if missing_pole_field_value(raw, value_domain):
+                values[key + "_status"] = "MISSING_OR_UNKNOWN"
+                issues.append(f"{label} missing/unknown (mandatory LV pole field)")
+            elif key == "number_of_circuit":
+                try:
+                    count = float(raw)
+                    valid_count = count.is_integer() and count > 0
+                except (TypeError, ValueError, OverflowError):
+                    valid_count = False
+                if not valid_count:
+                    values[key + "_status"] = "INVALID_COUNT"
+                    issues.append("Number of Circuit must be a positive whole number")
+                else:
+                    values[key + "_status"] = "RECORDED"
+            else:
+                values[key + "_status"] = "RECORDED"
         field = mapping.get("manufacturer")
         if field and missing_value(attributes.get(field), (domains or {}).get(field)):
-            if has_explicit_no_nameplate_note(note):
+            if not note:
+                values["manufacturer_status"] = "MISSING_MANUFACTURER_NOTES"
+                issues.append("Manufacturer missing and Notes empty")
+            elif has_explicit_no_nameplate_note(note):
                 values["manufacturer_status"] = "DOCUMENTED_NO_NAMEPLATE"
             else:
-                values["manufacturer_status"] = "MISSING_MANUFACTURER_EXPLANATION"
-                issues.append("Manufacturer missing: Notes must state no name plate")
+                values["manufacturer_status"] = "NOTES_PRESENT"
         elif field:
             values["manufacturer_status"] = "RECORDED"
         else:
