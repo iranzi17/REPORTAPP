@@ -12,7 +12,7 @@ click and safely select/zoom a feature using `QueuedTask.Run`.
 
 ## Link mechanism (no remote calls)
 
-1. The desktop notification uses the local `reportapp://zoom?asset=pole&objectid=4422434` URL.
+1. The desktop notification uses the local `reportapp://zoom/pole/4422434` URL.
 2. On an **explicit** installation command, a per-user `HKCU\Software\Classes\reportapp`
    scheme is registered, pointing to the REPORTAPP Python click handler.
 3. The click handler validates the asset/OBJECTID and atomically writes a small
@@ -50,7 +50,7 @@ click and safely select/zoom a feature using `QueuedTask.Run`.
    "C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" -m meter_photo_qa.alert_navigation --status
    ```
 8. Test safely with a known existing record (does not edit REG):
-   `start "" "reportapp://zoom?asset=pole&objectid=4422434"`.
+   `start "" "reportapp://zoom/pole/4422434"`.
    Windows may ask once for permission to open REPORTAPP links.
 9. Check failures in
    `%LOCALAPPDATA%\REPORTAPP\Navigation\bridge-errors.log`.

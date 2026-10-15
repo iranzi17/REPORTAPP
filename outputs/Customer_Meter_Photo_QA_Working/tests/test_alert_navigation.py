@@ -25,15 +25,15 @@ class NavigationTests(unittest.TestCase):
     def test_untrusted_or_invalid_links_are_not_accepted(self):
         bad=[
             "https://evil.example/?asset=pole&objectid=22",
-            "reportapp://zoom?asset=generator&objectid=10",
-            "reportapp://zoom?asset=line&objectid=0",
-            "reportapp://zoom?asset=line&objectid=-1",
-            "reportapp://zoom?asset=line&objectid=1;DROP",
-            "reportapp://zoom?asset=pole&objectid=1&asset=line",
-            "reportapp://zoom?objectid=1",
-            "reportapp://zoom?asset=pole&objectid=1&extra=2",
-            "reportapp://other?asset=pole&objectid=1",
-            "reportapp://zoom?asset=pole&objectid=9223372036854775808",
+            "reportapp://zoom/generator/10",
+            "reportapp://zoom/line/0",
+            "reportapp://zoom/line/-1",
+            "reportapp://zoom/line/1;DROP",
+            "reportapp://zoom/pole/1?asset=line",
+            "reportapp://zoom/pole",
+            "reportapp://zoom/pole/1?extra=2",
+            "reportapp://other/pole/1",
+            "reportapp://zoom/pole/9223372036854775808",
         ]
         for uri in bad:
             with self.subTest(uri=uri), self.assertRaises(ValueError):

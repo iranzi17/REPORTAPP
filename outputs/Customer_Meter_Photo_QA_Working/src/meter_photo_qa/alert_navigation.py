@@ -43,26 +43,22 @@ def zoom_uri(asset,objectid):
         raise ValueError("Invalid positive source OBJECTID.") from exc
     if not 0<oid<=MAX_OBJECTID:
         raise ValueError("Invalid positive source OBJECTID.")
-    return f"{SCHEME}://zoom?asset={asset}&objectid={oid}"
+    return f"{SCHEME}://zoom/{asset}/{oid}"
 
 
 def parse_uri(uri):
-    from urllib.parse import unquote
     supplied=str(uri or "").strip().strip('"')
     parts=urlsplit(supplied)
-    if parts.scheme.casefold()!=SCHEME or parts.netloc.casefold()!="zoom" or parts.path not in ("","/"):
+    if parts.scheme.casefold()!=SCHEME or parts.netloc.casefold()!="zoom":
         raise ValueError("Unsupported REPORTAPP navigation link.")
-    if parts.fragment or parts.username or parts.password:
+    if parts.query or parts.fragment or parts.username or parts.password:
         raise ValueError("Unexpected navigation link component.")
-    query=parse_qs(parts.query,keep_blank_values=True,strict_parsing=True)
-    if set(query)!={"asset","objectid"} or any(len(v)!=1 for v in query.values()):
-        raise ValueError("Navigation link must have one asset and one OBJECTID.")
-    asset=unquote(query["asset"][0]).casefold()
-    oid_str=query["objectid"][0]
-    if not re.fullmatch(r"[0-9]{1,19}",oid_str):
-        raise ValueError("OBJECTID must be a positive decimal integer.")
-    return asset,int(oid_str),zoom_uri(asset,oid_str)
-
+    match=re.fullmatch(r"/(pole|line|transformer)/([0-9]{1,19})",parts.path)
+    if not match:
+        raise ValueError("Navigation path must contain an asset and OBJECTID.")
+    asset=match.group(1)
+    oid=int(match.group(2))
+    return asset,oid,zoom_uri(asset,oid)
 
 def enqueue(uri,folder=None,now=None):
     asset,oid,canonical=parse_uri(uri)
