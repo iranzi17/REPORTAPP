@@ -110,6 +110,12 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
                          sum("append_cable" in item["values"] and
                              item["values"].get("append_cable_status") == "MISSING_OR_UNKNOWN"
                              for item in rows)])
+        overview.append(["Height > 12: MV/HV Notes required",
+                         sum(item["values"].get("height_status") == "MV_HV_NOTES_REQUIRED"
+                             for item in rows)])
+        overview.append(["Height check — source field not verified",
+                         sum(item["values"].get("height_status") == "NOT_VERIFIED_FIELD"
+                             for item in rows)])
         overview.append(["Append Cable — schema not verified",
                          sum(item["values"].get("append_cable_status") == "NOT_VERIFIED_FIELD"
                              for item in rows)])
@@ -131,7 +137,7 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         "Transformer Name", "Number of Low Voltage feeders",
         "Manufacturer", "Serial No", "Rated kVA",
         "Manufacturer Evidence", "Notes",
-        *(["Append Cable", "Append Cable QA"] if asset == "pole" else []),
+        *(["Pole Height", "Height QA", "Append Cable", "Append Cable QA"] if asset == "pole" else []),
     ])
     for item in rows:
         vals = item["values"]
@@ -148,7 +154,8 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             vals.get("lv_feeder_count", ""), vals.get("manufacturer", ""),
             vals.get("serial", ""), vals.get("capacity", ""),
             vals.get("manufacturer_status", ""), item["notes"],
-            *([vals.get("append_cable", ""),
+            *([vals.get("height", ""), vals.get("height_status", ""),
+               vals.get("append_cable", ""),
                vals.get("append_cable_status", "")] if asset == "pole" else []),
         ])
 
@@ -261,6 +268,10 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         "If no matching live field is found, the check is NOT VERIFIED, "
         "never presumed complete.",
     ])
+    rules_sheet.append(["LV Pole", "Height > 12",
+        "If recorded height exceeds 12 in the source field, Notes must affirm the pole "
+        "is for MV lines or HV lines/towers. Unknown field mapping = NOT_VERIFIED; "
+        "the threshold uses stored field units pending live schema verification."])
     rules_sheet.append(["Both", "NOT_VERIFIED", "Unavailable live fields are not silently passed."])
     rules_sheet.append(["Both", "Source data", "Read-only. No records are edited."])
     rules_sheet.append(["Both", "Recorded District/Sector/Cell", "Exported from feature attributes for correction coordination; not proof of actual location."])
