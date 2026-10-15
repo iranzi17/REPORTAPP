@@ -132,7 +132,7 @@ class NotificationTests(unittest.TestCase):
             source=Path(folder)/"src";source.mkdir()
             result=configure_monitoring(
                 ["ninamenye9683 — Kwizerwa Edison",
-                 "Ringuyeneza Frederic"],
+                 "maniraguhatheogene01 — Ringuyeneza Frederic"],
                 folder,src_path=source,python_path=py,now_ms=1950000,
             )
             self.assertEqual(result["watching_usernames"],
