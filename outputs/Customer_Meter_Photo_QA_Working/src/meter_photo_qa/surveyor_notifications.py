@@ -371,10 +371,18 @@ def deliver(alert,config):
                 "'python -m pip install winotify' in arcgispro-py3, "
                 "or choose SMTP email channel."
             ) from exc
+        # Only advertise click-to-zoom after the current Windows user has
+        # registered the reportapp:// handler. The ArcGIS Pro add-in is a
+        # separate required component; without it the request stays queued.
+        from .alert_navigation import is_registered,zoom_uri
+        launch=(zoom_uri(alert["asset"],alert["objectid"])
+                if is_registered() else "")
         popup=Notification(
             app_id="REPORTAPP Quality Alerts",title=subject,
-            msg=message[:400],duration="long",
+            msg=message[:400],duration="long",launch=launch,
         )
+        if launch:
+            popup.add_actions(label="Zoom in ArcGIS Pro",launch=launch)
         popup.show()
     elif channel=="smtp":
         host=os.environ.get("REPORTAPP_ALERT_SMTP_HOST")
