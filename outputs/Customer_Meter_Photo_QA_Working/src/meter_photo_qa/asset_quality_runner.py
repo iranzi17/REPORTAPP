@@ -122,6 +122,25 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         overview.append(["Append Cable — schema not verified",
                          sum(item["values"].get("append_cable_status") == "NOT_VERIFIED_FIELD"
                              for item in rows)])
+        for key, label in (
+            ("service_pole", "Service Pole"),
+            ("structure", "Structure"),
+            ("insulator_type", "Insulator Type"),
+            ("number_of_circuit", "Number of Circuit"),
+        ):
+            overview.append([
+                label + " — missing/unknown",
+                sum(item["values"].get(key + "_status") == "MISSING_OR_UNKNOWN"
+                    for item in rows),
+            ])
+            overview.append([
+                label + " — field not verified",
+                sum(item["values"].get(key + "_status") == "NOT_VERIFIED_FIELD"
+                    for item in rows),
+            ])
+        overview.append(["Number of Circuit — invalid count",
+                         sum(item["values"].get("number_of_circuit_status") == "INVALID_COUNT"
+                             for item in rows)])
     overview.append(["Location source", "Recorded District/Sector/Cell fields; NOT spatially verified."])
     overview.append(["Duplicate scan coverage", "ONLY features matching this run\u2019s districts, dates and surveyor filters; counterparts outside scope may be absent."])
     overview.append(["Duplicate review", "Distinct OBJECTIDs with reused GlobalID need source investigation, not automatic deletion."])
@@ -140,7 +159,13 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         "Transformer Name", "Number of Low Voltage feeders",
         "Manufacturer", "Serial No", "Rated kVA",
         "Manufacturer Evidence", "Notes",
-        *(["Pole Height", "Height QA", "Append Cable", "Append Cable QA"] if asset == "pole" else []),
+        *([
+            "Service Pole", "Service Pole QA",
+            "Structure", "Structure QA",
+            "Insulator Type", "Insulator Type QA",
+            "Number of Circuit", "Number of Circuit QA",
+            "Pole Height", "Height QA", "Append Cable", "Append Cable QA",
+        ] if asset == "pole" else []),
     ])
     for item in rows:
         vals = item["values"]
@@ -157,9 +182,14 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             vals.get("lv_feeder_count", ""), vals.get("manufacturer", ""),
             vals.get("serial", ""), vals.get("capacity", ""),
             vals.get("manufacturer_status", ""), item["notes"],
-            *([vals.get("height", ""), vals.get("height_status", ""),
-               vals.get("append_cable", ""),
-               vals.get("append_cable_status", "")] if asset == "pole" else []),
+            *([
+                vals.get("service_pole", ""), vals.get("service_pole_status", ""),
+                vals.get("structure", ""), vals.get("structure_status", ""),
+                vals.get("insulator_type", ""), vals.get("insulator_type_status", ""),
+                vals.get("number_of_circuit", ""), vals.get("number_of_circuit_status", ""),
+                vals.get("height", ""), vals.get("height_status", ""),
+                vals.get("append_cable", ""), vals.get("append_cable_status", ""),
+            ] if asset == "pole" else []),
         ])
 
     # Duplicates must not hide the seven original field-correction issues.
@@ -250,7 +280,7 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             "; ".join(candidates),
         ])
     schema.append(["NOTE", "", "Branch is never scored or required." if asset == "transformer"
-                   else "No nameplate requires an explicit note.", ""])
+                   else "Manufacturer is flagged only if the manufacturer AND Notes are empty.", ""])
     schema.append(["NOTE", "", "Review unrecognized live schema fields before judging results.", ""])
     schema.append(["Live Feature Service Field", "Alias", "Type", ""])
     for field in fields:
@@ -262,8 +292,18 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     rules_sheet.append(["Transformer", "Seven original correction checks", "Owner Name, Type of Installation, Phase Normal, Protection Switch, mounting support, Transformer Name and LV feeder count; only live-mapped fields are evaluated."])
     rules_sheet.append(["Transformer", "Supplementary fields", "Manufacturer, Serial and Rated kVA are displayed where available but NOT scored in the original correction register."])
     rules_sheet.append(["Transformer", "Branch", "Explicitly excluded from mandatory checking."])
-    rules_sheet.append(["LV Pole", "Manufacturer", "If blank, Notes must expressly state no name plate; otherwise a gap."])
-    rules_sheet.append(["LV Pole", "Nameplate exception", "Documented absence is NOT treated as a manufacturer value."])
+    rules_sheet.append([
+        "LV Pole", "Manufacturer", "Flag only when Manufacturer is missing AND Notes is empty. "
+        "Any nonempty Notes suppresses this specific flag, but does not verify Manufacturer."
+    ])
+    rules_sheet.append([
+        "LV Pole", "Nameplate evidence", "An explicit no-nameplate statement is marked DOCUMENTED_NO_NAMEPLATE; "
+        "any other nonempty Notes is labeled NOTES_PRESENT."
+    ])
+    rules_sheet.append(["LV Pole", "Service Pole", "Service_Pole: mandatory selected value; No is valid."])
+    rules_sheet.append(["LV Pole", "Structure", "PoleStructure: mandatory known value, not PylonStructure or TowerStructure."])
+    rules_sheet.append(["LV Pole", "Insulator Type", "InsulatorTypes: mandatory known value."])
+    rules_sheet.append(["LV Pole", "Number of Circuit", "Number_Circuit: mandatory positive whole number."])
     rules_sheet.append([
         "LV Pole", "Append Cable — mandatory",
         "A selected, known value is required for every eligible pole. "
