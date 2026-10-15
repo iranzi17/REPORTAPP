@@ -1278,7 +1278,7 @@ class AskReportApp:
             if parsed["date_start"] is not None:
                 params[8].value=datetime.combine(parsed["date_start"], datetime.min.time())
                 params[9].value=datetime.combine(parsed["date_end"], datetime.min.time())
-        elif re.search(r"\\bsurveyors?\\b",request,re.I):
+        elif re.search(r"\bsurveyors?\b",request,re.I):
             params[1].value="Generate surveyor attribute audit Excel report"
         elif (params[1].valueAsText or "").startswith("Generate "):
             params[1].value="Preview query and count only (read-only)"
