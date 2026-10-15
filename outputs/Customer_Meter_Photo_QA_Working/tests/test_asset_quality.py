@@ -104,7 +104,8 @@ class AssetQualityTests(unittest.TestCase):
     def test_kinyarwanda_explicit_absence_of_pole_nameplate(self):
         fields = {"manufacturer": "Manufacturers", "notes": "Notes",
                   "append_cable": "Append_Cable", "height":"Pole_Height"}
-        for note in ("Nta name plate iriho", "Nta nameplate iriho"):
+        for note in ("Nta name plate iriho", "Nta nameplate iriho",
+                     "Nta name plate ifite", "Nta nameplate ifite"):
             with self.subTest(note=note):
                 result = evaluate_asset({
                     "GLOBALID": "{POLE}", "OBJECTID": 123,

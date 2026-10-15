@@ -194,6 +194,14 @@ def _build_consolidated_workbook(destination, reports, context, geometry):
     ]
     for row in rows:overview.append(list(row))
     overview.append([])
+    overview.append(["ADDITIONAL LV SCORED-FIELD GAPS — SEPARATE FROM ORIGINAL PRIORITY COUNTS"])
+    overview.append(["LV line records with missing/invalid scored fields",
+                     lv.get("scored_field_gap_records", 0)])
+    overview.append(["LV scored-field missing entries",
+                     lv.get("scored_missing_entries", 0)])
+    overview.append(["LV scored-field invalid entries",
+                     lv.get("scored_invalid_entries", 0)])
+    overview.append([])
     overview.append(["CROSS-DISTRICT PROVISIONAL GEOMETRY (SEPARATE FROM QA TOTALS)"])
     if geometry.get("status")=="COMPLETE":
         for k,label in [
@@ -222,6 +230,8 @@ def _build_consolidated_workbook(destination, reports, context, geometry):
         ("Topic","Requirement and limitation"),
         ("Three original audits","All existing LV line, distribution-transformer and LV pole rules run unchanged."),
         ("LV gaps","Priority gap count is different from completion threshold FLAG count."),
+        ("Additional scored-field gaps","Missing construction/commissioning years and invalid coded values are reported separately, even when 60% completion is met."),
+        ("Pole height not recorded","Reported as informational. Current mandatory height rule only evaluates recorded values exceeding 12; requirements must be confirmed before treating missing height as noncompliance."),
         ("LV duplicate GlobalIDs","All scoped source OBJECTIDs retained in separate duplicate registers; no geometry comparison or source deletion. Identifier conflicts are outside original attribute-gap totals."),
         ("Distribution transformers","Seven original gap categories; duplicate source GlobalID recorded separately."),
         ("Poles","Manufacturer missing is only a correction gap when Notes do not document an absent nameplate."),

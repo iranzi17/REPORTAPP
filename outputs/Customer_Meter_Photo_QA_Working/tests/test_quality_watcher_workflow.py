@@ -72,6 +72,9 @@ class QualityWatcherWorkflowTests(unittest.TestCase):
                 self.assertIn("Outstanding LV Gaps", workbook.sheetnames)
                 self.assertEqual(first["outstanding_lv_lines"], 1)
                 self.assertEqual(first["outstanding_lv_issues"], 1)
+                self.assertGreater(first["scored_field_gap_records"], 0)
+                self.assertGreater(first["scored_missing_entries"], 0)
+                self.assertIn("Scored Field Gaps", workbook.sheetnames)
                 gap_row = workbook["Outstanding LV Gaps"]
                 self.assertEqual(gap_row["C2"].value, "{EXAMPLE-GID}")
                 self.assertIn("Missing transformer name", gap_row["J2"].value)

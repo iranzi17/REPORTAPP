@@ -45,6 +45,9 @@ class CombinedQAWorkflowTests(unittest.TestCase):
             "output_xlsx":str(file),"total_lines":1,"flagged_lines":1,
             "outstanding_lv_lines":1,"outstanding_lv_issues":2,
             "duplicate_globalid_groups":1,
+            "scored_field_gap_records":1,
+            "scored_missing_entries":2,
+            "scored_invalid_entries":1,
             "user_summary":[{"username":"ninamenye9683","total_lines":1,
                              "outstanding_lines":1}],
         }
@@ -99,6 +102,10 @@ class CombinedQAWorkflowTests(unittest.TestCase):
             self.assertIn("LV Review Queue",wb.sheetnames)
             self.assertIn("LV Duplicate GlobalIDs",wb.sheetnames)
             self.assertIn("LV Duplicate Line Records",wb.sheetnames)
+            self.assertTrue(any(
+                row[0]=="LV line records with missing/invalid scored fields"
+                and row[1]==1 for row in wb["Combined Summary"].values
+            ))
             self.assertEqual(wb["Combined Summary"]["E13"].value,1)
             self.assertIn("DT Duplicate GlobalIDs",wb.sheetnames)
             self.assertIn("Pole Duplicate GlobalIDs",wb.sheetnames)

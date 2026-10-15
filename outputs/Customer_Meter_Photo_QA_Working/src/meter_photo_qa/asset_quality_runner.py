@@ -113,6 +113,9 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         overview.append(["Height > 12: MV/HV Notes required",
                          sum(item["values"].get("height_status") == "MV_HV_NOTES_REQUIRED"
                              for item in rows)])
+        overview.append(["Height not recorded (informational, not an existing mandatory gap)",
+                         sum(item["values"].get("height_status") == "UNRECORDED"
+                             for item in rows)])
         overview.append(["Height check — source field not verified",
                          sum(item["values"].get("height_status") == "NOT_VERIFIED_FIELD"
                              for item in rows)])

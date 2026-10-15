@@ -491,6 +491,7 @@ def _create_quality_workbook(
     details_sheet = workbook.create_sheet("Line Details")
     rules_sheet = workbook.create_sheet("Rules")
     review_sheet = workbook.create_sheet("Review Queue")
+    scored_sheet = workbook.create_sheet("Scored Field Gaps")
     duplicate_group_sheet = workbook.create_sheet("Duplicate GlobalIDs")
     duplicate_records_sheet = workbook.create_sheet("Duplicate Line Records")
     metadata_sheet = workbook.create_sheet("Metadata")
@@ -931,6 +932,36 @@ def _create_quality_workbook(
         if sheet.max_row > 1:
             _keep_source_text_literal(sheet, 2, sheet.max_row)
 
+    # Non-priority scored fields still matter even where all LV lines meet
+    # the 60% completion threshold. Keep these separate from priority counts.
+    missing_by_field = Counter(
+        str(field) for row in results for field in row["missing_attributes"]
+    )
+    invalid_by_rule = Counter(
+        str(issue) for row in results for issue in row["invalid_attributes"]
+    )
+    scored_sheet.append(["Category", "Attribute / validation issue",
+                         "Affected LV line records", "Interpretation"])
+    for category, counts in (
+        ("MISSING", missing_by_field),
+        ("INVALID", invalid_by_rule),
+    ):
+        for label, amount in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0])):
+            scored_sheet.append([
+                category, label, amount,
+                "Original scored-field deficiency; separate from priority-gap and identifier-conflict counts.",
+            ])
+    scored_sheet.sheet_view.showGridLines = False
+    scored_sheet.freeze_panes = "A2"
+    scored_sheet.auto_filter.ref = f"A1:D{scored_sheet.max_row}"
+    for cell in scored_sheet[1]:
+        cell.fill = PatternFill("solid", fgColor=navy)
+        cell.font = Font(color=white, bold=True)
+        cell.alignment = Alignment(wrap_text=True)
+    _set_column_widths(scored_sheet, {"A": 15, "B": 63, "C": 29, "D": 87})
+    if scored_sheet.max_row > 1:
+        _keep_source_text_literal(scored_sheet, 2, scored_sheet.max_row)
+
     metadata_sheet.append(["Field", "Value"])
     for key, value in metadata:
         metadata_sheet.append([key, "" if value is None else str(value)])
@@ -1191,6 +1222,12 @@ def run_quality_watcher(
     priority_user_summary = summarize_priority_gaps(results)
     outstanding_results = [item for item in results if item["priority_gaps"]]
     flagged_results = [item for item in results if item["status"] == "FLAG"]
+    scored_field_gap_records = sum(
+        bool(item["missing_attributes"] or item["invalid_attributes"])
+        for item in results
+    )
+    scored_missing_entries = sum(len(item["missing_attributes"]) for item in results)
+    scored_invalid_entries = sum(len(item["invalid_attributes"]) for item in results)
     met_threshold_count = len(results) - len(flagged_results)
     review_rows = build_review_rows(results, prior_reviews, run_utc)
 
@@ -1232,6 +1269,9 @@ def run_quality_watcher(
         ("Minimum completion percent", threshold),
         ("LV outstanding lines", len(outstanding_results)),
         ("LV outstanding issues", sum(len(item["priority_gaps"]) for item in outstanding_results)),
+        ("LV records with any scored-field missing/invalid values", scored_field_gap_records),
+        ("Scored-field missing attribute entries", scored_missing_entries),
+        ("Scored-field invalid value entries", scored_invalid_entries),
         ("Reused GlobalID groups (this report only)", len(duplicate_groups)),
         ("Source records with reused GlobalIDs",
          sum(len(v) for v in duplicate_groups.values())),
@@ -1283,6 +1323,9 @@ def run_quality_watcher(
         "review_queue_items": len(review_rows),
         "outstanding_lv_lines": len(outstanding_results),
         "outstanding_lv_issues": sum(len(item["priority_gaps"]) for item in outstanding_results),
+        "scored_field_gap_records": scored_field_gap_records,
+        "scored_missing_entries": scored_missing_entries,
+        "scored_invalid_entries": scored_invalid_entries,
         "duplicate_globalid_groups": len(duplicate_groups),
         "duplicate_feature_records": sum(len(v) for v in duplicate_groups.values()),
         "duplicate_source_objectids": duplicate_groups,

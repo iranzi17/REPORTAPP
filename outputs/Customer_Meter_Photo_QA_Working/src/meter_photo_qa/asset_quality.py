@@ -64,7 +64,7 @@ NO_NAMEPLATE = re.compile(
 # Deliberately do not accept "not clear" or "illegible": those say the
 # nameplate may exist and warrant a different data-collection review.
 NO_NAMEPLATE_RW = re.compile(
-    r"\bnta\s+(?:name\s*plate|nameplate)\s+(?:iriho|ibaho|igaragara|yabonetse)\b"
+    r"\bnta\s+(?:name\s*plate|nameplate)\s+(?:iriho|ibaho|igaragara|yabonetse|ifite)\b"
     r"|\b(?:name\s*plate|nameplate)\s+ntayiriho\b",
     re.IGNORECASE,
 )
