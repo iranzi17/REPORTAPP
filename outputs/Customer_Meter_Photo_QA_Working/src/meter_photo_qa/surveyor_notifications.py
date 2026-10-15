@@ -1,0 +1,367 @@
+"""Selected-surveyor read-only quality notifications, five-minute maturity.
+
+Windows Task Scheduler executes this module via arcgispro-py3 once per minute.
+This is a POLLING workflow, not a guaranteed event webhook. REG data are
+never edited and the sender only receives an alert for a persisted current gap.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import sqlite3
+import smtplib
+import sys
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+
+from .asset_quality import ASSETS, domain_map, evaluate_asset, resolve_fields
+from .quality_watcher import (
+    _domain_maps, _verified_phase_expectations,
+    assess_line_quality, load_quality_rules,
+)
+from .phase_consistency import phase_type_conflict
+from .progress_report import DEFAULT_LINE_SERVICE_URL,_get_gis,_layer_url,_query_with_retry
+from .quality_query_batches import query_attributes_in_batches
+
+LOOKBACK_HOURS=24
+MAX_PER_ASSET=15000
+MIN_AGE_SECONDS=300
+
+def timestamp_ms(value):
+    if isinstance(value, datetime):
+        return int(value.timestamp()*1000)
+    if isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value):
+        return int(value)
+    if isinstance(value,str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def event_timestamp(attrs):
+    values=[timestamp_ms(attrs.get(key)) for key in ("created_date","last_edited_date")]
+    return max((v for v in values if v is not None),default=None)
+
+
+def record_findings(asset, attrs, fields,domains, line_rules=None,phase_expectations=None):
+    """Existing QA gaps only, including pole height and Appendix Cable.
+
+    No notifications for unresolved live schema fields: run logs warnings and
+    requires schema correction instead of accusing every surveyor.
+    """
+    if asset in ("pole","transformer"):
+        mapping=resolve_fields(fields,asset)
+        result=evaluate_asset(attrs,asset,mapping,domains)
+        return sorted(set(result["issues"])),list(result["unverified_checks"])
+    if asset!="line":
+        raise ValueError("Only LV Lines, LV Poles and Distribution Transformers supported.")
+    if not line_rules:
+        raise ValueError("Missing LV line quality rules.")
+    quality=assess_line_quality(attrs,line_rules,domains)
+    issues=list(quality["missing_attributes"])+list(quality["invalid_attributes"])
+    phase_issue=phase_type_conflict(
+        attrs, domains.get(int(attrs.get("ASSETGROUP") or 0),{}).get("Phases",{}),
+        phase_expectations or {},
+    )
+    if phase_issue:
+        issues.append(phase_issue)
+    return sorted(set(issues)),[]
+
+
+class State:
+    def __init__(self,path):
+        self.path=Path(path)
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        self.db=sqlite3.connect(self.path,timeout=15)
+        self.db.execute("PRAGMA busy_timeout=15000")
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS sent (
+                asset TEXT NOT NULL,
+                objectid INTEGER NOT NULL,
+                globalid TEXT NOT NULL,
+                issue_digest TEXT NOT NULL,
+                last_sent_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(asset,objectid,globalid)
+            )
+        """)
+        self.db.commit()
+    def close(self):
+        self.db.close()
+    def should_alert(self,asset,oid,gid,issues):
+        payload=json.dumps(sorted(set(issues)),sort_keys=True,ensure_ascii=False)
+        digest=hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        row=self.db.execute(
+            "SELECT issue_digest FROM sent WHERE asset=? AND objectid=? AND globalid=?",
+            (asset,int(oid),str(gid)),
+        ).fetchone()
+        return digest if not row or row[0]!=digest else None
+    def mark_sent(self,asset,oid,gid,digest,now_ms):
+        self.db.execute("""
+            INSERT INTO sent(asset,objectid,globalid,issue_digest,last_sent_at_ms)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(asset,objectid,globalid) DO UPDATE SET
+              issue_digest=excluded.issue_digest,
+              last_sent_at_ms=excluded.last_sent_at_ms
+        """,(asset,int(oid),str(gid),digest,int(now_ms)))
+        self.db.commit()
+    def clear_fixed(self,asset,oid,gid):
+        self.db.execute(
+            "DELETE FROM sent WHERE asset=? AND objectid=? AND globalid=?",
+            (asset,int(oid),str(gid)),
+        )
+        self.db.commit()
+
+
+def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=None,
+                 phase_expectations=None):
+    output=[]
+    cutoff=int(config["enabled_at_utc_ms"])
+    watch={str(u).casefold() for u in config["usernames"]}
+    for a in records:
+        oid=a.get("OBJECTID");gid=a.get("GLOBALID")
+        username=str(a.get("created_user") or "").strip()
+        submitted=event_timestamp(a)
+        if username.casefold() not in watch or oid is None or not gid or submitted is None:
+            continue
+        if submitted<cutoff or submitted>now_ms-MIN_AGE_SECONDS*1000:
+            continue
+        issues,unverified=record_findings(
+            asset,a,fields,domains,line_rules,phase_expectations
+        )
+        if unverified:
+            raise RuntimeError(
+                f"Cannot safely alert for {asset}: unresolved required template "
+                f"checks {unverified}. Correct the live field mapping first."
+            )
+        if not issues:
+            state.clear_fixed(asset,oid,gid)
+            continue
+        digest=state.should_alert(asset,oid,gid,issues)
+        if digest:
+            output.append({
+                "asset":asset,"objectid":int(oid),"globalid":str(gid),
+                "username":username,"last_edited_user":str(a.get("last_edited_user") or ""),
+                "event_time_utc_ms":submitted,"issues":issues,"issue_digest":digest,
+            })
+    return output
+
+
+def _feature_rows(layer,version,where,fields,asset):
+    records=query_attributes_in_batches(
+        layer,where,version,fields,[("Selected surveyor activity (national)",None)],
+        _query_with_retry,batch_size=120,asset_label=asset,
+        duplicate_globalid_policy="report",
+    )
+    if len(records)>MAX_PER_ASSET:
+        raise RuntimeError(
+            f"{asset}: {len(records)} changed features exceed {MAX_PER_ASSET}. "
+            "Narrow monitored accounts; no alerts sent for partial scans."
+        )
+    return records
+
+
+def collect(config,now_ms=None,gis=None,source_url=None):
+    """Return complete current quality findings across all eligible assets.
+
+    Every layer must finish successfully before sending any notifications.
+    """
+    from arcgis.features import FeatureLayer
+    now_ms=now_ms or int(datetime.now(timezone.utc).timestamp()*1000)
+    start_ms=max(
+        int(config["enabled_at_utc_ms"]),
+        now_ms-LOOKBACK_HOURS*3600*1000,
+    )
+    start=datetime.fromtimestamp(start_ms/1000,timezone.utc)
+    # The existing ArcGIS Enterprise layer supports TIMESTAMP predicates.
+    # Widen a day, then exact-filter client-side to avoid timezone cutoffs.
+    start_day=(start-timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+    accounts=sorted(set(config["usernames"]),key=str.casefold)
+    if not accounts:
+        raise ValueError("Choose at least one surveyor to watch.")
+    quoted=",".join("'"+user.replace("'","''")+"'" for user in accounts)
+    base=str(source_url or config.get("feature_service_url") or DEFAULT_LINE_SERVICE_URL).rstrip("/")
+    active=_get_gis(gis)
+    result={}
+    for asset in config.get("assets",["line","transformer","pole"]):
+        if asset not in ("line","transformer","pole"):
+            raise ValueError(f"Unsupported monitored asset: {asset}")
+        if asset=="line":
+            spec_group=(9,10);lid=10
+            rules=load_quality_rules()
+        else:
+            lid=ASSETS[asset]["layer_id"]
+            spec_group=(ASSETS[asset]["asset_group"],)
+            rules=None
+        layer=FeatureLayer(_layer_url(base,lid),active)
+        schema=[dict(f) for f in layer.properties.fields]
+        available={f["name"].casefold():f["name"] for f in schema}
+        required=["OBJECTID","GLOBALID","ASSETGROUP","ASSETTYPE",
+                  "created_user","created_date","last_edited_date","last_edited_user"]
+        if asset=="line":
+            required.extend(x["field"] for x in rules["scored_attributes"])
+            required.extend(["Notes"])
+        else:
+            fieldmap=resolve_fields(schema,asset)
+            if any(not fieldmap.get(key) for key in ASSETS[asset]["priority"]):
+                raise RuntimeError(
+                    f"{asset} live schema does not resolve priority fields. "
+                    "Monitor not started; no misleading alerts."
+                )
+            if asset=="pole" and not fieldmap.get("height"):
+                raise RuntimeError(
+                    "Pole height field cannot be verified; configure live height "
+                    "attribute before pole monitoring. No alerts sent."
+                )
+            required.extend(field for field in fieldmap.values() if field)
+        missing=[f for f in required if f.casefold() not in available]
+        if missing:
+            raise RuntimeError(f"{asset} missing live template columns: {missing}")
+        groups=",".join(map(str,spec_group))
+        where=(
+            f"ASSETGROUP IN ({groups}) AND "
+            f"created_user IN ({quoted}) AND "
+            "((created_date >= TIMESTAMP '"+start_day+"') OR "
+            "(last_edited_date >= TIMESTAMP '"+start_day+"'))"
+        )
+        if asset in ("pole","transformer"):
+            where+=" AND ASSETTYPE IN ("+",".join(map(str,sorted(ASSETS[asset]["types"])))+")"
+        fields=list(dict.fromkeys(available[name.casefold()] for name in required))
+        records=_feature_rows(layer,config.get("version","sde.DEFAULT"),where,fields,asset)
+        records=[r for r in records if (event_timestamp(r) or 0)>=start_ms]
+        if asset=="line":
+            domains=_domain_maps(layer)
+            expectations=_verified_phase_expectations(domains)
+        else:
+            domains=domain_map(layer.properties,ASSETS[asset]["asset_group"])
+            expectations=None
+        result[asset]=(records,schema,domains,rules,expectations)
+    return result
+
+
+def _alert_text(alert):
+    return (
+        f"{alert['asset'].upper()} | {alert['username']} | "
+        f"ObjectID {alert['objectid']}\n"
+        f"GlobalID {alert['globalid']}\n"
+        +"Missing/invalid: "+"; ".join(alert["issues"])
+        +"\nSource created_user is an account; verify edit ownership."
+    )
+
+
+def deliver(alert,config):
+    """Selected local desktop notification or recipient email. Never silent."""
+    channel=config.get("channel","desktop")
+    subject=f"REG QA: {alert['asset']} gaps - {alert['username']}"
+    message=_alert_text(alert)
+    if channel=="desktop":
+        try:
+            from winotify import Notification
+        except ImportError as exc:
+            raise RuntimeError(
+                "Windows desktop alert library not installed. Run "
+                "'python -m pip install winotify' in arcgispro-py3, "
+                "or choose SMTP email channel."
+            ) from exc
+        popup=Notification(
+            app_id="REPORTAPP Quality Alerts",title=subject,
+            msg=message[:400],duration="long",
+        )
+        popup.show()
+    elif channel=="smtp":
+        host=os.environ.get("REPORTAPP_ALERT_SMTP_HOST")
+        user=os.environ.get("REPORTAPP_ALERT_SMTP_USER")
+        secret=os.environ.get("REPORTAPP_ALERT_SMTP_PASSWORD")
+        recipient=config.get("recipient_email")
+        sender=os.environ.get("REPORTAPP_ALERT_SMTP_FROM") or user
+        if not all((host,secret,recipient,sender)):
+            raise RuntimeError("SMTP recipient or secure environment configuration missing.")
+        email=EmailMessage()
+        email["From"]=sender
+        email["To"]=recipient
+        email["Subject"]=subject
+        email.set_content(message)
+        port=int(os.environ.get("REPORTAPP_ALERT_SMTP_PORT","587"))
+        with smtplib.SMTP(host,port,timeout=15) as smtp:
+            smtp.starttls()
+            if user:smtp.login(user,secret)
+            smtp.send_message(email)
+    else:
+        raise ValueError("Notification channel must be desktop or smtp.")
+
+
+def run_once(config_path,now_ms=None,collector=None,sender=None):
+    """One atomic-quality survey cycle; source scan succeeds before deliveries.
+
+    Existing issues prior to monitor enable time are not notified. Desktop
+    Task Scheduler must run once each minute for ~5-6 minute maturity.
+    """
+    path=Path(config_path).resolve()
+    config=json.loads(path.read_text(encoding="utf-8"))
+    if config.get("enabled") is not True:
+        raise ValueError("Notification monitoring disabled in configuration.")
+    now_ms=now_ms or int(datetime.now(timezone.utc).timestamp()*1000)
+    state=State(path.with_suffix(".sqlite3"))
+    logfile=path.with_suffix(".events.jsonl")
+    collector=collector or collect
+    sender=sender or deliver
+    try:
+        # Fetch and validate ALL monitored services before alert delivery.
+        snapshots=collector(config,now_ms=now_ms)
+        notices=[]
+        for asset,(records,fields,domains,rules,phase_expectations) in snapshots.items():
+            notices.extend(ready_alerts(
+                records,asset,fields,domains,config,now_ms,state,
+                rules,phase_expectations
+            ))
+        sent=0
+        for item in notices:
+            try:
+                sender(item,config)
+            except Exception as exc:
+                with logfile.open("a",encoding="utf-8") as fh:
+                    fh.write(json.dumps({
+                        "at_utc_ms":now_ms,"status":"SEND_FAILED",
+                        "asset":item["asset"],"objectid":item["objectid"],
+                        "reason":str(exc),
+                    })+"\n")
+                continue
+            state.mark_sent(
+                item["asset"],item["objectid"],item["globalid"],
+                item["issue_digest"],now_ms
+            )
+            with logfile.open("a",encoding="utf-8") as fh:
+                fh.write(json.dumps({
+                    "at_utc_ms":now_ms,"status":"SENT",
+                    "asset":item["asset"],"objectid":item["objectid"],
+                    "globalid":item["globalid"],"username":item["username"],
+                    "issues":item["issues"],
+                },ensure_ascii=False)+"\n")
+            sent+=1
+        return {"alerts_sent":sent,"alerts_considered":len(notices),
+                "channel":config.get("channel","desktop")}
+    finally:
+        state.close()
+
+
+def main(argv=None):
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--config",required=True)
+    options=parser.parse_args(argv)
+    path=Path(options.config).resolve()
+    log=path.with_suffix(".monitor.log")
+    try:
+        result=run_once(path)
+        with log.open("a",encoding="utf-8") as fh:
+            fh.write(f"{datetime.now(timezone.utc).isoformat()} {result}\n")
+        return 0
+    except Exception as exc:
+        with log.open("a",encoding="utf-8") as fh:
+            fh.write(f"{datetime.now(timezone.utc).isoformat()} ERROR {exc}\n")
+        return 1
+
+
+if __name__=="__main__":
+    sys.exit(main())
