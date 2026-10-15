@@ -37,7 +37,18 @@ python -m pytest outputs/Customer_Meter_Photo_QA_Working/tests/test_toolbox_ui.p
 
 ## Still requires the user's authenticated Pro 3.4 workstation
 
-ArcGIS Pro is absent here. SDK compilation and packaging are verified; installation,
+Correction: ArcGIS Pro **3.4.0.55405** is installed here, with **MyProject12** open.
+The initial detection checked the wrong mapping DLL location. The installed DLL is
+under `C:/Program Files/ArcGIS/Pro/bin/Extensions/Mapping`. Pro's Python interpreter
+successfully imported arcpy and returned version 3.4. The original regression run
+used standalone Python 3.12, which did not have arcpy; its results above remain valid
+for that interpreter. Rerunning the two toolbox tests with Pro Python produced
+**one pass and one failure**: the test expects 11 QA toolbox tools, but the existing
+toolbox contains 12. This is an existing toolbox/test expectation mismatch; this
+navigation change does not modify the toolbox. The missing-arcpy limitation is
+resolved by using the installed Pro interpreter.
+
+SDK compilation and packaging are verified; installation,
 DAML loading, CIM connection representations in the actual REG map, SDK runtime
 selection/zoom, Windows foreground activation and real toast activation are not.
 No URI protocol or add-in was installed in this environment.

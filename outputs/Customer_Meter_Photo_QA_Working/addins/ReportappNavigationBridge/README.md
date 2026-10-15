@@ -3,7 +3,9 @@
 Targets **ArcGIS Pro 3.4 / .NET 8 / Windows x64**. Release compilation against
 Esri.ArcGISPro.Extensions30 **3.4.0.55405** succeeded with zero warnings/errors
 on 2026-10-15. Package: `bin/Release/net8.0-windows/ReportappNavigationBridge.esriAddInX`.
-**Installation and live navigation remain unverified:** this computer has no Pro.
+**Installation and live navigation remain unverified.** Follow-up inspection confirmed
+ArcGIS Pro **3.4.0.55405** is installed and running with MyProject12 open. The initial
+absence report was incorrect: the mapping DLL lives under bin/Extensions/Mapping.
 
 ## Build
 
