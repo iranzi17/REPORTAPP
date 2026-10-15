@@ -7,6 +7,8 @@ import json
 import os
 import re
 import sys
+import shutil
+import tempfile
 
 from .smart_query import USER_NAMES_PATH,resolve_surveyor_name
 
@@ -97,8 +99,11 @@ def configure_monitoring(
     install=dest/"Install_One_Minute_Monitor.ps1"
     if config.exists() and not replace_existing:
         raise FileExistsError(
-            "Monitoring config already exists. Back up current notification "
-            "state and stop the scheduled task before reconfiguring monitored accounts."
+            "Monitoring config already exists and Replace existing was not enabled. "
+            "For adding/removing surveyors, open the REPORTAPP Quality "
+            "Notification Inbox and click Manage Surveyors. The existing "
+            "configuration, monitoring start date, and inbox are preserved. "
+            "Use full replacement only when explicitly resetting the setup."
         )
     enable=int(now_ms or datetime.now(timezone.utc).timestamp()*1000)
     data={
@@ -131,4 +136,95 @@ def configure_monitoring(
         "task_name":TASK_NAME,
         "actively_running":False,
         "alerts_sent":0,
+    }
+
+
+def update_monitored_surveyors(config_path, *, add=(), remove=(), now_ms=None):
+    """Add/remove existing monitor accounts without touching notification history.
+
+    Preserves the original activation cutoff for existing users. New accounts
+    receive their own activation cutoff, so past bad records never generate a
+    retroactive burst of alerts. Atomic replacement tolerates Task Scheduler
+    reading the config at the same time.
+    """
+    path=Path(config_path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Existing REPORTAPP monitor config not found: {path}")
+    current=json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(current,dict) or not isinstance(current.get("usernames"),list):
+        raise ValueError("Existing monitoring config is invalid; not overwritten.")
+    if not current.get("assets") or "enabled_at_utc_ms" not in current:
+        raise ValueError("Monitoring assets or original start time unavailable.")
+    original=list(current["usernames"])
+    if not original:
+        raise ValueError("Existing monitoring accounts missing.")
+    new_accounts=chosen_usernames(add) if add else []
+    removals={str(value).strip().casefold() for value in remove if str(value).strip()}
+    if any(" — " in x for x in removals):
+        raise ValueError("Remove surveyors by exact portal username.")
+    if not new_accounts and not removals:
+        raise ValueError("Select at least one surveyor to add or remove.")
+    original_lower={s.casefold():s for s in original}
+    missing=removals-original_lower.keys()
+    if missing:
+        raise ValueError("Cannot remove accounts not monitored: "+", ".join(sorted(missing)))
+    preserved=[s for s in original if s.casefold() not in removals]
+    seen={s.casefold() for s in preserved}
+    added=[]
+    for username in new_accounts:
+        if username.casefold() not in seen:
+            preserved.append(username)
+            added.append(username)
+            seen.add(username.casefold())
+    if not preserved:
+        raise ValueError("Cannot remove the last monitored surveyor.")
+    if preserved==original:
+        return {
+            "status":"UNCHANGED","usernames":preserved,
+            "added":[],"removed":[],"config_path":str(path),
+            "original_enabled_at_utc_ms":int(current["enabled_at_utc_ms"]),
+        }
+    cutoff=int(current["enabled_at_utc_ms"])
+    stamp=int(now_ms if now_ms is not None else datetime.now(timezone.utc).timestamp()*1000)
+    if stamp<cutoff:
+        raise ValueError("New account start time precedes monitor activation.")
+    prior=current.get("enabled_at_by_username_utc_ms") or {}
+    if not isinstance(prior,dict):
+        raise ValueError("Existing per-surveyor activation map invalid.")
+    # Existing accounts inherit the old activation timestamp if the config
+    # was created before per-surveyor timestamps were introduced.
+    times={s.casefold():int(prior.get(s.casefold(),cutoff))
+           for s in preserved if s.casefold() in original_lower}
+    for username in added:
+        times[username.casefold()]=stamp
+    current["usernames"]=preserved
+    current["enabled_at_by_username_utc_ms"]=times
+    tmp_path=None
+    # The timestamped backup keeps only configuration data, not SQLite state.
+    backup=path.with_name(
+        path.stem+"_backup_"+datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        +path.suffix
+    )
+    shutil.copy2(path,backup)
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",encoding="utf-8",dir=path.parent,
+            prefix="."+path.stem+"_",suffix=".tmp",delete=False
+        ) as stream:
+            tmp_path=Path(stream.name)
+            json.dump(current,stream,indent=2,ensure_ascii=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_path,path)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            tmp_path.unlink()
+    return {
+        "status":"UPDATED","usernames":preserved,
+        "added":added,
+        "removed":[s for s in original if s.casefold() in removals],
+        "config_path":str(path),"backup":str(backup),
+        "original_enabled_at_utc_ms":cutoff,
+        "new_account_start_utc_ms":stamp if added else None,
     }

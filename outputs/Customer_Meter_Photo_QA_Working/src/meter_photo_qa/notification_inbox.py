@@ -389,7 +389,110 @@ def launch_gui(config_path):
         except Exception as exc:
             messagebox.showerror("Review update failed",str(exc))
 
+    def manage_surveyors():
+        """Local add/remove actions preserve existing selected-account timing."""
+        from .notification_setup import update_monitored_surveyors
+        from .smart_query import USER_NAMES_PATH
+
+        try:
+            known=json.loads(USER_NAMES_PATH.read_text(encoding="utf-8"))
+            current=json.loads(config.read_text(encoding="utf-8"))
+        except Exception as exc:
+            messagebox.showerror("Manage Surveyors",str(exc))
+            return
+        dialog=tk.Toplevel(root)
+        dialog.title("REPORTAPP | Manage Surveyors")
+        dialog.geometry("800x555")
+        dialog.transient(root)
+        dialog.grab_set()
+        shell=ttk.Frame(dialog,padding=12)
+        shell.pack(fill="both",expand=True)
+        ttk.Label(shell,text="Add or remove monitored surveyors",
+                  font=("Segoe UI",14,"bold")).pack(anchor="w")
+        ttk.Label(shell,text=(
+            "Current assets: "+", ".join(current.get("assets",[]))+
+            "  |  Existing monitoring dates and inbox alerts stay unchanged."
+        )).pack(anchor="w",pady=(5,10))
+        panes=ttk.Frame(shell)
+        panes.pack(fill="both",expand=True)
+        left=ttk.Frame(panes)
+        right=ttk.Frame(panes)
+        left.pack(side="left",fill="both",expand=True,padx=(0,8))
+        right.pack(side="left",fill="both",expand=True,padx=(8,0))
+        ttk.Label(left,text="Currently monitored (select to remove)").pack(anchor="w")
+        monitored=tk.Listbox(left,selectmode="extended",exportselection=False)
+        monitored.pack(fill="both",expand=True,pady=(5,6))
+        ttk.Label(right,text="Available accounts (select to add)").pack(anchor="w")
+        available=tk.Listbox(right,selectmode="extended",exportselection=False)
+        available.pack(fill="both",expand=True,pady=(5,6))
+        options=sorted(known.items(),key=lambda v:v[0].casefold())
+        candidate_usernames=[user for user,_ in options]
+
+        def reload_lists():
+            conf=json.loads(config.read_text(encoding="utf-8"))
+            monitored.delete(0,"end")
+            for login in conf.get("usernames",[]):
+                monitored.insert("end",login+" — "+str(known.get(login,"(unknown name)")))
+            available.delete(0,"end")
+            active={x.casefold() for x in conf.get("usernames",[])}
+            for user,name in options:
+                available.insert("end",user+" — "+str(name))
+                if user.casefold() in active:
+                    available.itemconfig("end",foreground="#888888")
+            return conf
+
+        def apply_update(action):
+            if action=="add":
+                choices=[candidate_usernames[i] for i in available.curselection()]
+                if not choices:
+                    messagebox.showinfo("Manage Surveyors","Select surveyors to add.",parent=dialog)
+                    return
+            else:
+                conf=reload_lists() if False else json.loads(config.read_text(encoding="utf-8"))
+                choices=[conf["usernames"][i] for i in monitored.curselection()]
+                if not choices:
+                    messagebox.showinfo("Manage Surveyors","Select surveyors to remove.",parent=dialog)
+                    return
+                if not messagebox.askyesno(
+                    "Confirm removal",
+                    "Stop watching: "+", ".join(choices)+"?\n"
+                    "Previously recorded inbox alerts remain accessible.",
+                    parent=dialog,
+                ):
+                    return
+            try:
+                result=update_monitored_surveyors(
+                    config,
+                    add=choices if action=="add" else (),
+                    remove=choices if action=="remove" else (),
+                )
+                reload_lists()
+                messagebox.showinfo(
+                    "Monitor updated",
+                    ("Added: "+", ".join(result.get("added",[]))+"\n"
+                     if result.get("added") else "")+
+                    ("Removed: "+", ".join(result.get("removed",[]))+"\n"
+                     if result.get("removed") else "")+
+                    "Task Scheduler will read this configuration on its next run.\n"
+                    "The existing inbox and alert history were preserved.",
+                    parent=dialog,
+                )
+            except Exception as exc:
+                messagebox.showerror("Cannot change surveyors",str(exc),parent=dialog)
+
+        ttk.Button(left,text="Remove Selected",command=lambda:apply_update("remove")).pack(anchor="w")
+        ttk.Button(right,text="Add Selected",command=lambda:apply_update("add")).pack(anchor="w")
+        ttk.Label(shell,text=(
+            "New accounts start monitoring from the moment they are added. "
+            "Historical errors do not trigger retroactive alerts."
+        ),wraplength=750).pack(anchor="w",pady=(9,5))
+        ttk.Button(shell,text="Close",command=dialog.destroy).pack(anchor="e")
+        reload_lists()
+
     ttk.Button(controls,text="Refresh",command=refresh).pack(side="left")
+    ttk.Button(controls,text="Manage Surveyors",command=manage_surveyors).pack(
+        side="left",padx=(8,0)
+    )
     ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
     ttk.Button(buttons,text="Mark Reviewed",command=lambda:update("REVIEWED")).pack(side="left",padx=9)
     ttk.Button(buttons,text="Reopen",command=lambda:update("OPEN")).pack(side="left",padx=9)
@@ -425,8 +528,18 @@ def main(argv=None):
     mode.add_argument("--list",action="store_true",help="Print recent alerts without GUI")
     mode.add_argument("--review",type=int,metavar="ID",help="Mark local alert reviewed")
     mode.add_argument("--reopen",type=int,metavar="ID",help="Reopen local alert")
+    mode.add_argument("--add-user",action="append",metavar="USERNAME",help="Add monitored portal username without resetting the config")
+    mode.add_argument("--remove-user",action="append",metavar="USERNAME",help="Remove monitored portal username without losing inbox history")
     parser.add_argument("--note",help="Supervisor remark for --review/--reopen")
     options=parser.parse_args(argv)
+    if options.add_user or options.remove_user:
+        from .notification_setup import update_monitored_surveyors
+        result=update_monitored_surveyors(
+            options.config, add=options.add_user or (),
+            remove=options.remove_user or (),
+        )
+        print(json.dumps(result,indent=2,ensure_ascii=False))
+        return 0
     if not any((options.list,options.review is not None,options.reopen is not None)):
         launch_gui(options.config)
         return 0

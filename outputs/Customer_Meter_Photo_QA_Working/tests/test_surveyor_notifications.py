@@ -14,6 +14,7 @@ from meter_photo_qa.surveyor_notifications import (
 )
 from meter_photo_qa.notification_setup import (
     configure_monitoring,chosen_usernames,_powershell,_standalone_python,
+    update_monitored_surveyors,
 )
 
 
@@ -289,6 +290,63 @@ class NotificationTests(unittest.TestCase):
                 replace_existing=True,src_path=source,python_path=py,
                 now_ms=2200000)
             self.assertEqual(updated["watching_usernames"],["janviersafari515"])
+
+    def test_incremental_surveyor_management_preserves_start_and_inbox(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            path=Path(folder)/"monitor_config.json"
+            config={"enabled":True,"enabled_at_utc_ms":1000000,
+                    "usernames":["ninamenye9683"],"assets":["pole"],
+                    "channel":"desktop"}
+            path.write_text(json.dumps(config),encoding="utf-8")
+            archive=path.with_suffix(".sqlite3")
+            archive.write_text("sentinel",encoding="utf-8")
+            result=update_monitored_surveyors(
+                path,add=["janviersafari515"],now_ms=2000000
+            )
+            self.assertEqual(result["status"],"UPDATED")
+            conf=json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(conf["usernames"],["ninamenye9683","janviersafari515"])
+            self.assertEqual(conf["enabled_at_utc_ms"],1000000)
+            self.assertEqual(conf["enabled_at_by_username_utc_ms"],
+                             {"ninamenye9683":1000000,"janviersafari515":2000000})
+            self.assertEqual(archive.read_text(),"sentinel")
+            self.assertEqual(len(list(Path(folder).glob("*backup_*.json"))),1)
+            again=update_monitored_surveyors(
+                path,add=["janviersafari515"],now_ms=2100000
+            )
+            self.assertEqual(again["status"],"UNCHANGED")
+            still=json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(still["enabled_at_by_username_utc_ms"]["janviersafari515"],2000000)
+            removed=update_monitored_surveyors(
+                path,remove=["ninamenye9683"],now_ms=2200000
+            )
+            self.assertEqual(removed["removed"],["ninamenye9683"])
+            self.assertEqual(json.loads(path.read_text())["usernames"],["janviersafari515"])
+            with self.assertRaisesRegex(ValueError,"last monitored"):
+                update_monitored_surveyors(path,remove=["janviersafari515"],now_ms=2300000)
+
+    def test_newly_added_surveyor_has_no_retroactive_alerts(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            config=dict(CONFIG)
+            config["enabled_at_by_username_utc_ms"]={
+                "ninamenye9683":1000000,"janviersafari515":2000000
+            }
+            config["usernames"]=["ninamenye9683","janviersafari515"]
+            state=State(Path(folder)/"monitor.sqlite3")
+            try:
+                old=pole(1500000)
+                old["created_user"]="janviersafari515"
+                old["last_edited_user"]="janviersafari515"
+                self.assertEqual(ready_alerts(
+                    [old],"pole",FIELDS,{},config,2400000,state
+                ),[])
+                old["created_date"]=2100000
+                old["last_edited_date"]=2100000
+                self.assertEqual(len(ready_alerts(
+                    [old],"pole",FIELDS,{},config,2400000,state
+                )),1)
+            finally:
+                state.close()
 
     def test_selected_accounts_required(self):
         with self.assertRaises(ValueError):

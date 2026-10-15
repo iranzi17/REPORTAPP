@@ -1489,7 +1489,7 @@ class ConfigureQualityNotifications:
             parameterType="Optional",direction="Input",
         )
         replace=arcpy.Parameter(
-            displayName="Replace an existing selected-surveyor configuration",
+            displayName="Replace ALL existing monitored surveyors (resets monitoring start date)",
             name="replace_existing",datatype="GPBoolean",
             parameterType="Optional",direction="Input",
         )
@@ -1531,7 +1531,7 @@ class ConfigureQualityNotifications:
             assets=assets,
             python_path=sys.executable,
             src_path=SRC,
-            replace_existing=bool(parameters[5].value),
+            replace_existing=str(parameters[5].valueAsText or "").strip().casefold() in ("true","1","yes"),
         )
         arcpy.AddMessage("Monitoring configuration created: "+result["configuration"])
         arcpy.AddMessage("Selected accounts: "+", ".join(result["watching_usernames"]))

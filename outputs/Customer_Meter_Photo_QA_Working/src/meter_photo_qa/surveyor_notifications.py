@@ -127,7 +127,8 @@ class State:
 def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=None,
                  phase_expectations=None):
     output=[]
-    cutoff=int(config["enabled_at_utc_ms"])
+    default_cutoff=int(config["enabled_at_utc_ms"])
+    account_cutoffs=config.get("enabled_at_by_username_utc_ms") or {}
     watch={str(u).casefold() for u in config["usernames"]}
     for a in records:
         oid=a.get("OBJECTID");gid=a.get("GLOBALID")
@@ -135,6 +136,7 @@ def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=Non
         submitted=event_timestamp(a)
         if username.casefold() not in watch or oid is None or not gid or submitted is None:
             continue
+        cutoff=int(account_cutoffs.get(username.casefold(),default_cutoff))
         if submitted<cutoff or submitted>now_ms-MIN_AGE_SECONDS*1000:
             continue
         issues,unverified=record_findings(

@@ -147,6 +147,31 @@ class InboxTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_cli_add_user_preserves_inbox(self):
+        from meter_photo_qa.notification_inbox import main
+        from contextlib import redirect_stdout
+        import io
+        saved=connect_inbox(self.config)
+        try:
+            recorded=record_alert(saved,self.sample(),1400000)
+        finally:
+            saved.close()
+        output=io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main([
+                "--config",str(self.config),"--add-user","ninamenye9683"
+            ]),0)
+        result=json.loads(output.getvalue())
+        self.assertEqual(result["status"],"UPDATED")
+        conf=json.loads(self.config.read_text())
+        self.assertIn("ninamenye9683",conf["usernames"])
+        self.assertEqual(conf["enabled_at_utc_ms"],1000000)
+        saved=connect_inbox(self.config)
+        try:
+            self.assertIsNotNone(get_alert(saved,recorded))
+        finally:
+            saved.close()
+
     def test_distinct_issue_or_edit_creates_separate_inbox_entries(self):
         conn=connect_inbox(self.config)
         try:
