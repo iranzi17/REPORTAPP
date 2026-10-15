@@ -127,6 +127,26 @@ class InboxTests(unittest.TestCase):
                         sender=lambda *_:self.fail("duplicate toast"))
         self.assertEqual(result["alerts_sent"],0)
 
+    def test_live_sent_jsonl_is_not_double_imported(self):
+        alert=self.sample()
+        conn=connect_inbox(self.config)
+        try:
+            row_id=record_alert(conn,alert,1400000)
+            mark_delivery(conn,row_id,"SENT")
+            entry={
+                "at_utc_ms":1400000,"status":"SENT",
+                "asset":alert["asset"],"objectid":alert["objectid"],
+                "globalid":alert["globalid"],"username":alert["username"],
+                "issues":alert["issues"],
+            }
+            self.config.with_suffix(".events.jsonl").write_text(
+                json.dumps(entry,ensure_ascii=False)+"\n",encoding="utf-8"
+            )
+            self.assertEqual(import_legacy_events(self.config,conn)["imported"],0)
+            self.assertEqual(len(list_alerts(conn,"ALL")),1)
+        finally:
+            conn.close()
+
     def test_distinct_issue_or_edit_creates_separate_inbox_entries(self):
         conn=connect_inbox(self.config)
         try:
