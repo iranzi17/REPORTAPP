@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reference only: replace the SDK-generated Config.daml using the instructions
+     in README.md, preserving the desktopVersion set by YOUR Pro SDK template. -->
+<ArcGIS defaultAssembly="ReportappNavigationBridge.dll"
+        defaultNamespace="ReportappNavigationBridge"
+        xmlns="http://schemas.esri.com/DADF/Registry">
+  <AddInInfo id="{B5ED8B73-4944-47D7-B8DF-A4EE9D75C9C2}"
+             version="0.1" desktopVersion="3.3">
+    <Name>REPORTAPP Alert Zoom Bridge</Name>
+    <Description>Read-only selection/zoom of REG alerts in the active map.</Description>
+    <Author>REPORTAPP</Author>
+    <Subject>Map Exploration</Subject>
+  </AddInInfo>
+  <modules>
+    <insertModule id="ReportappNavigationBridge_Module"
+                  className="BridgeModule"
+                  autoLoad="true"
+                  caption="REPORTAPP Navigation Bridge" />
+  </modules>
+</ArcGIS>
