@@ -1468,7 +1468,13 @@ class ConfigureQualityNotifications:
             parameterType="Optional",direction="Input",
         )
         replace.value=False
-        return [people,folder,source,channel,recipient,replace]
+        activate=arcpy.Parameter(
+            displayName="Activate monitoring now (register Windows scheduled task)",
+            name="activate_monitoring_now",datatype="GPBoolean",
+            parameterType="Optional",direction="Input",
+        )
+        activate.value=False
+        return [people,folder,source,channel,recipient,replace,activate]
 
     def execute(self,parameters,messages):
         raw=parameters[0].valueAsText or ""
@@ -1496,11 +1502,38 @@ class ConfigureQualityNotifications:
         arcpy.AddMessage("Monitoring configuration created: "+result["configuration"])
         arcpy.AddMessage("Selected accounts: "+", ".join(result["watching_usernames"]))
         arcpy.AddMessage("Windows setup script: "+result["installation_script"])
+        if bool(parameters[6].value):
+            import subprocess
+            if sys.platform != "win32":
+                raise RuntimeError(
+                    "Windows Task Scheduler activation requires Windows. "
+                    "The configuration and installer script are preserved."
+                )
+            result_task=subprocess.run(
+                ["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass",
+                 "-File",result["installation_script"]],
+                capture_output=True,text=True,timeout=90,check=False,
+            )
+            if result_task.returncode!=0:
+                raise RuntimeError(
+                    "Task registration failed; monitoring has NOT started. "
+                    "Install manually with the generated PowerShell script. "
+                    "PowerShell details: "+(result_task.stderr or result_task.stdout)
+                )
+            arcpy.AddMessage(
+                "Windows confirmed registration of the one-minute task: "
+                + result["task_name"]
+            )
+        else:
+            arcpy.AddWarning(
+                "NOT ACTIVATED YET. Execute the generated "
+                "Install_One_Minute_Monitor.ps1 file while logged into Windows, "
+                "or rerun this setup tool with Activate monitoring now checked."
+            )
         arcpy.AddWarning(
-            "NOT ACTIVATED YET. From Windows PowerShell while signed into your "
-            "user account, execute the Install_One_Minute_Monitor.ps1 file. "
-            "The job will run every minute and send eligible alerts after "
-            "at least five minutes when REG and the PC are accessible."
+            "Check desktop/email delivery with --send-test and verify the first "
+            "monitor.log checks. A scheduled task alone does not prove REG "
+            "authentication or notification delivery."
         )
         if channel=="desktop":
             arcpy.AddWarning(
