@@ -49,13 +49,13 @@ class QualityWatcherTests(unittest.TestCase):
     def setUpClass(cls):
         cls.rules = load_quality_rules()
 
-    def test_typical_eight_of_ten_fields_passes(self):
+    def test_typical_eight_of_eight_fields_passes(self):
         result = assess_line_quality(
             typical_attributes(), self.rules, DOMAINS, 60, current_year=2026
         )
         self.assertEqual(result["completed_fields"], 8)
-        self.assertEqual(result["required_fields"], 10)
-        self.assertAlmostEqual(result["completion_percent"], 80.0)
+        self.assertEqual(result["required_fields"], 8)
+        self.assertAlmostEqual(result["completion_percent"], 100.0)
         self.assertEqual(result["status"], "MEETS_THRESHOLD")
 
     def test_transformer_name_is_mandatory_even_above_threshold(self):
@@ -65,11 +65,11 @@ class QualityWatcherTests(unittest.TestCase):
         attributes["Year_construction"] = 2025
         attributes["Year_of_commisioning"] = 2026
         result = assess_line_quality(attributes, self.rules, DOMAINS, 60, current_year=2026)
-        self.assertEqual(result["completed_fields"], 9)
+        self.assertEqual(result["completed_fields"], 7)
         self.assertEqual(result["status"], "FLAG")
         self.assertEqual(result["mandatory_failures"], ["Transformer Name"])
 
-    def test_two_more_missing_fields_drop_below_threshold(self):
+    def test_two_more_missing_fields_do_not_override_mandatory_requirement(self):
         attributes = typical_attributes()
         attributes["Transformer_Name"] = None
         attributes["Rated_Current"] = None
@@ -77,6 +77,7 @@ class QualityWatcherTests(unittest.TestCase):
             attributes, self.rules, DOMAINS, 60, current_year=2026
         )
         self.assertEqual(result["completed_fields"], 6)
+        self.assertAlmostEqual(result["completion_percent"],75.0)
         self.assertEqual(result["status"], "FLAG")
 
     def test_lv_feeder_name_is_optional(self):
@@ -102,13 +103,13 @@ class QualityWatcherTests(unittest.TestCase):
         from meter_photo_qa.surveyor_notifications import record_findings
         attributes=typical_attributes()
         full=assess_line_quality(attributes,self.rules,DOMAINS,60,current_year=2026)
-        self.assertEqual(full["required_fields"],10)
+        self.assertEqual(full["required_fields"],8)
         self.assertEqual(full["display_values"]["supplying_lines"],"Unknown")
         self.assertNotIn("Supplying Lines",full["missing_attributes"])
-        self.assertTrue(any("Year of Construction" in x
-                            for x in full["missing_attributes"]))
-        self.assertTrue(any("Year of Commissioning" in x
-                            for x in full["missing_attributes"]))
+        self.assertFalse(any("Year of Construction" in x
+                             for x in full["missing_attributes"]))
+        self.assertFalse(any("Year of Commissioning" in x
+                             for x in full["missing_attributes"]))
         alerts,unverified=record_findings(
             "line",attributes,[],DOMAINS,self.rules,{},
         )
@@ -119,22 +120,30 @@ class QualityWatcherTests(unittest.TestCase):
         self.assertEqual(full_filled["completion_percent"],full["completion_percent"])
         self.assertEqual(full_filled["display_values"]["supplying_lines"],"Residential")
 
-    def test_commissioning_before_construction_is_invalid(self):
-        attributes = typical_attributes()
-        attributes["LV_Feeder_Name"] = "Feeder A"
-        attributes["SupplyingLines"] = 1
-        attributes["Year_construction"] = 2025
-        attributes["Year_of_commisioning"] = 2024
-        result = assess_line_quality(
-            attributes, self.rules, DOMAINS, 60, current_year=2026
+    def test_both_years_optional_in_score_reports_and_notifications(self):
+        from meter_photo_qa.surveyor_notifications import record_findings
+        attrs=typical_attributes()
+        missing=assess_line_quality(attrs,self.rules,DOMAINS,60,current_year=2026)
+        check_keys={field["key"] for field in missing["checks"]}
+        for key,label in (("year_construction","Year of Construction"),
+                          ("year_commissioning","Year of Commissioning")):
+            self.assertNotIn(key,check_keys)
+            self.assertIn(key,missing["display_values"])
+            self.assertNotIn(label,missing["missing_attributes"])
+            self.assertFalse(any(label in x for x in missing["invalid_attributes"]))
+        self.assertEqual(missing["completion_percent"],100)
+        attrs["Year_construction"]=2025.9
+        attrs["Year_of_commisioning"]=2024
+        recorded=assess_line_quality(attrs,self.rules,DOMAINS,60,current_year=2026)
+        self.assertEqual(recorded["completion_percent"],100)
+        self.assertEqual(recorded["display_values"]["year_construction"],2025.9)
+        self.assertEqual(recorded["display_values"]["year_commissioning"],2024)
+        self.assertFalse(any("Year of " in x for x in recorded["invalid_attributes"]))
+        alerts,uncertain=record_findings(
+            "line",attrs,[],DOMAINS,self.rules,{}
         )
-        self.assertTrue(any("Year of Commissioning" in text for text in result["invalid_attributes"]))
-
-    def test_fractional_year_is_invalid(self):
-        attributes = typical_attributes()
-        attributes["Year_construction"] = 2025.9
-        result = assess_line_quality(attributes, self.rules, DOMAINS, 60, current_year=2026)
-        self.assertTrue(any("Year of Construction" in text for text in result["invalid_attributes"]))
+        self.assertFalse(any("Year of " in x for x in alerts))
+        self.assertEqual(uncertain,[])
 
     def test_where_uses_inclusive_end_date(self):
         where = build_quality_where("2026-07-01", "2026-07-15", ["alpha"])

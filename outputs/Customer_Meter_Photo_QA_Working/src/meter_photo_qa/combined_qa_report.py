@@ -230,7 +230,7 @@ def _build_consolidated_workbook(destination, reports, context, geometry):
         ("Topic","Requirement and limitation"),
         ("Three original audits","All existing LV line, distribution-transformer and LV pole rules run unchanged."),
         ("LV gaps","Priority gap count is different from completion threshold FLAG count."),
-        ("Additional scored-field gaps","Missing construction/commissioning years and invalid coded values are reported separately, even when 60% completion is met."),
+        ("Additional scored-field gaps","Missing mandatory/scored LV attributes and invalid scored coded values are shown separately even when the completion threshold is met; supplying lines and the two years are informational."),
         ("Pole height not recorded","Reported as informational. Current mandatory height rule only evaluates recorded values exceeding 12; requirements must be confirmed before treating missing height as noncompliance."),
         ("LV duplicate GlobalIDs","All scoped source OBJECTIDs retained in separate duplicate registers; no geometry comparison or source deletion. Identifier conflicts are outside original attribute-gap totals."),
         ("Distribution transformers","Seven original gap categories; duplicate source GlobalID recorded separately."),

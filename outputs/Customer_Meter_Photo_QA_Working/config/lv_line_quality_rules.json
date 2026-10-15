@@ -87,22 +87,6 @@
       "validation": "domain_any",
       "template_domain": "1; 2; 3",
       "notes": "All three phase-count choices are valid; domain code 0 means 1 phase."
-    },
-    {
-      "key": "year_construction",
-      "label": "Year of Construction",
-      "field": "Year_construction",
-      "validation": "year",
-      "template_domain": "Integer year",
-      "notes": "Accepted range is 1900 through one year after the report end year."
-    },
-    {
-      "key": "year_commissioning",
-      "label": "Year of Commissioning",
-      "field": "Year_of_commisioning",
-      "validation": "year",
-      "template_domain": "Integer year",
-      "notes": "Must not be earlier than the construction year."
     }
   ],
   "optional_attributes": [
@@ -126,6 +110,20 @@
       "field": "Notes",
       "template_domain": "Free note for facility problems or unknown data",
       "notes": "Optional and excluded from the completion denominator."
+    },
+    {
+      "key": "year_construction",
+      "label": "Year of Construction",
+      "field": "Year_construction",
+      "template_domain": "Integer year",
+      "notes": "Optional and informational. Excluded from completion scores, mandatory failures, and five-minute QA notifications. Raw recorded value remains visible in the LV Line Details worksheet."
+    },
+    {
+      "key": "year_commissioning",
+      "label": "Year of Commissioning",
+      "field": "Year_of_commisioning",
+      "template_domain": "Integer year",
+      "notes": "Optional and informational. Excluded from completion scores, mandatory failures, and five-minute QA notifications. Raw recorded value remains visible in the LV Line Details worksheet."
     }
   ]
 }
