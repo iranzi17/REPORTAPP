@@ -1,0 +1,451 @@
+"""Persistent, local-only REPORTAPP surveyor quality alert inbox.
+
+Shares the existing monitor_config.sqlite3 database; never edits REG features.
+GUI uses tkinter only when explicitly opened by the Windows user. All review
+states are local supervisory actions and do NOT mean the source defect was fixed.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS alert_inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key TEXT UNIQUE NOT NULL,
+    asset TEXT NOT NULL,
+    objectid INTEGER NOT NULL,
+    globalid TEXT NOT NULL,
+    username TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    created_user TEXT NOT NULL,
+    last_edited_user TEXT NOT NULL,
+    event_time_utc_ms INTEGER,
+    received_utc_ms INTEGER NOT NULL,
+    issues_json TEXT NOT NULL,
+    issue_digest TEXT NOT NULL,
+    delivery_status TEXT NOT NULL DEFAULT 'PENDING',
+    delivery_error TEXT NOT NULL DEFAULT '',
+    review_status TEXT NOT NULL DEFAULT 'OPEN',
+    review_notes TEXT NOT NULL DEFAULT '',
+    reviewed_by TEXT NOT NULL DEFAULT '',
+    reviewed_at_utc_ms INTEGER,
+    origin TEXT NOT NULL DEFAULT 'LIVE'
+);
+CREATE INDEX IF NOT EXISTS ix_alert_inbox_review
+    ON alert_inbox (review_status, received_utc_ms DESC);
+"""
+
+def database_path(config_path):
+    return Path(config_path).expanduser().resolve().with_suffix(".sqlite3")
+
+def connect_inbox(config_path):
+    config = Path(config_path).expanduser().resolve()
+    if not config.is_file():
+        raise FileNotFoundError(f"REPORTAPP monitor config missing: {config}")
+    conn = sqlite3.connect(database_path(config), timeout=15)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=15000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    ensure_schema(conn)
+    return conn
+
+def ensure_schema(conn):
+    conn.executescript(SCHEMA)
+    conn.commit()
+
+def _event_key(alert):
+    # Distinct source edits are separate events; an unchanged pending event is
+    # never duplicated by repeated minute-by-minute retries.
+    data = [
+        str(alert["asset"]), int(alert["objectid"]),
+        str(alert["globalid"]).strip().casefold(),
+        str(alert["issue_digest"]),
+        int(alert["event_time_utc_ms"]),
+    ]
+    digest = hashlib.sha256(
+        json.dumps(data,ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return "LIVE:" + digest
+
+def record_alert(conn, alert, received_ms):
+    ensure_schema(conn)
+    key = _event_key(alert)
+    conn.execute("""
+        INSERT OR IGNORE INTO alert_inbox
+        (event_key,asset,objectid,globalid,username,event_type,created_user,
+         last_edited_user,event_time_utc_ms,received_utc_ms,issues_json,
+         issue_digest,delivery_status,origin)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'PENDING','LIVE')
+    """, (
+        key, str(alert["asset"]), int(alert["objectid"]),
+        str(alert["globalid"]),str(alert["username"]),
+        str(alert.get("event_type") or ""),
+        str(alert.get("created_user") or ""),
+        str(alert.get("last_edited_user") or ""),
+        int(alert["event_time_utc_ms"]),int(received_ms),
+        json.dumps(alert["issues"],ensure_ascii=False),
+        str(alert["issue_digest"]),
+    ))
+    row = conn.execute("SELECT id FROM alert_inbox WHERE event_key=?", (key,)).fetchone()
+    conn.commit()
+    return int(row[0])
+
+def mark_delivery(conn, row_id, status, reason=""):
+    if status not in ("SENT", "SEND_FAILED"):
+        raise ValueError("Unknown delivery status.")
+    cursor=conn.execute(
+        "UPDATE alert_inbox SET delivery_status=?, delivery_error=? WHERE id=?",
+        (status,str(reason),int(row_id))
+    )
+    if cursor.rowcount != 1:
+        raise ValueError(f"Unknown alert ID: {row_id}")
+    conn.commit()
+
+def import_legacy_events(config_path, conn):
+    """Idempotently import old SENT JSONL events including prior real alerts.
+
+    Old event logs lack exact source edit timestamps; only the delivery timestamp
+    is shown. Test notification lines are excluded from the real alert inbox.
+    """
+    path=Path(config_path).expanduser().resolve().with_suffix(".events.jsonl")
+    if not path.is_file():
+        return {"imported":0,"skipped":0}
+    ensure_schema(conn)
+    imported=0
+    skipped=0
+    with path.open("r",encoding="utf-8-sig") as source:
+        for line in source:
+            line=line.strip()
+            if not line:
+                continue
+            try:
+                event=json.loads(line)
+                if event.get("status")!="SENT" or not isinstance(event.get("issues"),list):
+                    # Failed deliveries have no field-level issues in old logs.
+                    continue
+                oid=int(event["objectid"])
+                asset=str(event["asset"])
+                gid=str(event["globalid"])
+                user=str(event["username"])
+                received=int(event["at_utc_ms"])
+                issues=[str(issue) for issue in event["issues"]]
+                if asset not in ("pole","transformer","line") or not issues:
+                    continue
+                key="LEGACY:"+hashlib.sha256(line.encode("utf-8")).hexdigest()
+                result=conn.execute("""
+                    INSERT OR IGNORE INTO alert_inbox
+                    (event_key,asset,objectid,globalid,username,event_type,created_user,
+                     last_edited_user,event_time_utc_ms,received_utc_ms,issues_json,
+                     issue_digest,delivery_status,origin)
+                    VALUES (?,?,?,?,?,'','','',NULL,?,?,?,'SENT','HISTORICAL_JSONL')
+                """,(
+                    key,asset,oid,gid,user,received,
+                    json.dumps(issues,ensure_ascii=False),
+                    hashlib.sha256(line.encode("utf-8")).hexdigest(),
+                ))
+                imported+=int(result.rowcount>0)
+            except (ValueError,TypeError,KeyError,json.JSONDecodeError,sqlite3.Error):
+                skipped+=1
+    conn.commit()
+    return {"imported":imported,"skipped":skipped}
+
+def list_alerts(conn, status="OPEN", search="", limit=500):
+    if status not in ("OPEN","REVIEWED","ALL"):
+        raise ValueError("Invalid review filter.")
+    if not 1<=int(limit)<=5000:
+        raise ValueError("Limit must be 1 to 5000.")
+    where=[]
+    values=[]
+    if status!="ALL":
+        where.append("review_status=?")
+        values.append(status)
+    query=str(search or "").strip()
+    if query:
+        where.append("(username LIKE ? OR globalid LIKE ? OR CAST(objectid AS TEXT) LIKE ? OR asset LIKE ?)")
+        values.extend(["%"+query+"%"]*4)
+    clause=" WHERE "+" AND ".join(where) if where else ""
+    sql="SELECT * FROM alert_inbox"+clause+" ORDER BY received_utc_ms DESC,id DESC LIMIT ?"
+    return [dict(row) for row in conn.execute(sql,(*values,int(limit))).fetchall()]
+
+def get_alert(conn,row_id):
+    row=conn.execute("SELECT * FROM alert_inbox WHERE id=?",(int(row_id),)).fetchone()
+    return dict(row) if row else None
+
+def set_review(conn,row_id,status,note=None,reviewer=None,now_ms=None):
+    if status not in ("OPEN","REVIEWED"):
+        raise ValueError("Use OPEN or REVIEWED.")
+    if not get_alert(conn,row_id):
+        raise ValueError(f"Alert {row_id} was not found.")
+    now=int(now_ms if now_ms is not None else dt.datetime.now(dt.timezone.utc).timestamp()*1000)
+    username=str(reviewer or os.environ.get("USERNAME") or "LOCAL_REVIEWER")
+    current=get_alert(conn,row_id)
+    updated_note=current["review_notes"] if note is None else str(note)
+    if status=="REVIEWED":
+        values=(status,updated_note,username,now,int(row_id))
+    else:
+        values=(status,updated_note,"",None,int(row_id))
+    conn.execute("""
+        UPDATE alert_inbox SET review_status=?, review_notes=?, reviewed_by=?,
+        reviewed_at_utc_ms=? WHERE id=?
+    """,values)
+    conn.commit()
+    return get_alert(conn,row_id)
+
+def format_time(ms):
+    if ms is None:
+        return "(not recorded)"
+    return dt.datetime.fromtimestamp(int(ms)/1000,dt.timezone.utc).astimezone().strftime(
+        "%Y-%m-%d %H:%M:%S %Z"
+    )
+
+def format_details(record):
+    lines=[
+        "REPORTAPP SURVEYOR QUALITY ALERT",
+        f"Alert ID: {record['id']}",
+        f"Surveyor login: {record['username']}",
+        f"Asset type: {record['asset'].upper()}",
+        f"Source OBJECTID: {record['objectid']}",
+        f"Source GlobalID: {record['globalid']}",
+        f"Event: {record['event_type'] or 'Not recorded in legacy log'}",
+        f"Source event time: {format_time(record['event_time_utc_ms'])}",
+        f"Notification delivered/logged: {format_time(record['received_utc_ms'])}",
+        f"Original creator: {record['created_user'] or 'Not available'}",
+        f"Last editor: {record['last_edited_user'] or 'Not available'}",
+        f"Delivery: {record['delivery_status']}",
+        f"Review: {record['review_status']}",
+        f"Review by: {record['reviewed_by'] or 'Not yet reviewed'}",
+        f"Reviewed at: {format_time(record['reviewed_at_utc_ms'])}",
+        "Source: " + record["origin"],
+        "",
+        "DETECTED ISSUES:",
+    ]
+    for i,issue in enumerate(json.loads(record["issues_json"]),1):
+        lines.append(f"{i}. {issue}")
+    lines.extend(["","Supervisor notes:",record["review_notes"] or "(none)",
+                  "",
+                  "REVIEWED means reviewed in REPORTAPP only; no REG asset is modified."])
+    return "\n".join(lines)
+
+def launch_gui(config_path):
+    # Import lazily so scheduled monitoring never imports GUI components.
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+    from tkinter.scrolledtext import ScrolledText
+
+    config=Path(config_path).expanduser().resolve()
+    root=tk.Tk()
+    root.title("REPORTAPP | Quality Notification Inbox")
+    root.geometry("1150x760")
+    root.minsize(850,550)
+    filter_value=tk.StringVar(value="OPEN")
+    search_value=tk.StringVar()
+    selected_id=[None]
+
+    heading=ttk.Frame(root,padding=12)
+    heading.pack(fill="x")
+    ttk.Label(heading,text="REPORTAPP Quality Notification Inbox",
+              font=("Segoe UI",17,"bold")).pack(side="left")
+    counter=ttk.Label(heading,text="")
+    counter.pack(side="right")
+
+    controls=ttk.Frame(root,padding=(12,0,12,8))
+    controls.pack(fill="x")
+    ttk.Label(controls,text="Show").pack(side="left")
+    picker=ttk.Combobox(controls,textvariable=filter_value,
+                        values=("OPEN","REVIEWED","ALL"),state="readonly",width=12)
+    picker.pack(side="left",padx=(7,16))
+    ttk.Label(controls,text="Search username / OBJECTID / GlobalID").pack(side="left")
+    search=ttk.Entry(controls,textvariable=search_value,width=35)
+    search.pack(side="left",padx=(8,10))
+
+    tree_frame=ttk.Frame(root,padding=(12,0,12,0))
+    tree_frame.pack(fill="both",expand=True)
+    names=("ID","Received","Surveyor","Asset","OBJECTID","Issues","Review","Delivery")
+    tree=ttk.Treeview(tree_frame,columns=names,show="headings",height=11)
+    widths=(65,175,135,100,115,65,100,110)
+    for col,width in zip(names,widths):
+        tree.heading(col,text=col)
+        tree.column(col,width=width,stretch=col in ("Surveyor","Received"))
+    scroll=ttk.Scrollbar(tree_frame,orient="vertical",command=tree.yview)
+    tree.configure(yscrollcommand=scroll.set)
+    tree.pack(side="left",fill="both",expand=True)
+    scroll.pack(side="right",fill="y")
+
+    detail_frame=ttk.Frame(root,padding=12)
+    detail_frame.pack(fill="both",expand=True)
+    ttk.Label(detail_frame,text="Alert details — original REG source is read-only",
+              font=("Segoe UI",10,"bold")).pack(anchor="w")
+    details=ScrolledText(detail_frame,height=12,wrap="word",state="disabled")
+    details.pack(fill="both",expand=True,pady=(4,7))
+    ttk.Label(detail_frame,text="Supervisor review notes (stored locally):").pack(anchor="w")
+    notes=tk.Text(detail_frame,height=3,wrap="word")
+    notes.pack(fill="x",pady=(3,7))
+    buttons=ttk.Frame(detail_frame)
+    buttons.pack(fill="x")
+
+    def open_db():
+        conn=connect_inbox(config)
+        migration=import_legacy_events(config,conn)
+        return conn,migration
+
+    def detail():
+        record_id=selected_id[0]
+        if record_id is None:
+            return
+        conn,_=open_db()
+        try:
+            rec=get_alert(conn,record_id)
+        finally:
+            conn.close()
+        if rec is None:
+            return
+        details.configure(state="normal")
+        details.delete("1.0","end")
+        details.insert("1.0",format_details(rec))
+        details.configure(state="disabled")
+        notes.delete("1.0","end")
+        notes.insert("1.0",rec["review_notes"])
+
+    def on_selection(_event=None):
+        selection=tree.selection()
+        if selection:
+            new_id=int(selection[0])
+            if new_id!=selected_id[0]:
+                selected_id[0]=new_id
+                detail()
+
+    def refresh():
+        previous=selected_id[0]
+        try:
+            conn,migration=open_db()
+            try:
+                rows=list_alerts(conn,filter_value.get(),search_value.get())
+                count_open=conn.execute(
+                    "SELECT COUNT(*) FROM alert_inbox WHERE review_status='OPEN'"
+                ).fetchone()[0]
+                count_total=conn.execute("SELECT COUNT(*) FROM alert_inbox").fetchone()[0]
+            finally:
+                conn.close()
+            for item in tree.get_children():
+                tree.delete(item)
+            for item in rows:
+                tree.insert("", "end", iid=str(item["id"]),values=(
+                    item["id"],format_time(item["received_utc_ms"]),
+                    item["username"],item["asset"].upper(),item["objectid"],
+                    len(json.loads(item["issues_json"])),item["review_status"],
+                    item["delivery_status"],
+                ))
+            counter.configure(text=f"Open: {count_open} | All: {count_total}")
+            if previous is not None and tree.exists(str(previous)):
+                tree.selection_set(str(previous))
+            elif tree.get_children():
+                selected_id[0]=None
+                tree.selection_set(tree.get_children()[0])
+                on_selection()
+            else:
+                selected_id[0]=None
+                details.configure(state="normal")
+                details.delete("1.0","end")
+                details.configure(state="disabled")
+                notes.delete("1.0","end")
+            if migration["skipped"]:
+                messagebox.showwarning("Legacy alert import",
+                    f"Skipped {migration['skipped']} invalid event log lines.")
+        except Exception as exc:
+            messagebox.showerror("Inbox database error",str(exc))
+
+    def update(status=None):
+        if selected_id[0] is None:
+            messagebox.showinfo("Choose alert","Select an alert before saving.")
+            return
+        try:
+            conn,_=open_db()
+            try:
+                rec=get_alert(conn,selected_id[0])
+                target=status or rec["review_status"]
+                set_review(conn,selected_id[0],target,
+                           note=notes.get("1.0","end-1c"))
+            finally:
+                conn.close()
+            refresh()
+        except Exception as exc:
+            messagebox.showerror("Review update failed",str(exc))
+
+    ttk.Button(controls,text="Refresh",command=refresh).pack(side="left")
+    ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
+    ttk.Button(buttons,text="Mark Reviewed",command=lambda:update("REVIEWED")).pack(side="left",padx=9)
+    ttk.Button(buttons,text="Reopen",command=lambda:update("OPEN")).pack(side="left",padx=9)
+    ttk.Label(buttons,text="Review status does not change REG data.").pack(side="right")
+    tree.bind("<<TreeviewSelect>>",on_selection)
+    picker.bind("<<ComboboxSelected>>",lambda _evt:refresh())
+    search.bind("<Return>",lambda _evt:refresh())
+
+    def auto_refresh():
+        # Do not overwrite the note editor while a supervisor is typing.
+        # Refresh is explicit, but the open/total counters still update.
+        try:
+            conn,_=open_db()
+            try:
+                opened=conn.execute(
+                    "SELECT COUNT(*) FROM alert_inbox WHERE review_status='OPEN'"
+                ).fetchone()[0]
+                total=conn.execute("SELECT COUNT(*) FROM alert_inbox").fetchone()[0]
+            finally:
+                conn.close()
+            counter.configure(text=f"Open: {opened} | All: {total}")
+        except Exception:
+            pass
+        root.after(15000,auto_refresh)
+    refresh()
+    root.after(15000,auto_refresh)
+    root.mainloop()
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description="REPORTAPP local Quality Notification Inbox")
+    parser.add_argument("--config",required=True,help="Existing monitor_config.json file")
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument("--list",action="store_true",help="Print recent alerts without GUI")
+    mode.add_argument("--review",type=int,metavar="ID",help="Mark local alert reviewed")
+    mode.add_argument("--reopen",type=int,metavar="ID",help="Reopen local alert")
+    parser.add_argument("--note",help="Supervisor remark for --review/--reopen")
+    options=parser.parse_args(argv)
+    if not any((options.list,options.review is not None,options.reopen is not None)):
+        launch_gui(options.config)
+        return 0
+    conn=connect_inbox(options.config)
+    try:
+        migration=import_legacy_events(options.config,conn)
+        if options.list:
+            data=[
+                {"id":row["id"],"survey":row["username"],
+                 "asset":row["asset"],"objectid":row["objectid"],
+                 "issues":json.loads(row["issues_json"]),
+                 "review":row["review_status"],
+                 "delivery":row["delivery_status"],
+                 "received":format_time(row["received_utc_ms"])}
+                for row in list_alerts(conn,status="ALL")
+            ]
+            print(json.dumps({"alerts":data,"legacy_import":migration},
+                             ensure_ascii=False,indent=2))
+        else:
+            rowid=options.review if options.review is not None else options.reopen
+            status="REVIEWED" if options.review is not None else "OPEN"
+            updated=set_review(conn,rowid,status,note=options.note)
+            print(format_details(updated))
+        return 0
+    finally:
+        conn.close()
+
+if __name__=="__main__":
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        print(f"REPORTAPP INBOX ERROR: {exc}",file=sys.stderr)
+        sys.exit(1)

@@ -407,6 +407,10 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
     collector=collector or collect
     sender=sender or deliver
     try:
+        # Migrate historical real SENT events without reissuing notifications.
+        from .notification_inbox import (record_alert, mark_delivery,
+                                         import_legacy_events)
+        import_legacy_events(path,state.db)
         # Fetch and validate ALL monitored services before alert delivery.
         snapshots=collector(config,now_ms=now_ms)
         if set(snapshots)!=set(config.get("assets",[])):
@@ -421,9 +425,12 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
         sent=0
         failed=0
         for item in notices:
+            # Persist first so any transient popup cannot be the only record.
+            inbox_id=record_alert(state.db,item,now_ms)
             try:
                 sender(item,config)
             except Exception as exc:
+                mark_delivery(state.db,inbox_id,"SEND_FAILED",str(exc))
                 with logfile.open("a",encoding="utf-8") as fh:
                     fh.write(json.dumps({
                         "at_utc_ms":now_ms,"status":"SEND_FAILED",
@@ -436,6 +443,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
                 item["asset"],item["objectid"],item["globalid"],
                 item["issue_digest"],now_ms
             )
+            mark_delivery(state.db,inbox_id,"SENT")
             with logfile.open("a",encoding="utf-8") as fh:
                 fh.write(json.dumps({
                     "at_utc_ms":now_ms,"status":"SENT",

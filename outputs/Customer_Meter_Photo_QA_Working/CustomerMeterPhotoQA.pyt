@@ -143,6 +143,7 @@ class Toolbox:
             ReviewGicumbiPamelaTeam,
             AskReportApp,
             ConfigureQualityNotifications,
+            OpenQualityNotificationInbox,
         ]
 
 
@@ -1579,6 +1580,62 @@ class ConfigureQualityNotifications:
                 "configured outside GitHub and visible to the scheduled task."
             )
         arcpy.AddMessage("No notifications have been sent during setup.")
+
+
+class OpenQualityNotificationInbox:
+    """Open the local Windows inbox; never modify REG FeatureServer assets."""
+    label = "Open REPORTAPP Quality Notification Inbox"
+    description = (
+        "Open persistent Windows inbox for selected surveyor QA alerts. "
+        "Review or reopen locally without changing REG source data. "
+        "Imports previous SENT notifications from existing events.jsonl."
+    )
+    canRunInBackground = False
+
+    @_log_tool_open_errors
+    def getParameterInfo(self):
+        config = arcpy.Parameter(
+            displayName="Existing live monitoring config (monitor_config.json)",
+            name="monitor_config",
+            datatype="DEFile", parameterType="Required",
+            direction="Input",
+        )
+        config.value = str(
+            ROOT/"outputs"/"REPORTAPP_Surveyor_Notifications"/"monitor_config.json"
+        )
+        return [config]
+
+    def execute(self, parameters, messages):
+        import os
+        import subprocess
+        config = Path(parameters[0].valueAsText)
+        if not config.is_file():
+            raise FileNotFoundError(
+                "Monitoring configuration not found: "+str(config)
+            )
+        if sys.platform != "win32":
+            raise RuntimeError("Windows Notification Inbox requires Windows desktop.")
+        python = _notification_setup._standalone_python(sys.executable)
+        environ = os.environ.copy()
+        environ["PYTHONPATH"] = str(SRC) + os.pathsep + environ.get("PYTHONPATH","")
+        try:
+            process = subprocess.Popen(
+                [str(python),"-m","meter_photo_qa.notification_inbox",
+                 "--config",str(config)],
+                cwd=str(SRC),
+                env=environ,
+                creationflags=getattr(subprocess,"CREATE_NEW_CONSOLE",0),
+            )
+        except OSError as exc:
+            raise RuntimeError("Could not launch local inbox window: "+str(exc)) from exc
+        arcpy.AddMessage(
+            "Launching local REPORTAPP Notification Inbox. "
+            "Process ID: "+str(process.pid)
+        )
+        arcpy.AddMessage(
+            "Old SENT events are imported automatically; review status "
+            "is local only and never modifies REG records."
+        )
 
 
 class ReviewGicumbiPamelaTeam:
