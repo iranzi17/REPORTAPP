@@ -130,7 +130,8 @@ class AssetQualityTests(unittest.TestCase):
                 "Manufacturers": None, "Notes": "Name plate not clear",
                 "Append_Cable": "Yes", "Pole_Height":10,
             }, "pole", mapping)
-            self.assertEqual(wrong["status"], "GAP")
+            self.assertEqual(wrong["status"], "NO_GAPS_FOUND")
+            self.assertEqual(wrong["values"]["manufacturer_status"], "NOTES_PRESENT")
 
     def test_kinyarwanda_explicit_absence_of_pole_nameplate(self):
         fields = {"manufacturer": "Manufacturers", "notes": "Notes",
