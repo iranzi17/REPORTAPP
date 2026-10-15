@@ -895,6 +895,15 @@ report phrase has an explicit or relative period. At execution the
 stated period takes precedence over date picker values. Without a time
 phrase, the manually chosen QA date controls remain authoritative.
 
+The same date suffixes now work with surveyor field audits, e.g.
+"Show surveyors with pole height > 12 in Gicumbi the last 2 weeks"
+or "Show surveyors missing manufacturer and append cable on LV poles
+in Gicumbi sector Muko last month". A requested time window is
+applied to the live feature created_date OR last_edited_date; if the
+layer cannot verify both fields, the audit refuses to run rather than
+ignoring its requested date filter. Attribute data are the present
+feature snapshot, not necessarily the precise contents at past edit time.
+
 The interpreter recognizes verified portal usernames or unique mapped
 real names, and only official Rwanda district names. Unrecognized,
 ambiguous or unsupported time expressions result in a validation
