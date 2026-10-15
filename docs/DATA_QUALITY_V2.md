@@ -770,3 +770,88 @@ compiler), `template_audit_runner.py` (ArcGIS selected view + XLSX),
 `test_template_attribute_audit.py`,
 `test_template_audit_runner.py`, and `test_smart_query_toolbox.py`.
 Live REG service verification remains necessary before relying on output.
+
+
+## Pole height > 12 and opt-in selected-surveyor alerts (Oct 15, 2026)
+
+### Conditional pole-height rule
+
+The original LV Pole QA and combined workbook now check a recorded
+height greater than **12 (stored field units)**. Such a record
+passes THIS SPECIFIC height check only when Notes clearly affirm
+the pole is **for MV lines** or **for HV lines/towers**, e.g.
+"Pole for MV lines" or "HV tower". A blank, "No nameplate" or
+"not for MV lines" is NOT sufficient. Mandatory Append Cable,
+manufacturer and nameplate-documentation requirements remain separate.
+
+Recognized potential names include Pole_Height, Height_of_Pole,
+Height and Height_m. The actual field name/alias must be resolved
+against the live schema; if missing or ambiguous, the height check
+is NOT_VERIFIED and alerting for poles is blocked until verified.
+A Notes exception does not certify that the chosen electric
+asset group is correct for an MV/HV pole.
+
+### Monitoring setup
+
+New ArcGIS Pro tool: **Configure Surveyor Quality Notifications (5-minute)**.
+
+1. Choose watched surveyor portal usernames (shown together with
+   current names; historic account transfers mean real names may be
+   ambiguous).
+2. Choose LV Lines, Distribution Transformers, LV Poles or all three.
+3. Choose the notification output folder, and a delivery channel:
+   Windows desktop (default) or SMTP email.
+4. Run the tool. It produces configuration and a local PowerShell
+   setup script, but DOES NOT start monitoring automatically.
+5. For Windows desktop notifications, install winotify into the
+   ArcGIS Pro Python environment: python -m pip install winotify.
+6. Execute the generated PowerShell file
+   REPORTAPP_Surveyor_Notifications/Install_One_Minute_Monitor.ps1
+   while logged into Windows. This creates a *separate* task named
+   REPORTAPP Surveyor Quality Alerts; it does not enable the older
+   REPORTAPP GitHub Auto Sync task.
+7. Test the configured channel from the toolbox src directory:
+   python -m meter_photo_qa.surveyor_notifications --config
+   "PATH_TO_monitor_config.json" --send-test
+8. Inspect monitor_config.monitor.log and
+   monitor_config.events.jsonl beside the JSON configuration.
+
+The monitor checks the FeatureServer once per minute for new
+or edited records by the selected accounts, recognizing the
+latest submitter (created_user for creation, last_edited_user
+for a later edit). Five minutes after that event's recorded UTC
+timestamp, outstanding issues become eligible for alerts.
+
+**Timing:** about 5–6 minutes under normal conditions, NOT
+a guaranteed five-minute push. It needs Windows awake, the
+signed-in session (for desktop toasts), portal authentication,
+a working REG GIS service and a running Windows scheduled task.
+No work is scheduled or activated by publishing this code to
+GitHub. Long outages may cause missed events because searches
+use a rolling 24-hour lookback.
+
+Existing checks are reused: LV Lines scored gaps/invalid entries
+and phase-type consistency (even if the 60% threshold passes),
+seven mandatory Distribution Transformer gaps, and LV Pole
+Append Cable, manufacturer/nameplate and >12 MV/HV Notes.
+Nothing edits Utility Network features.
+
+Local SQLite stores successful notification fingerprints
+(asset + ObjectID + GlobalID + submitter + issues) and suppresses
+repeat alerts for unchanged outstanding problems. Corrected
+records clear their alert state. Failed attempts are logged for
+retry. Monitoring begins at the time it is configured, avoiding
+historical back-alerts for older records. Source last-editor
+metadata should not be used as proof of an individual's identity
+when shared portal accounts have changed hands.
+
+SMTP uses environment variables REPORTAPP_ALERT_SMTP_HOST,
+REPORTAPP_ALERT_SMTP_PORT, REPORTAPP_ALERT_SMTP_USER,
+REPORTAPP_ALERT_SMTP_PASSWORD and REPORTAPP_ALERT_SMTP_FROM;
+never store passwords in GitHub. Config and notification history
+are stored in the local outputs folder, excluded from Git.
+
+**Pause** using Windows Task Scheduler: disable the task
+REPORTAPP Surveyor Quality Alerts. Live ArcGIS Pro verification is
+still required, particularly the actual pole-height field
+and noninteractive ArcGIS portal session access.
