@@ -62,6 +62,7 @@ try:
     from meter_photo_qa import combined_qa_report as _combined_qa_report
     from meter_photo_qa import template_attribute_audit as _template_attribute_audit
     from meter_photo_qa import template_audit_runner as _template_audit_runner
+    from meter_photo_qa import notification_setup as _notification_setup
 
     # ArcGIS Pro keeps imported Python modules in memory after a toolbox refresh.
     # Reload the helpers so newly added parameters and logic become available
@@ -81,6 +82,7 @@ try:
     _combined_qa_report = importlib.reload(_combined_qa_report)
     _template_attribute_audit = importlib.reload(_template_attribute_audit)
     _template_audit_runner = importlib.reload(_template_audit_runner)
+    _notification_setup = importlib.reload(_notification_setup)
 except Exception:
     try:
         error_folder = ROOT / "outputs"
@@ -111,6 +113,7 @@ run_smart_query = _smart_query_runner.run_smart_query
 run_lv_feeder_report = _lv_feeder_report.run_lv_feeder_report
 run_combined_qa_report = _combined_qa_report.run_combined_qa_report
 run_template_surveyor_audit = _template_audit_runner.run_template_surveyor_audit
+configure_quality_notifications = _notification_setup.configure_monitoring
 DEFAULT_SUBSTATION_SERVICE_URL = _substation_containment.DEFAULT_SUBSTATION_SERVICE_URL
 KIGALI_MODE = _substation_containment.KIGALI_MODE
 PROVINCE_MODE = _substation_containment.PROVINCE_MODE
@@ -139,6 +142,7 @@ class Toolbox:
             ScanAllElectricLineDuplicates,
             ReviewGicumbiPamelaTeam,
             AskReportApp,
+            ConfigureQualityNotifications,
         ]
 
 
@@ -1395,6 +1399,120 @@ class AskReportApp:
             )
         for caution in result["cautions"]:
             arcpy.AddWarning(caution)
+
+
+class ConfigureQualityNotifications:
+    """Explicit opt-in selected account monitoring; no task auto-starts."""
+    label = "Configure Surveyor Quality Notifications (5-minute)"
+    description = (
+        "Choose specific ArcGIS surveyor accounts to monitor for new or edited "
+        "LV Lines, Distribution Transformers and LV Poles. Creates local "
+        "JSON configuration and a one-minute Windows Task Scheduler installation "
+        "script. Notifications become active ONLY after you execute that script. "
+        "Checks existing REG QA rules after five minutes and suppresses "
+        "repeated unchanged issues. No Utility Network edits."
+    )
+    canRunInBackground=False
+
+    @_log_tool_open_errors
+    def getParameterInfo(self):
+        from meter_photo_qa.smart_query import USER_NAMES_PATH
+        usernames=json.loads(USER_NAMES_PATH.read_text(encoding="utf-8"))
+        people=arcpy.Parameter(
+            displayName="Select surveyors to watch (login — current name)",
+            name="watched_surveyors",
+            datatype="GPString",parameterType="Required",
+            direction="Input",multiValue=True,
+        )
+        people.filter.type="ValueList"
+        people.filter.list=[
+            login+" — "+str(name)
+            for login,name in sorted(usernames.items(),key=lambda v:v[0].casefold())
+        ]
+        folder=arcpy.Parameter(
+            displayName="Notification storage folder",
+            name="notification_folder",datatype="DEFolder",
+            parameterType="Required",direction="Input",
+        )
+        folder.value=str(ROOT/"outputs")
+        source=arcpy.Parameter(
+            displayName="Assets monitored",
+            name="asset_classes",datatype="GPString",
+            parameterType="Required",direction="Input",
+        )
+        source.filter.type="ValueList"
+        source.filter.list=[
+            "All: LV Lines, Distribution Transformers, LV Poles",
+            "LV Lines only","Distribution Transformers only","LV Poles only",
+        ]
+        source.value=source.filter.list[0]
+        channel=arcpy.Parameter(
+            displayName="Notification delivery",
+            name="notification_delivery",datatype="GPString",
+            parameterType="Required",direction="Input",
+        )
+        channel.filter.type="ValueList"
+        channel.filter.list=[
+            "Windows desktop notifications (when signed in)",
+            "Email via configured SMTP environment variables",
+        ]
+        channel.value=channel.filter.list[0]
+        recipient=arcpy.Parameter(
+            displayName="Recipient email (only for SMTP mode)",
+            name="recipient_email",datatype="GPString",
+            parameterType="Optional",direction="Input",
+        )
+        replace=arcpy.Parameter(
+            displayName="Replace an existing selected-surveyor configuration",
+            name="replace_existing",datatype="GPBoolean",
+            parameterType="Optional",direction="Input",
+        )
+        replace.value=False
+        return [people,folder,source,channel,recipient,replace]
+
+    def execute(self,parameters,messages):
+        raw=parameters[0].valueAsText or ""
+        names=[name.strip().strip("'\"") for name in raw.split(";") if name.strip()]
+        label=parameters[2].valueAsText or ""
+        if label.startswith("LV Lines only"):
+            assets=("line",)
+        elif label.startswith("Distribution Transformers only"):
+            assets=("transformer",)
+        elif label.startswith("LV Poles only"):
+            assets=("pole",)
+        else:
+            assets=("line","transformer","pole")
+        channel="smtp" if (parameters[3].valueAsText or "").startswith("Email") else "desktop"
+        result=configure_quality_notifications(
+            usernames=names,
+            output_folder=parameters[1].valueAsText,
+            channel=channel,
+            recipient_email=parameters[4].valueAsText or None,
+            assets=assets,
+            python_path=sys.executable,
+            src_path=SRC,
+            replace_existing=bool(parameters[5].value),
+        )
+        arcpy.AddMessage("Monitoring configuration created: "+result["configuration"])
+        arcpy.AddMessage("Selected accounts: "+", ".join(result["watching_usernames"]))
+        arcpy.AddMessage("Windows setup script: "+result["installation_script"])
+        arcpy.AddWarning(
+            "NOT ACTIVATED YET. From Windows PowerShell while signed into your "
+            "user account, execute the Install_One_Minute_Monitor.ps1 file. "
+            "The job will run every minute and send eligible alerts after "
+            "at least five minutes when REG and the PC are accessible."
+        )
+        if channel=="desktop":
+            arcpy.AddWarning(
+                "Install winotify into arcgispro-py3 first: "
+                "python -m pip install winotify. Windows user must be logged in."
+            )
+        else:
+            arcpy.AddWarning(
+                "SMTP host/user/password/sender environment variables must be "
+                "configured outside GitHub and visible to the scheduled task."
+            )
+        arcpy.AddMessage("No notifications have been sent during setup.")
 
 
 class ReviewGicumbiPamelaTeam:
