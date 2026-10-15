@@ -138,6 +138,17 @@ def import_legacy_events(config_path, conn):
                 issues=[str(issue) for issue in event["issues"]]
                 if asset not in ("pole","transformer","line") or not issues:
                     continue
+                issues_json=json.dumps(issues,ensure_ascii=False)
+                # The new monitor logs LIVE deliveries to JSONL as well.
+                # Do not import a copy of those as legacy alerts.
+                existing=conn.execute("""
+                    SELECT id FROM alert_inbox
+                    WHERE origin='LIVE' AND asset=? AND objectid=?
+                    AND globalid=? AND username=? AND received_utc_ms=?
+                    AND issues_json=? AND delivery_status='SENT' LIMIT 1
+                """,(asset,oid,gid,user,received,issues_json)).fetchone()
+                if existing is not None:
+                    continue
                 key="LEGACY:"+hashlib.sha256(line.encode("utf-8")).hexdigest()
                 result=conn.execute("""
                     INSERT OR IGNORE INTO alert_inbox
@@ -147,7 +158,7 @@ def import_legacy_events(config_path, conn):
                     VALUES (?,?,?,?,?,'','','',NULL,?,?,?,'SENT','HISTORICAL_JSONL')
                 """,(
                     key,asset,oid,gid,user,received,
-                    json.dumps(issues,ensure_ascii=False),
+                    issues_json,
                     hashlib.sha256(line.encode("utf-8")).hexdigest(),
                 ))
                 imported+=int(result.rowcount>0)
