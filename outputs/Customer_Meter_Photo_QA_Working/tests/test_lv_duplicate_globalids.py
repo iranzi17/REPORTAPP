@@ -56,8 +56,11 @@ class DuplicateLinesTests(unittest.TestCase):
             self.assertTrue(all("|oid:" in key for key in keys))
             self.assertTrue(all("Duplicate GlobalID" in (r[7] or "")
                                 for r in list(queue.values)[4:]))
-            queue["M5"]="RESOLVED"
-            queue["M6"]="IN_REVIEW"
+            for row_no in range(5, queue.max_row + 1):
+                oid = queue.cell(row_no, 3).value
+                queue.cell(row_no, 13).value = (
+                    "RESOLVED" if oid == 916046 else "IN_REVIEW"
+                )
             wb.save(first["output_xlsx"])
             wb.close()
             second=run_quality_watcher(output,"2026-09-11","2026-10-15")
