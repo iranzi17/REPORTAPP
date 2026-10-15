@@ -174,6 +174,43 @@ def _feature_rows(layer,version,where,fields,asset):
     return records
 
 
+def _monitor_gis(config, gis=None):
+    """Use ArcGIS Pro credentials or an explicitly configured local profile.
+
+    The profile stores no password in REPORTAPP's configuration. ArcGIS API
+    for Python manages its stored credentials via the OS credential manager.
+    """
+    if gis is not None:
+        return gis
+    profile = str(
+        config.get("arcgis_profile") or
+        os.environ.get("REPORTAPP_ARCGIS_PROFILE") or ""
+    ).strip()
+    if profile:
+        from arcgis.gis import GIS
+        try:
+            return GIS(profile=profile)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Saved ArcGIS profile {profile!r} failed to authenticate. "
+                "Check the profile under this Windows account; do not put "
+                "the portal password in the REPORTAPP JSON."
+            ) from exc
+    try:
+        return _get_gis(None)
+    except Exception as exc:
+        raise RuntimeError(
+            "ArcGIS Pro authentication unavailable in this standalone "
+            "monitor process. Sign in to the correct Enterprise portal in "
+            "ArcGIS Pro with 'Sign me in automatically', then retry "
+            "--preflight with the ArcGIS Pro Python interpreter. "
+            "Alternatively configure a secured local ArcGIS profile using "
+            "arcgis_profile in monitor_config.json or the "
+            "REPORTAPP_ARCGIS_PROFILE user environment variable. "
+            "Never store a password in the JSON."
+        ) from exc
+
+
 def collect(config,now_ms=None,gis=None,source_url=None):
     """Return complete current quality findings across all eligible assets.
 
@@ -194,7 +231,7 @@ def collect(config,now_ms=None,gis=None,source_url=None):
         raise ValueError("Choose at least one surveyor to watch.")
     quoted=",".join("'"+user.replace("'","''")+"'" for user in accounts)
     base=str(source_url or config.get("feature_service_url") or DEFAULT_LINE_SERVICE_URL).rstrip("/")
-    active=_get_gis(gis)
+    active=_monitor_gis(config,gis)
     result={}
     for asset in config.get("assets",["line","transformer","pole"]):
         if asset not in ("line","transformer","pole"):
@@ -250,6 +287,56 @@ def collect(config,now_ms=None,gis=None,source_url=None):
             expectations=None
         result[asset]=(records,schema,domains,rules,expectations)
     return result
+
+
+def preflight(config_path, *, collector=None, now_ms=None, check_delivery=True):
+    """Verify standalone GIS/schema access without alerts or SQLite changes."""
+    path=Path(config_path).resolve()
+    config=json.loads(path.read_text(encoding="utf-8"))
+    if config.get("enabled") is not True:
+        raise ValueError("Monitoring config is disabled.")
+    if not config.get("usernames") or not config.get("assets"):
+        raise ValueError("Select monitored usernames and assets first.")
+    if check_delivery and config.get("channel","desktop") == "desktop":
+        import importlib.util
+        if importlib.util.find_spec("winotify") is None:
+            raise RuntimeError(
+                "winotify unavailable in this Python environment. "
+                "Install it in the ArcGIS Pro Python environment before "
+                "activating desktop notifications."
+            )
+    now_ms=int(now_ms if now_ms is not None else datetime.now(timezone.utc).timestamp()*1000)
+    snapshots=(collector or collect)(config,now_ms=now_ms)
+    expected=set(config["assets"])
+    if set(snapshots)!=expected:
+        raise RuntimeError(
+            f"Incomplete monitoring scan: expected {sorted(expected)}, "
+            f"received {sorted(snapshots)}. No alerts sent."
+        )
+    counts={}
+    for asset, (records, fields, domains, rules, expectations) in snapshots.items():
+        counts[asset]=len(records)
+        # Check QA mappings on a real record where available; the collector
+        # already validates source fields even when there are zero matches.
+        if records:
+            _,unverified=record_findings(
+                asset,records[0],fields,domains,rules,expectations
+            )
+            if unverified:
+                raise RuntimeError(
+                    f"{asset} has unresolved live template checks: {unverified}"
+                )
+    return {
+        "status":"PREFLIGHT_OK",
+        "monitoring_is_active":False,
+        "data_source_modified":False,
+        "notifications_sent":0,
+        "selected_accounts":list(config["usernames"]),
+        "asset_record_counts":counts,
+        "authentication_test":"FeatureServer reads succeeded" if collector is None
+                               else "Injected test collector",
+        "next_step":"Perform --send-test then install the scheduled monitor.",
+    }
 
 
 def _alert_text(alert):
@@ -322,6 +409,9 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
     try:
         # Fetch and validate ALL monitored services before alert delivery.
         snapshots=collector(config,now_ms=now_ms)
+        if set(snapshots)!=set(config.get("assets",[])):
+            raise RuntimeError("Incomplete monitored asset scan; no alerts sent.")
+        scanned={asset:len(snapshot[0]) for asset,snapshot in snapshots.items()}
         notices=[]
         for asset,(records,fields,domains,rules,phase_expectations) in snapshots.items():
             notices.extend(ready_alerts(
@@ -329,6 +419,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
                 rules,phase_expectations
             ))
         sent=0
+        failed=0
         for item in notices:
             try:
                 sender(item,config)
@@ -339,6 +430,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
                         "asset":item["asset"],"objectid":item["objectid"],
                         "reason":str(exc),
                     })+"\n")
+                failed+=1
                 continue
             state.mark_sent(
                 item["asset"],item["objectid"],item["globalid"],
@@ -353,6 +445,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
                 },ensure_ascii=False)+"\n")
             sent+=1
         return {"alerts_sent":sent,"alerts_considered":len(notices),
+                "alerts_delivery_failed":failed,"records_scanned":scanned,
                 "channel":config.get("channel","desktop")}
     finally:
         state.close()
@@ -361,9 +454,14 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
 def main(argv=None):
     parser=argparse.ArgumentParser()
     parser.add_argument("--config",required=True)
-    parser.add_argument(
+    operation=parser.add_mutually_exclusive_group()
+    operation.add_argument(
         "--send-test",action="store_true",
         help="Send one marked TEST alert to the configured channel (no GIS query).",
+    )
+    operation.add_argument(
+        "--preflight",action="store_true",
+        help="Verify GIS access, schemas and delivery dependency without alerts.",
     )
     options=parser.parse_args(argv)
     path=Path(options.config).resolve()
@@ -380,6 +478,12 @@ def main(argv=None):
             deliver(test,config)
             with log.open("a",encoding="utf-8") as fh:
                 fh.write(f"{datetime.now(timezone.utc).isoformat()} TEST_NOTIFICATION_SENT\n")
+            return 0
+        if options.preflight:
+            result=preflight(path)
+            print(json.dumps(result,indent=2,ensure_ascii=False))
+            with log.open("a",encoding="utf-8") as fh:
+                fh.write(f"{datetime.now(timezone.utc).isoformat()} {result}\n")
             return 0
         result=run_once(path)
         with log.open("a",encoding="utf-8") as fh:

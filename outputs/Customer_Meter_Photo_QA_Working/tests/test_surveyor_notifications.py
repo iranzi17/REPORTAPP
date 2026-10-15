@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from meter_photo_qa.surveyor_notifications import (
-    State,ready_alerts,run_once,event_timestamp,
+    State,ready_alerts,run_once,event_timestamp,preflight,_monitor_gis,
 )
 from meter_photo_qa.notification_setup import (
     configure_monitoring,chosen_usernames,_powershell,
@@ -35,6 +35,63 @@ CONFIG={"enabled":True,"usernames":["ninamenye9683"],"assets":["pole"],
 
 
 class NotificationTests(unittest.TestCase):
+    def test_preflight_queries_all_selected_assets_without_issuing_alerts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cfg=Path(folder)/"monitor_config.json"
+            cfg.write_text(json.dumps(CONFIG),encoding="utf-8")
+            result=preflight(
+                cfg,check_delivery=False,now_ms=1400*1000,
+                collector=lambda conf,now_ms=None:{
+                    "pole":([pole(1100*1000)],FIELDS,{},None,None)
+                },
+            )
+            self.assertEqual(result["status"],"PREFLIGHT_OK")
+            self.assertEqual(result["notifications_sent"],0)
+            self.assertEqual(result["asset_record_counts"],{"pole":1})
+            self.assertFalse(cfg.with_suffix(".sqlite3").exists())
+            self.assertEqual(list(Path(folder).iterdir()),[cfg])
+
+    def test_preflight_fails_closed_on_missing_asset_snapshot(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cfg=Path(folder)/"monitor_config.json"
+            cfg.write_text(json.dumps(CONFIG),encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError,"Incomplete monitoring scan"):
+                preflight(
+                    cfg,check_delivery=False,
+                    collector=lambda conf,now_ms=None:{},
+                )
+
+    def test_gis_profile_only_when_explicitly_configured(self):
+        sentinel=object()
+        self.assertIs(_monitor_gis({"arcgis_profile":""},sentinel),sentinel)
+        with patch("meter_photo_qa.surveyor_notifications._get_gis",
+                   return_value=sentinel) as default_gis, \
+             patch.dict("os.environ",{"REPORTAPP_ARCGIS_PROFILE":""}):
+            self.assertIs(_monitor_gis({}),sentinel)
+            default_gis.assert_called_once_with(None)
+        with patch("meter_photo_qa.surveyor_notifications._get_gis",
+                   side_effect=RuntimeError("No Pro session")), \
+             patch.dict("os.environ",{"REPORTAPP_ARCGIS_PROFILE":""}):
+            with self.assertRaisesRegex(RuntimeError,"--preflight"):
+                _monitor_gis({})
+
+    def test_run_once_reports_scanned_records_and_delivery_failures(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cfg=Path(folder)/"monitor_config.json"
+            cfg.write_text(json.dumps(CONFIG),encoding="utf-8")
+            response=run_once(
+                cfg,now_ms=1400*1000,
+                collector=lambda conf,now_ms=None:{
+                    "pole":([pole(1100*1000)],FIELDS,{},None,None)
+                },
+                sender=lambda alert,conf:(_ for _ in ()).throw(
+                    RuntimeError("Toast denied")
+                ),
+            )
+            self.assertEqual(response["records_scanned"],{"pole":1})
+            self.assertEqual(response["alerts_delivery_failed"],1)
+            self.assertEqual(response["alerts_sent"],0)
+
     def test_matures_after_five_minutes_and_deduplicates(self):
         with tempfile.TemporaryDirectory() as folder:
             cfg=Path(folder)/"monitor_config.json"
