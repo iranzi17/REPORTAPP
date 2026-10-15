@@ -22,6 +22,8 @@ def _fixture_workbook(path, kind):
         first["B2"]='=COUNTA(\'Line Details\'!C2:C2)'
         wb.create_sheet("Outstanding LV Gaps").append(["GlobalID","Gap"])
         wb.create_sheet("Review Queue").append(["GlobalID","Review"])
+        wb.create_sheet("Duplicate GlobalIDs").append(["GlobalID","OBJECTIDs"])
+        wb.create_sheet("Duplicate Line Records").append(["GlobalID","OBJECTID"])
     else:
         detail=wb.create_sheet("Asset Details")
         detail.append(["Status","OBJECTID","GlobalID","Surveyor"])
@@ -42,6 +44,7 @@ class CombinedQAWorkflowTests(unittest.TestCase):
         return {
             "output_xlsx":str(file),"total_lines":1,"flagged_lines":1,
             "outstanding_lv_lines":1,"outstanding_lv_issues":2,
+            "duplicate_globalid_groups":1,
             "user_summary":[{"username":"ninamenye9683","total_lines":1,
                              "outstanding_lines":1}],
         }
@@ -94,6 +97,9 @@ class CombinedQAWorkflowTests(unittest.TestCase):
             self.assertIn("Pole Asset Details",wb.sheetnames)
             self.assertIn("LV Outstanding LV Gaps",wb.sheetnames)
             self.assertIn("LV Review Queue",wb.sheetnames)
+            self.assertIn("LV Duplicate GlobalIDs",wb.sheetnames)
+            self.assertIn("LV Duplicate Line Records",wb.sheetnames)
+            self.assertEqual(wb["Combined Summary"]["E13"].value,1)
             self.assertIn("DT Duplicate GlobalIDs",wb.sheetnames)
             self.assertIn("Pole Duplicate GlobalIDs",wb.sheetnames)
             self.assertEqual(wb["Combined Summary"]["B13"].value,1)

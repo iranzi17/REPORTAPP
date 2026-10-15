@@ -86,25 +86,36 @@ def build_review_rows(
     current = {key: dict(value, this_run_status="NOT_CHECKED") for key, value in previous.items()}
     for result in results:
         globalid = str(result.get("globalid") or "").strip()
+        # A shared GlobalID alone is an unsafe review key. Retain legacy
+        # keys for normal rows; key only the colliding rows by OBJECTID too.
+        conflict = bool(result.get("duplicate_peer_objectids"))
         key = globalid.casefold() if globalid else f"oid:{result['source_objectid']}"
-        if result["status"] != "FLAG" and key not in current:
+        if conflict:
+            key += f"|oid:{result['source_objectid']}"
+        this_run = ("IDENTIFIER_CONFLICT"
+                    if conflict and result["status"] != "FLAG"
+                    else result["status"])
+        needs_review = this_run in {"FLAG", "IDENTIFIER_CONFLICT"}
+        if not needs_review and key not in current:
             continue
         old = current.get(key, {})
         status = str(old.get("review_status") or "OPEN").strip().upper()
-        if result["status"] == "FLAG" and status in {"RESOLVED", "DISMISSED"}:
+        if needs_review and status in {"RESOLVED", "DISMISSED"}:
             status = "REOPENED"
         current[key] = {
             "record_key": key,
             "globalid": globalid,
             "source_objectid": result["source_objectid"],
             "username": result["username"],
-            "this_run_status": result["status"],
+            "this_run_status": this_run,
             "completion_percent": result["completion_percent"],
             "missing_attributes": "; ".join(result["missing_attributes"]),
-            "invalid_attributes": "; ".join(result["invalid_attributes"]),
+            "invalid_attributes": "; ".join(
+                [*result["invalid_attributes"], *result.get("identifier_issues", [])]
+            ),
             "first_flagged_utc": old.get("first_flagged_utc") or now,
-            "last_flagged_utc": now if result["status"] == "FLAG" else old.get("last_flagged_utc", ""),
-            "flagged_runs": int(old.get("flagged_runs") or 0) + (result["status"] == "FLAG"),
+            "last_flagged_utc": now if needs_review else old.get("last_flagged_utc", ""),
+            "flagged_runs": int(old.get("flagged_runs") or 0) + needs_review,
             "last_seen_utc": now,
             "review_status": status,
             "assigned_to": old.get("assigned_to", ""),

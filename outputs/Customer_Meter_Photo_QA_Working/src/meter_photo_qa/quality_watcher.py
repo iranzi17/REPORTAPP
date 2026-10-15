@@ -390,7 +390,38 @@ def _query_quality_attributes(
         geometry_filters=filters,
         query_fn=_query_with_retry,
         progress=report_progress,
+        duplicate_globalid_policy="report",
     )
+
+
+def _annotate_duplicate_line_globalids(results):
+    """Preserve all distinct OBJECTIDs sharing a GlobalID, within report scope."""
+    groups = defaultdict(list)
+    unique_ids = set()
+    for result in results:
+        oid = int(result["source_objectid"])
+        if oid in unique_ids:
+            raise RuntimeError(f"Repeated source OBJECTID {oid} in LV QA results.")
+        unique_ids.add(oid)
+        result["duplicate_peer_objectids"] = []
+        result["identifier_issues"] = []
+        gid = str(result.get("globalid") or "").strip().strip("{}").casefold()
+        if gid:
+            groups[gid].append(result)
+    duplicates = {}
+    for gid, entries in sorted(groups.items()):
+        if len(entries) < 2:
+            continue
+        oids = sorted(int(row["source_objectid"]) for row in entries)
+        duplicates[gid] = oids
+        for row in entries:
+            peers = [oid for oid in oids if oid != row["source_objectid"]]
+            row["duplicate_peer_objectids"] = peers
+            row["identifier_issues"] = [
+                "Duplicate GlobalID shared with OBJECTID(s): " +
+                ", ".join(map(str, peers))
+            ]
+    return duplicates
 
 
 def _summarize_users(
@@ -444,6 +475,7 @@ def _create_quality_workbook(
     title: str,
     metadata: Sequence[tuple[str, Any]],
     review_rows: Sequence[dict[str, Any]],
+    duplicate_groups: dict[str, list[int]] | None = None,
 ) -> None:
     from openpyxl import Workbook
     from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, FormulaRule
@@ -459,6 +491,8 @@ def _create_quality_workbook(
     details_sheet = workbook.create_sheet("Line Details")
     rules_sheet = workbook.create_sheet("Rules")
     review_sheet = workbook.create_sheet("Review Queue")
+    duplicate_group_sheet = workbook.create_sheet("Duplicate GlobalIDs")
+    duplicate_records_sheet = workbook.create_sheet("Duplicate Line Records")
     metadata_sheet = workbook.create_sheet("Metadata")
     metadata_sheet.sheet_state = "hidden"
 
@@ -502,6 +536,10 @@ def _create_quality_workbook(
     summary_sheet["B5"] = len(review_rows)
     summary_sheet["C5"] = "Active Reviews"
     summary_sheet["D5"] = sum(row["review_status"] in {"OPEN", "REOPENED", "IN_REVIEW"} for row in review_rows)
+    summary_sheet["E5"] = "Duplicate GlobalID groups"
+    summary_sheet["F5"] = len(duplicate_groups or {})
+    summary_sheet["G5"] = "Affected source OBJECTIDs"
+    summary_sheet["H5"] = sum(len(x) for x in (duplicate_groups or {}).values())
     for row in summary_sheet["3:4"]:
         for cell in row:
             cell.border = border
@@ -843,6 +881,56 @@ def _create_quality_workbook(
         "L": 21, "M": 21, "N": 23, "O": 15, "P": 45,
     })
 
+    # A separate identifier-integrity register must not alter the original
+    # field-completeness scores or silently discard either physical record.
+    duplicate_group_sheet.append([
+        "Normalized GlobalID", "All OBJECTIDs", "Number of source records",
+        "Geometry comparison", "Verification required",
+    ])
+    for gid, objectids in sorted((duplicate_groups or {}).items()):
+        duplicate_group_sheet.append([
+            gid, "; ".join(map(str, objectids)), len(objectids),
+            "NOT VERIFIED",
+            "Inspect geometry, attachments, connectivity and ownership; do not auto-delete.",
+        ])
+    duplicate_records_sheet.append([
+        "GlobalID", "Source OBJECTID", "Other OBJECTIDs", "Surveyor Username",
+        "Surveyor Name", "Asset Group", "Asset Type", "Created Date",
+        "Last Edited Date", "Last Edited User", "Notes", "Status",
+    ])
+    for item in sorted(results, key=lambda x: (
+        str(x["globalid"]).strip().strip("{}").casefold(),
+        int(x["source_objectid"]),
+    )):
+        peers = item.get("duplicate_peer_objectids", [])
+        if not peers:
+            continue
+        duplicate_records_sheet.append([
+            item["globalid"], item["source_objectid"],
+            "; ".join(map(str, peers)), item["username"], item["full_name"],
+            item.get("asset_group"), item.get("asset_type"),
+            item["created_date"], item["last_edited_date"],
+            item["last_edited_user"], item["notes"], "IDENTIFIER_CONFLICT",
+        ])
+        for column in (8, 9):
+            duplicate_records_sheet.cell(duplicate_records_sheet.max_row, column).number_format = "yyyy-mm-dd hh:mm"
+    for sheet, widths, lastcol in (
+        (duplicate_group_sheet, {"A": 44, "B": 43, "C": 24, "D": 20, "E": 87}, "E"),
+        (duplicate_records_sheet, {"A": 44, "B": 21, "C": 28, "D": 24,
+             "E": 28, "F": 15, "G": 15, "H": 22, "I": 22, "J": 26,
+             "K": 65, "L": 26}, "L"),
+    ):
+        sheet.sheet_view.showGridLines = False
+        sheet.freeze_panes = "B2"
+        sheet.auto_filter.ref = f"A1:{lastcol}{sheet.max_row}"
+        for cell in sheet[1]:
+            cell.fill = PatternFill("solid", fgColor=navy)
+            cell.font = Font(color=white, bold=True)
+            cell.alignment = Alignment(wrap_text=True)
+        _set_column_widths(sheet, widths)
+        if sheet.max_row > 1:
+            _keep_source_text_literal(sheet, 2, sheet.max_row)
+
     metadata_sheet.append(["Field", "Value"])
     for key, value in metadata:
         metadata_sheet.append([key, "" if value is None else str(value)])
@@ -1082,6 +1170,17 @@ def run_quality_watcher(
             "notes": str(attributes.get("Notes") or ""),
         }
         results.append(result)
+    duplicate_groups = _annotate_duplicate_line_globalids(results)
+    if duplicate_groups:
+        try:
+            import arcpy
+            arcpy.AddWarning(
+                f"Found {len(duplicate_groups)} LV GlobalID conflict group(s). "
+                "Both OBJECTIDs are retained; see Duplicate GlobalIDs and "
+                "Duplicate Line Records in the Excel workbook."
+            )
+        except ImportError:
+            pass
     results.sort(key=lambda item: (
         0 if item["status"] == "FLAG" else 1,
         item["completion_percent"],
@@ -1133,6 +1232,10 @@ def run_quality_watcher(
         ("Minimum completion percent", threshold),
         ("LV outstanding lines", len(outstanding_results)),
         ("LV outstanding issues", sum(len(item["priority_gaps"]) for item in outstanding_results)),
+        ("Reused GlobalID groups (this report only)", len(duplicate_groups)),
+        ("Source records with reused GlobalIDs",
+         sum(len(v) for v in duplicate_groups.values())),
+        ("Geometry comparison for duplicates", "NOT VERIFIED"),
         ("Query", where),
         ("Version", version),
         ("Line feature service", _layer_url(active_service_url, LINE_LAYER_ID)),
@@ -1145,7 +1248,8 @@ def run_quality_watcher(
         ("Previous review report", str(prior_path) if prior_path else ""),
     ]
     _create_quality_workbook(
-        output_path, results, user_summary, rules, threshold, title, metadata, review_rows
+        output_path, results, user_summary, rules, threshold, title, metadata,
+        review_rows, duplicate_groups
     )
 
     flagged_feature_class = ""
@@ -1179,6 +1283,9 @@ def run_quality_watcher(
         "review_queue_items": len(review_rows),
         "outstanding_lv_lines": len(outstanding_results),
         "outstanding_lv_issues": sum(len(item["priority_gaps"]) for item in outstanding_results),
+        "duplicate_globalid_groups": len(duplicate_groups),
+        "duplicate_feature_records": sum(len(v) for v in duplicate_groups.values()),
+        "duplicate_source_objectids": duplicate_groups,
         "outstanding_lv_by_user": priority_user_summary,
         "previous_review_report": str(prior_path) if prior_path else "",
         "average_completion_percent": (

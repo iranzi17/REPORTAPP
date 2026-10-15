@@ -176,7 +176,7 @@ def _build_consolidated_workbook(destination, reports, context, geometry):
     pole=reports["pole"]
     rows=[
         ("LV Lines",lv.get("total_lines",0),lv.get("outstanding_lv_lines",0),
-         lv.get("outstanding_lv_issues",0), "See LV detail", 
+         lv.get("outstanding_lv_issues",0), lv.get("duplicate_globalid_groups",0), 
          f"{lv.get('flagged_lines',0)} lines flagged by threshold",
          Path(lv["output_xlsx"]).name),
         ("Distribution Transformers",dt.get("total",0),
@@ -222,6 +222,7 @@ def _build_consolidated_workbook(destination, reports, context, geometry):
         ("Topic","Requirement and limitation"),
         ("Three original audits","All existing LV line, distribution-transformer and LV pole rules run unchanged."),
         ("LV gaps","Priority gap count is different from completion threshold FLAG count."),
+        ("LV duplicate GlobalIDs","All scoped source OBJECTIDs retained in separate duplicate registers; no geometry comparison or source deletion. Identifier conflicts are outside original attribute-gap totals."),
         ("Distribution transformers","Seven original gap categories; duplicate source GlobalID recorded separately."),
         ("Poles","Manufacturer missing is only a correction gap when Notes do not document an absent nameplate."),
         ("Date scope","Same created/edited date range and surveyor filter for all three asset QA checks."),
