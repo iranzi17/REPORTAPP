@@ -361,10 +361,26 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
 def main(argv=None):
     parser=argparse.ArgumentParser()
     parser.add_argument("--config",required=True)
+    parser.add_argument(
+        "--send-test",action="store_true",
+        help="Send one marked TEST alert to the configured channel (no GIS query).",
+    )
     options=parser.parse_args(argv)
     path=Path(options.config).resolve()
     log=path.with_suffix(".monitor.log")
     try:
+        if options.send_test:
+            config=json.loads(path.read_text(encoding="utf-8"))
+            test={
+                "asset":"TEST","username":"REPORTAPP","event_type":"TEST",
+                "objectid":0,"globalid":"TEST-ONLY",
+                "created_user":"TEST","last_edited_user":"TEST",
+                "issues":["Delivery test only; no real surveyor record"],
+            }
+            deliver(test,config)
+            with log.open("a",encoding="utf-8") as fh:
+                fh.write(f"{datetime.now(timezone.utc).isoformat()} TEST_NOTIFICATION_SENT\n")
+            return 0
         result=run_once(path)
         with log.open("a",encoding="utf-8") as fh:
             fh.write(f"{datetime.now(timezone.utc).isoformat()} {result}\n")
