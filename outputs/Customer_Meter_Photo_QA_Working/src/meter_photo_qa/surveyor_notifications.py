@@ -15,7 +15,7 @@ from pathlib import Path
 import sqlite3
 import smtplib
 import sys
-from datetime import datetime, timedelta, timezone
+import datetime as _dt
 from email.message import EmailMessage
 
 from .asset_quality import ASSETS, domain_map, evaluate_asset, resolve_fields
@@ -32,7 +32,7 @@ MAX_PER_ASSET=15000
 MIN_AGE_SECONDS=300
 
 def timestamp_ms(value):
-    if isinstance(value, datetime):
+    if isinstance(value, _dt.datetime):
         return int(value.timestamp()*1000)
     if isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value):
         return int(value)
@@ -217,15 +217,15 @@ def collect(config,now_ms=None,gis=None,source_url=None):
     Every layer must finish successfully before sending any notifications.
     """
     from arcgis.features import FeatureLayer
-    now_ms=now_ms or int(datetime.now(timezone.utc).timestamp()*1000)
+    now_ms=now_ms or int(_dt.datetime.now(_dt.timezone.utc).timestamp()*1000)
     start_ms=max(
         int(config["enabled_at_utc_ms"]),
         now_ms-LOOKBACK_HOURS*3600*1000,
     )
-    start=datetime.fromtimestamp(start_ms/1000,timezone.utc)
+    start=_dt.datetime.fromtimestamp(start_ms/1000,_dt.timezone.utc)
     # The existing ArcGIS Enterprise layer supports TIMESTAMP predicates.
     # Widen a day, then exact-filter client-side to avoid timezone cutoffs.
-    start_day=(start-timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+    start_day=(start-_dt.timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
     accounts=sorted(set(config["usernames"]),key=str.casefold)
     if not accounts:
         raise ValueError("Choose at least one surveyor to watch.")
@@ -305,7 +305,7 @@ def preflight(config_path, *, collector=None, now_ms=None, check_delivery=True):
                 "Install it in the ArcGIS Pro Python environment before "
                 "activating desktop notifications."
             )
-    now_ms=int(now_ms if now_ms is not None else datetime.now(timezone.utc).timestamp()*1000)
+    now_ms=int(now_ms if now_ms is not None else _dt.datetime.now(_dt.timezone.utc).timestamp()*1000)
     snapshots=(collector or collect)(config,now_ms=now_ms)
     expected=set(config["assets"])
     if set(snapshots)!=expected:
@@ -401,7 +401,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
     config=json.loads(path.read_text(encoding="utf-8"))
     if config.get("enabled") is not True:
         raise ValueError("Notification monitoring disabled in configuration.")
-    now_ms=now_ms or int(datetime.now(timezone.utc).timestamp()*1000)
+    now_ms=now_ms or int(_dt.datetime.now(_dt.timezone.utc).timestamp()*1000)
     state=State(path.with_suffix(".sqlite3"))
     logfile=path.with_suffix(".events.jsonl")
     collector=collector or collect
@@ -477,21 +477,36 @@ def main(argv=None):
             }
             deliver(test,config)
             with log.open("a",encoding="utf-8") as fh:
-                fh.write(f"{datetime.now(timezone.utc).isoformat()} TEST_NOTIFICATION_SENT\n")
+                fh.write(f"{_dt.datetime.now(_dt.timezone.utc).isoformat()} TEST_NOTIFICATION_SENT\n")
             return 0
         if options.preflight:
             result=preflight(path)
             print(json.dumps(result,indent=2,ensure_ascii=False))
             with log.open("a",encoding="utf-8") as fh:
-                fh.write(f"{datetime.now(timezone.utc).isoformat()} {result}\n")
+                fh.write(f"{_dt.datetime.now(_dt.timezone.utc).isoformat()} {result}\n")
             return 0
         result=run_once(path)
         with log.open("a",encoding="utf-8") as fh:
-            fh.write(f"{datetime.now(timezone.utc).isoformat()} {result}\n")
+            fh.write(f"{_dt.datetime.now(_dt.timezone.utc).isoformat()} {result}\n")
         return 0
     except Exception as exc:
-        with log.open("a",encoding="utf-8") as fh:
-            fh.write(f"{datetime.now(timezone.utc).isoformat()} ERROR {exc}\n")
+        # Always report the *original* failure to the command-line operator.
+        # Failure to write the optional log must never hide a GIS/auth error.
+        print(
+            f"REPORTAPP MONITOR ERROR ({type(exc).__name__}): {exc}",
+            file=sys.stderr,
+        )
+        try:
+            with log.open("a",encoding="utf-8") as fh:
+                fh.write(
+                    f"{_dt.datetime.now(_dt.timezone.utc).isoformat()} "
+                    f"ERROR {type(exc).__name__}: {exc}\n"
+                )
+        except Exception as log_exc:
+            print(
+                f"REPORTAPP monitor log unavailable: {log_exc}",
+                file=sys.stderr,
+            )
         return 1
 
 

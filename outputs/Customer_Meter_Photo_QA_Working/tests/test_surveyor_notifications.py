@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import datetime as std_datetime
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from contextlib import redirect_stderr
 
 from meter_photo_qa.surveyor_notifications import (
     State,ready_alerts,run_once,event_timestamp,preflight,_monitor_gis,
@@ -35,6 +38,36 @@ CONFIG={"enabled":True,"usernames":["ninamenye9683"],"assets":["pole"],
 
 
 class NotificationTests(unittest.TestCase):
+    def test_preflight_datetime_module_shadow_does_not_break_runtime(self):
+        # The actual ArcGIS Pro traceback exposed 'datetime' as a module,
+        # which caused the preflight and its exception logger to fail.
+        import meter_photo_qa.surveyor_notifications as monitor
+        with tempfile.TemporaryDirectory() as folder:
+            cfg=Path(folder)/"monitor_config.json"
+            cfg.write_text(json.dumps(CONFIG),encoding="utf-8")
+            with patch.object(monitor,"datetime",std_datetime,create=True):
+                info=preflight(
+                    cfg, check_delivery=False,
+                    collector=lambda config,now_ms=None:{
+                        "pole":([pole(1100*1000)],FIELDS,{},None,None)
+                    },
+                )
+            self.assertEqual(info["status"],"PREFLIGHT_OK")
+
+    def test_command_line_error_cannot_be_hidden_by_logger(self):
+        import meter_photo_qa.surveyor_notifications as monitor
+        with tempfile.TemporaryDirectory() as folder:
+            cfg=Path(folder)/"monitor_config.json"
+            cfg.write_text(json.dumps(CONFIG),encoding="utf-8")
+            error_output=io.StringIO()
+            with patch.object(monitor,"datetime",std_datetime,create=True), \
+                 patch.object(monitor,"preflight",side_effect=RuntimeError("GIS offline")), \
+                 redirect_stderr(error_output):
+                result=monitor.main(["--config",str(cfg),"--preflight"])
+            self.assertEqual(result,1)
+            self.assertIn("GIS offline",error_output.getvalue())
+            self.assertIn("GIS offline",cfg.with_suffix(".monitor.log").read_text())
+
     def test_preflight_queries_all_selected_assets_without_issuing_alerts(self):
         with tempfile.TemporaryDirectory() as folder:
             cfg=Path(folder)/"monitor_config.json"
