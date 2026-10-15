@@ -190,6 +190,27 @@ def missing_pole_field_value(raw, domain=None):
     return missing_value(raw, domain)
 
 
+def is_substandard_pole_structure(raw, domain=None):
+    """Honor the verified PoleStructure 'Substandard' option, including codes.
+
+    Do not assume that a particular numeric code denotes Substandard. ArcGIS
+    domains can be integer-coded, or a text value may be returned directly.
+    """
+    if raw is None:
+        return False
+    value = str(raw).strip()
+    if not value:
+        return False
+    if value.casefold() == "substandard":
+        return True
+    for code, label in (domain or {}).items():
+        if (raw == code or value == str(code).strip()) and (
+            str(label or "").strip().casefold() == "substandard"
+        ):
+            return True
+    return False
+
+
 def domain_map(layer_properties, group_code):
     """Read only subtype-coded domains for our asset group."""
     output = {}
@@ -330,8 +351,18 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
             else:
                 values[key + "_status"] = "RECORDED"
         field = mapping.get("manufacturer")
+        structure_field = mapping.get("structure")
+        is_substandard = (
+            bool(structure_field)
+            and is_substandard_pole_structure(
+                attributes.get(structure_field),
+                (domains or {}).get(structure_field),
+            )
+        )
         if field and missing_value(attributes.get(field), (domains or {}).get(field)):
-            if not note:
+            if is_substandard:
+                values["manufacturer_status"] = "SUBSTANDARD_EXEMPT"
+            elif not note:
                 values["manufacturer_status"] = "MISSING_MANUFACTURER_NOTES"
                 issues.append("Manufacturer missing and Notes empty")
             elif has_explicit_no_nameplate_note(note):

@@ -157,6 +157,24 @@ class AssetWorkflowTests(unittest.TestCase):
             for row in sheets["Schema Verification"]
         ))
 
+    def test_substandard_pole_not_flagged_for_manufacturer_in_excel(self):
+        sub=pole("{SUB}",501, note="", manufacturer=None)
+        sub["PoleStructure"]="Substandard"
+        standard=pole("{STANDARD}",502,note="",manufacturer=None)
+        standard["PoleStructure"]="Standard"
+        report,sheets,_=self.run_fake("pole",[sub,standard])
+        self.assertEqual(report["with_gaps"],1)
+        self.assertEqual(report["no_gaps_found"],1)
+        lines={record[1]:record for record in sheets["Asset Details"][1:]}
+        self.assertEqual(lines[501][21],"SUBSTANDARD_EXEMPT")
+        self.assertEqual(lines[501][0],"NO_GAPS_FOUND")
+        self.assertIn("Manufacturer missing and Notes empty",lines[502][8])
+        self.assertEqual(lines[502][0],"GAP")
+        self.assertTrue(any(
+            row[1]=="Manufacturer" and "Substandard" in str(row[2])
+            for row in sheets["Rules"][1:]
+        ))
+
     def test_four_new_pole_fields_are_in_workbook_and_qa_counts(self):
         rows=[
             pole("{S1}",101,"Notes supplied","Maker"),

@@ -207,6 +207,35 @@ class NotificationTests(unittest.TestCase):
             finally:
                 state.close()
 
+    def test_substandard_structure_does_not_alert_missing_manufacturer(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            state=State(Path(folder)/"state.sqlite")
+            try:
+                sample=pole(1100000,notes="",manufacturer=None,height=10)
+                sample["PoleStructure"]=4
+                issues=ready_alerts(
+                    [sample],"pole",FIELDS,{"PoleStructure":{4:"Substandard"}},
+                    CONFIG,1400000,state,
+                )
+                self.assertEqual(issues,[])
+                sample["Append_Cable"]=None
+                issues=ready_alerts(
+                    [sample],"pole",FIELDS,{"PoleStructure":{4:"Substandard"}},
+                    CONFIG,1400000,state,
+                )
+                self.assertEqual(len(issues),1)
+                self.assertIn("Append Cable",issues[0]["issues"][0])
+                sample["PoleStructure"]=5
+                issues=ready_alerts(
+                    [sample],"pole",FIELDS,{"PoleStructure":{4:"Substandard",5:"Standard"}},
+                    CONFIG,1400000,state,
+                )
+                self.assertEqual(len(issues),1)
+                self.assertTrue(any("Manufacturer missing" in issue
+                                    for issue in issues[0]["issues"]))
+            finally:
+                state.close()
+
     def test_nameplate_note_does_not_exempt_large_pole(self):
         with tempfile.TemporaryDirectory() as folder:
             state=State(Path(folder)/"s.sqlite")

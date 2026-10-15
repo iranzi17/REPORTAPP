@@ -69,6 +69,54 @@ class AssetQualityTests(unittest.TestCase):
         self.assertEqual(result["status"], "NOT_VERIFIED")
         self.assertIn("name", result["unverified_checks"])
 
+    def test_substandard_structure_exempts_manufacturer_even_without_notes(self):
+        from meter_photo_qa.asset_quality import is_substandard_pole_structure
+        mapping={
+            "manufacturer":"Manufacturers","notes":"Notes",
+            "append_cable":"Append_Cable","height":"Pole_Height",
+            **EXTRA_POLE_FIELDS,
+        }
+        original={
+            "ASSETGROUP":7,"ASSETTYPE":2,"GLOBALID":"{P77}",
+            "Manufacturers":None,"Notes":"","Append_Cable":"No",
+            "Pole_Height":10,**EXTRA_POLE_VALUES,
+        }
+        examples=(
+            ("Substandard",{},True),
+            (" subSTANDARD ",{},True),
+            (7,{"PoleStructure":{7:"Substandard",8:"Standard"}},True),
+            ("7",{"PoleStructure":{7:"Substandard",8:"Standard"}},True),
+            (0,{"PoleStructure":{0:"Substandard",1:"Standard"}},True),
+            (8,{"PoleStructure":{7:"Substandard",8:"Standard"}},False),
+            ("Standard",{},False),
+            ("Unknown",{},False),
+            (None,{},False),
+            (7,{},False),
+            ("Not Substandard",{},False),
+        )
+        for raw,domain,exempt in examples:
+            with self.subTest(raw=raw,domain=domain):
+                self.assertEqual(is_substandard_pole_structure(
+                    raw,domain.get("PoleStructure")),exempt)
+                row=dict(original,PoleStructure=raw)
+                result=evaluate_asset_raw(row,"pole",mapping,domain)
+                flagged=any("Manufacturer missing" in issue for issue in result["issues"])
+                self.assertEqual(flagged,not exempt)
+                if exempt:
+                    self.assertEqual(
+                        result["values"]["manufacturer_status"],"SUBSTANDARD_EXEMPT"
+                    )
+                    self.assertEqual(result["status"],"NO_GAPS_FOUND")
+        # Substandard does not excuse Append Cable or other pole deficiencies.
+        row=dict(original,PoleStructure="Substandard",Append_Cable=None,
+                 InsulatorTypes=None,Number_Circuit=0)
+        result=evaluate_asset_raw(row,"pole",mapping)
+        self.assertEqual(result["values"]["manufacturer_status"],"SUBSTANDARD_EXEMPT")
+        self.assertEqual(len(result["issues"]),3)
+        self.assertTrue(any("Append Cable" in issue for issue in result["issues"]))
+        self.assertTrue(any("Insulator Type" in issue for issue in result["issues"]))
+        self.assertTrue(any("Number of Circuit" in issue for issue in result["issues"]))
+
     def test_missing_manufacturer_flag_only_if_notes_empty(self):
         mapping = {"manufacturer":"Manufacturer", "notes":"Notes",
                    "append_cable":"Append_Cable", "height":"Pole_Height"}

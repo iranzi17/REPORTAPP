@@ -293,12 +293,15 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     rules_sheet.append(["Transformer", "Supplementary fields", "Manufacturer, Serial and Rated kVA are displayed where available but NOT scored in the original correction register."])
     rules_sheet.append(["Transformer", "Branch", "Explicitly excluded from mandatory checking."])
     rules_sheet.append([
-        "LV Pole", "Manufacturer", "Flag only when Manufacturer is missing AND Notes is empty. "
-        "Any nonempty Notes suppresses this specific flag, but does not verify Manufacturer."
+        "LV Pole", "Manufacturer", "Flag only when Manufacturer is missing, Notes is empty, "
+        "and PoleStructure is NOT Substandard. The Substandard option exempts this "
+        "manufacturer check even with blank Notes. All other pole rules still apply."
     ])
     rules_sheet.append([
-        "LV Pole", "Nameplate evidence", "An explicit no-nameplate statement is marked DOCUMENTED_NO_NAMEPLATE; "
-        "any other nonempty Notes is labeled NOTES_PRESENT."
+        "LV Pole", "Nameplate evidence", "An explicit no-nameplate statement is marked "
+        "DOCUMENTED_NO_NAMEPLATE; any other nonempty Notes is labeled NOTES_PRESENT. "
+        "The verified Substandard structure option is labeled SUBSTANDARD_EXEMPT, "
+        "without inventing a Manufacturer value."
     ])
     rules_sheet.append(["LV Pole", "Service Pole", "Service_Pole: mandatory selected value; No is valid."])
     rules_sheet.append(["LV Pole", "Structure", "PoleStructure: mandatory known value, not PylonStructure or TowerStructure."])
