@@ -7,8 +7,9 @@ fields and ambiguous alias matches always fail closed.
 from __future__ import annotations
 import re
 from dataclasses import dataclass
+from datetime import date,datetime,timedelta
 from typing import Mapping
-from .smart_query import _load_admin, ASSET_GROUPS, ASSET_LAYERS
+from .smart_query import _load_admin, _report_window, ASSET_GROUPS, ASSET_LAYERS
 from .asset_quality import ASSETS,resolve_fields
 
 ASSET_TERMS = {
@@ -48,12 +49,18 @@ class TemplateAuditPlan:
     cell: str | None
     criteria: tuple[Criterion, ...]
     condition_mode: str = "all"
+    date_start: date | None = None
+    date_end: date | None = None
+    date_expression: str | None = None
 
     def serialize(self):
         return {
             "asset":self.asset,"district":self.district,
             "sector":self.sector,"cell":self.cell,
             "condition_mode":self.condition_mode,
+            "date_start":self.date_start.isoformat() if self.date_start else None,
+            "date_end":self.date_end.isoformat() if self.date_end else None,
+            "date_expression":self.date_expression,
             "criteria":[
                 {"field_requested":c.field_phrase,"operator":c.operator,"value":c.value}
                 for c in self.criteria
@@ -84,7 +91,7 @@ def _strip_field_phrase(value, asset):
     return value.strip(" .:-")
 
 
-def parse_surveyor_template_request(request):
+def parse_surveyor_template_request(request,today=None):
     """Examples:
     'Give me surveyors recording pole height greater than 12 in Gicumbi'
     'Show surveyors missing manufacturer and append cable on LV poles in Gicumbi sector Muko'
@@ -92,6 +99,7 @@ def parse_surveyor_template_request(request):
     raw=str(request or "").strip().rstrip(".?!")
     if not 10<=len(raw)<=600:
         raise ValueError("Enter a surveyor/attribute audit request (10-600 characters).")
+    raw,start,end,period=_report_window(raw,today or date.today())
     if re.search(r"\b(delete|update|remove|edit|overwrite|drop|erase|fix)\b",raw,re.I):
         raise ValueError("This is a read-only surveyor template audit; editing commands are not supported.")
     if not re.match(r"^(?:give(?:\s+me|\s+the)?|show|find|list|identify|which|who|check)\b",raw,re.I):
@@ -177,7 +185,7 @@ def parse_surveyor_template_request(request):
         criteria=tuple(Criterion(_strip_field_phrase(p,asset),"missing") for p in pieces)
         if not all(c.field_phrase for c in criteria):
             raise ValueError("One of the missing attribute names is blank.")
-        return TemplateAuditPlan(asset,district,sector,cell,criteria,"any" if any_mode else "all")
+        return TemplateAuditPlan(asset,district,sector,cell,criteria,"any" if any_mode else "all",start,end,period)
 
     main=re.sub(
         r"^(?:(?:who\s+)?(?:are\s+)?(?:filling(?:\s+in)?|recording|recorded|filled|have|has)"
@@ -211,7 +219,8 @@ def parse_surveyor_template_request(request):
             "to compare the stored numeric value, and confirm the field unit."
         )
     return TemplateAuditPlan(asset,district,sector,cell,
-                             (Criterion(field,key,float(matched.group(1))),))
+                             (Criterion(field,key,float(matched.group(1))),),
+                             "all",start,end,period)
 
 
 def _field_tokens(phrase,asset):
@@ -322,4 +331,20 @@ def compile_template_filter(plan, fields, domains=None):
         sql+=" AND ASSETTYPE IN ("+",".join(map(str,allowed))+")"
     if terms:
         sql+=" AND ("+joiner.join(terms)+")"
+    if plan.date_start is not None:
+        available={str(f["name"]).casefold() for f in fields}
+        if not {"created_date","last_edited_date"}.issubset(available):
+            raise ValueError(
+                "Live layer must contain both created_date and last_edited_date "
+                "to honor the requested report period; no unfiltered results produced."
+            )
+        start_text=plan.date_start.strftime("%Y-%m-%d 00:00:00")
+        end_next=plan.date_end+timedelta(days=1)
+        end_text=end_next.strftime("%Y-%m-%d 00:00:00")
+        sql+=(
+            " AND ((created_date >= TIMESTAMP '"+start_text+
+            "' AND created_date < TIMESTAMP '"+end_text+
+            "') OR (last_edited_date >= TIMESTAMP '"+start_text+
+            "' AND last_edited_date < TIMESTAMP '"+end_text+"'))"
+        )
     return sql,tuple(dict.fromkeys(x["live_field"] for x in resolved)),resolved
