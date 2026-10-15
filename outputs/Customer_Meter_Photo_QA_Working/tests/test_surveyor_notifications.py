@@ -28,11 +28,15 @@ def pole(edited,notes="",append="No",height=13.5,manufacturer="Good Company"):
         "Manufacturers":manufacturer,
         "Append_Cable":append,
         "Pole_Height":height,"Notes":notes,
+        "Service_Pole":"No","PoleStructure":1,"InsulatorTypes":1,
+        "Number_Circuit":1,
     }
 
 FIELDS=[
     {"name":"Manufacturers"},{"name":"Append_Cable"},
     {"name":"Pole_Height"},{"name":"Notes"},
+    {"name":"Service_Pole"},{"name":"PoleStructure"},
+    {"name":"InsulatorTypes"},{"name":"Number_Circuit"},
 ]
 CONFIG={"enabled":True,"usernames":["ninamenye9683"],"assets":["pole"],
         "channel":"desktop","enabled_at_utc_ms":1000*1000}
@@ -174,6 +178,34 @@ class NotificationTests(unittest.TestCase):
                 )
                 self.assertEqual(alerts,[])
             finally:state.close()
+
+    def test_new_pole_attributes_and_manufacturer_notes_reach_live_alerts(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            state=State(Path(folder)/"monitor.sqlite3")
+            try:
+                entry=pole(1100000,notes="Pole inspected",manufacturer=None,
+                           height=10)
+                entry.update({
+                    "Service_Pole":None,"PoleStructure":None,
+                    "InsulatorTypes":"Unknown","Number_Circuit":0,
+                })
+                issues=ready_alerts(
+                    [entry],"pole",FIELDS,{},CONFIG,1400000,state
+                )[0]["issues"]
+                self.assertEqual(len(issues),4)
+                self.assertTrue(any("Service Pole missing" in x for x in issues))
+                self.assertTrue(any("Structure missing" in x for x in issues))
+                self.assertTrue(any("Insulator Type missing" in x for x in issues))
+                self.assertTrue(any("positive whole number" in x for x in issues))
+                self.assertFalse(any("Manufacturer missing" in x for x in issues))
+                entry["Notes"]=""
+                issues=ready_alerts(
+                    [entry],"pole",FIELDS,{},CONFIG,1400000,state
+                )[0]["issues"]
+                self.assertEqual(len(issues),5)
+                self.assertIn("Manufacturer missing and Notes empty",issues)
+            finally:
+                state.close()
 
     def test_nameplate_note_does_not_exempt_large_pole(self):
         with tempfile.TemporaryDirectory() as folder:
