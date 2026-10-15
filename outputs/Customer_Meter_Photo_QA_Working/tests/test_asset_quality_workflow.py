@@ -23,7 +23,8 @@ class FakeLayer:
                  "Phase_Normal", "Transformer_Protection_Switch",
                  "Transformer_mounting_support", "Number_of_Low_Voltage_feeders",
                  "Manufacturer", "Serial_No", "Rated_kVA", "Notes",
-                 "Append_Cable", "Pole_Height",
+                 "Append_Cable", "Pole_Height", "Service_Pole",
+                 "PoleStructure", "InsulatorTypes", "Number_Circuit",
                  "District", "Sector", "Cell"]
         self.properties = SimpleNamespace(
             fields=[{"name": x, "alias": x, "type": "esriFieldTypeString"} for x in names],
@@ -66,6 +67,8 @@ def pole(gid, oid, note="", manufacturer=None, atype=1,
         "created_date": 1789420000000, "last_edited_date": 1789420000000,
         "Manufacturer": manufacturer, "Notes": note,
         "Append_Cable": append_cable, "Pole_Height": 10,
+        "Service_Pole": 1, "PoleStructure": 1, "InsulatorTypes": 1,
+        "Number_Circuit": 1,
         "District": "Rulindo", "Sector": "Buyoga", "Cell": "Munyana",
     }
 
@@ -153,6 +156,35 @@ class AssetWorkflowTests(unittest.TestCase):
             row[0] == "append_cable" and row[1] == "Append_Cable"
             for row in sheets["Schema Verification"]
         ))
+
+    def test_four_new_pole_fields_are_in_workbook_and_qa_counts(self):
+        rows=[
+            pole("{S1}",101,"Notes supplied","Maker"),
+            pole("{S2}",102,"Notes supplied","Maker"),
+        ]
+        rows[1].update({
+            "Service_Pole": None, "PoleStructure": "Unknown",
+            "InsulatorTypes": None, "Number_Circuit": 0,
+        })
+        report,sheets,_=self.run_fake("pole",rows)
+        self.assertEqual(report["with_gaps"],1)
+        self.assertEqual(report["original_attribute_issue_count"],4)
+        header=sheets["Asset Details"][0]
+        self.assertIn("Service Pole",header)
+        self.assertIn("Structure",header)
+        self.assertIn("Insulator Type",header)
+        self.assertIn("Number of Circuit",header)
+        text="; ".join(str(x) for x in sheets["Asset Details"][1:])
+        self.assertIn("Service Pole missing/unknown",text)
+        self.assertIn("Structure missing/unknown",text)
+        self.assertIn("Insulator Type missing/unknown",text)
+        self.assertIn("Number of Circuit must be a positive whole number",text)
+        schema=sheets["Schema Verification"]
+        self.assertTrue(any(row[0]=="number_of_circuit" and
+                            row[1]=="Number_Circuit" for row in schema))
+        summary=dict((row[0],row[1]) for row in sheets["Summary"] if row[0])
+        self.assertEqual(summary["Service Pole — missing/unknown"],1)
+        self.assertEqual(summary["Number of Circuit — invalid count"],1)
 
     def test_missing_append_cable_in_pole_report_is_mandatory_issue(self):
         report, sheets, _ = self.run_fake(
