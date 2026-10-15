@@ -1,4 +1,4 @@
-// REPORTAPP ArcGIS Pro SDK add-in module (ArcGIS Pro 3.3+ / .NET 8).
+// REPORTAPP ArcGIS Pro SDK add-in module (ArcGIS Pro 3.4 / .NET 8).
 // Add to a matching ArcGIS Pro SDK Module Add-in project. See README.md.
 // Reads ONLY the current Windows user's validated navigation request files.
 // Never calls editing APIs or writes to the REG FeatureServer.
@@ -177,11 +177,16 @@ namespace ReportappNavigationBridge
                 {
                     ObjectIDs = new List<long> { req.ObjectId }
                 };
+                // Select only the requested record and zoom to selection.
+                // MapView.ZoomTo(layer, objectid) is NOT an ArcGIS Pro 3.4
+                // API overload; ZoomToSelected() is supported by SDK 3.4.
+                view.Map.ClearSelection();
                 using var selected = layer.Select(
                     filter, SelectionCombinationMethod.New);
                 if (selected.GetCount() != 1)
                     return (string?)"OBJECTID not selectable (possibly filtered or deleted).";
-                view.ZoomTo(layer, req.ObjectId);
+                if (!view.ZoomToSelected(TimeSpan.FromSeconds(1)))
+                    return (string?)"ArcGIS Pro did not complete the zoom.";
                 return (string?)null;
             });
         }
