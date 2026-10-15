@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Mapping
 
 from .area_selection import district_filters
@@ -370,42 +371,211 @@ def compile_attribute_where(plan: QueryPlan, live_fields: list[Mapping[str,Any]]
 
 
 
-def parse_lv_report_request(message: str) -> dict:
-    """Parse only specific create-report instructions, no arbitrary path in prose.
+_REPORT_VERBS = re.compile(
+    r"^\s*(?:(?:please|kindly)\s+)?"
+    r"(?:(?:can|could)\s+you\s+)?"
+    r"(?:prepare|create|generate|make|produce|give\s+me|i\s+need|i\s+want)\s+"
+    r"(?:(?:me|an?|the)\s+)?"
+    r"(?:(?:lv\s+lines?|low\s+voltage\s+lines?|combined\s+qa|combined|qa|"
+    r"asset\s+quality|data\s+quality|quality|survey(?:or)?\s+performance)\s+)?"
+    r"(?:reports?|summar(?:y|ies))\b", re.I,
+)
 
-    Destination is an explicit ArcGIS Pro folder parameter, not a path
-    inferred from natural language. Report username is optional.
-    """
-    raw=str(message or "").strip()
-    if not 1 <= len(raw) <= 550:
-        raise ValueError("Enter a short LV Lines Report instruction.")
-    pat=(
-        r"^(?:prepare|create|generate|make)\s+(?:an?\s+)?"
-        r"(?:(?:lv\s+lines?|low\s+voltage\s+lines?|combined\s+qa|combined|qa|asset\s+quality|data\s+quality)\s+)?report"
-        r"(?:\s+(?:for|of)\s+(?P<person>.+?))?"
-        r"\s+in\s+(?P<district>[a-zA-Z][a-zA-Z ]+?)"
-        r"(?:\s+district)?\s*[.!]?$"
+_REPORT_DATE_TOKEN = r"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{4})"
+_REPORT_COUNTS = {
+    "one":1,"two":2,"three":3,"four":4,"five":5,
+    "six":6,"seven":7,"eight":8,"nine":9,"ten":10,
+    "eleven":11,"twelve":12,
+}
+
+
+def _report_date(text):
+    """Unambiguous ISO or day/month/year (Rwanda) input, no fuzzy date guesses."""
+    value=str(text).strip()
+    for fmt in ("%Y-%m-%d","%d/%m/%Y"):
+        try:
+            return datetime.strptime(value,fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(
+        f"Invalid report date '{value}'. Use YYYY-MM-DD or DD/MM/YYYY."
     )
-    match=re.fullmatch(pat,raw,re.I)
-    if not match:
+
+
+def _month_before(day,months):
+    import calendar
+    from datetime import date
+    count=day.year*12+day.month-1-months
+    if count<0:
+        raise ValueError("Report period starts before year 1.")
+    year,month=divmod(count,12)
+    month+=1
+    return date(year,month,min(day.day,calendar.monthrange(year,month)[1]))
+
+
+def _report_window(raw,today):
+    """Remove only a recognized trailing date expression, reject any leftover."""
+    from datetime import timedelta, date
+    if isinstance(today,datetime):
+        today=today.date()
+    if not isinstance(today,date):
+        raise TypeError("today must be a calendar date.")
+    plain=raw.strip().rstrip(" .!?")
+    d=_REPORT_DATE_TOKEN
+    exact=re.search(
+        rf"\b(?:from|between)\s+(?P<from>{d})\s+"
+        rf"(?:to|through|until|and)\s+(?P<to>{d})$",
+        plain,re.I,
+    )
+    if exact:
+        start,end=_report_date(exact.group("from")),_report_date(exact.group("to"))
+        label="explicit date range"
+        stem=plain[:exact.start()].strip()
+    else:
+        since=re.search(rf"\b(?:since|from)\s+(?P<start>{d})$",plain,re.I)
+        on=re.search(rf"\bon\s+(?P<on>{d})$",plain,re.I)
+        if since:
+            start,end=_report_date(since.group("start")),today
+            label="since date"
+            stem=plain[:since.start()].strip()
+        elif on:
+            start=end=_report_date(on.group("on"))
+            label="on date"
+            stem=plain[:on.start()].strip()
+        else:
+            numbered=re.search(
+                r"(?:\b(?:during|within|over|for|in)\s+)?"
+                r"(?:the\s+)?(?:last|past|previous)\s+"
+                r"(?P<n>\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+"
+                r"(?P<unit>days?|weeks?|months?)$",plain,re.I,
+            )
+            if numbered:
+                word=numbered.group("n").casefold()
+                count=_REPORT_COUNTS.get(word)
+                if count is None:
+                    count=int(word)
+                if count<1:
+                    raise ValueError("The report period must be positive.")
+                unit=numbered.group("unit").casefold().rstrip("s")
+                if unit=="day":
+                    days=count
+                    if days>1095:raise ValueError("Limit relative report periods to 1095 days.")
+                    start=today-timedelta(days=days-1)
+                elif unit=="week":
+                    days=count*7
+                    if days>1095:raise ValueError("Limit relative report periods to 156 weeks.")
+                    start=today-timedelta(days=days-1)
+                else:
+                    if count>36:raise ValueError("Limit relative report periods to 36 months.")
+                    start=_month_before(today,count)+timedelta(days=1)
+                end=today
+                label=f"last {count} {unit}{'s' if count!=1 else ''}, including today"
+                stem=plain[:numbered.start()].strip()
+            else:
+                singular=re.search(
+                    r"(?:\b(?:during|within|over|for|in)\s+)?"
+                    r"(?:the\s+)?(?P<period>today|yesterday|this\s+week|"
+                    r"last\s+week|this\s+month|last\s+month|"
+                    r"this\s+year|last\s+year)$",plain,re.I,
+                )
+                if singular:
+                    period=" ".join(singular.group("period").casefold().split())
+                    if period=="today":
+                        start=end=today
+                    elif period=="yesterday":
+                        start=end=today-timedelta(days=1)
+                    elif period=="this week":
+                        start=today-timedelta(days=today.weekday());end=today
+                    elif period=="last week":
+                        start=today-timedelta(days=today.weekday()+7)
+                        end=start+timedelta(days=6)
+                    elif period=="this month":
+                        start=today.replace(day=1);end=today
+                    elif period=="last month":
+                        first=today.replace(day=1)
+                        end=first-timedelta(days=1)
+                        start=end.replace(day=1)
+                    elif period=="this year":
+                        start=today.replace(month=1,day=1);end=today
+                    else:
+                        start=today.replace(year=today.year-1,month=1,day=1)
+                        end=today.replace(year=today.year-1,month=12,day=31)
+                    label=period
+                    stem=plain[:singular.start()].strip()
+                else:
+                    return plain,None,None,None
+    if end<start:
+        raise ValueError("Report end date cannot precede its start date.")
+    if end>today:
+        raise ValueError("Report end date is in the future; choose a past or current date.")
+    return stem,start,end,label
+
+
+def is_report_instruction(message):
+    """Dispatch report requests without swallowing ordinary GIS show/filter."""
+    return bool(_REPORT_VERBS.match(str(message or "")))
+
+
+def parse_lv_report_request(message: str, today=None) -> dict:
+    """Strict natural-language QA report requests, including relative dates.
+
+    e.g. 'prepare report for julesmugae72 in Gicumbi the last 2 weeks'.
+    Relative dates are evaluated using the ArcGIS Pro computer's local date.
+    Without a date phrase, the ArcGIS QA from/to controls remain authoritative.
+    """
+    from datetime import date
+    raw=str(message or "").strip()
+    if not 1<=len(raw)<=550:
+        raise ValueError("Enter a report instruction of 1 to 550 characters.")
+    if re.search(r"\b(delete|remove|erase|update|truncate|overwrite|drop)\b",raw,re.I):
+        raise ValueError("Report requests are read-only; editing instructions are not supported.")
+    prefix=_REPORT_VERBS.match(raw)
+    if not prefix:
         raise ValueError(
-            "Use 'Prepare Combined QA Report for Kwizerwa Edison in Gicumbi'. "
-            "Choose the output folder in the separate Destination Folder control."
+            "Use 'Prepare report for julesmugae72 in Gicumbi the last 2 weeks'."
         )
-    district_name=" ".join(match.group("district").split())
+    body=raw[prefix.end():].strip()
+    # 'report for <surveyor> in <district>'; district names come only from
+    # the authoritative local Rwanda administrative index.
+    body,start,end,period=_report_window(body,today or date.today())
+    body=body.strip(" .!")
     districts,_=_load_admin()
-    matches=[d for d in districts if d.casefold()==district_name.casefold()]
-    if len(matches)!=1:
-        raise ValueError(f"Unknown or ambiguous transformer starting district: '{district_name}'.")
-    district=matches[0]
-    person=(match.group("person") or "").strip()
+    # Take the explicit final 'in <district>' phrase only; 'in Gicumbi'
+    # cannot be mistaken for part of a surveyor name.
+    candidate=re.fullmatch(
+        r"(?:(?:for|of|by)\s+(?P<person>.+?)\s+)?"
+        r"in\s+(?P<district>[A-Za-z][A-Za-z ]+?)(?:\s+district)?",
+        body,re.I,
+    )
+    if not candidate:
+        raise ValueError(
+            "Specify a verified surveyor and district, e.g. "
+            "'Prepare report for julesmugae72 in Gicumbi the last 2 weeks'. "
+            "Supported periods: last N days/weeks/months, this/last week, "
+            "this/last month, today/yesterday, or from YYYY-MM-DD to YYYY-MM-DD."
+        )
+    district_name=" ".join(candidate.group("district").split())
+    matched=[d for d in districts if d.casefold()==district_name.casefold()]
+    if len(matched)!=1:
+        raise ValueError(
+            f"Unknown or ambiguous district '{district_name}'. Use the official district name."
+        )
+    district=matched[0]
+    person=(candidate.group("person") or "").strip()
     if person and re.search(r"\b(?:and|or|where|with|outside|within)\b",person,re.I):
-        raise ValueError("Specify one surveyor per report; complex conditions are not supported.")
-    user=resolve_surveyor_name(person,district) if person else None
-    return {"action":"combined_qa_report","district":district,
-            "usernames":[user] if user else [],
-            "requested_name":person or None,
-            "trace_rule":"Select starting transformers in district; trace all connected LV lines across borders"}
+        raise ValueError("Specify one surveyor per report; use the original multi-surveyor QA tools for larger batches.")
+    username=resolve_surveyor_name(person,district) if person else None
+    return {
+        "action":"combined_qa_report",
+        "district":district,
+        "usernames":[username] if username else [],
+        "requested_name":person or None,
+        "date_start":start,
+        "date_end":end,
+        "date_expression":period,
+        "trace_rule":"Select starting transformers in district; trace all connected LV lines across borders",
+    }
+
 
 def boundary_where(plan: QueryPlan):
     if not plan.district:
