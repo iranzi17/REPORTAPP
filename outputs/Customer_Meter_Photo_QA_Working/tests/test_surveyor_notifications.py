@@ -59,6 +59,31 @@ class NotificationTests(unittest.TestCase):
             )["alerts_sent"],0)
             self.assertIn('"status": "SENT"',cfg.with_suffix(".events.jsonl").read_text())
 
+    def test_latest_editor_is_not_confused_with_record_creator(self):
+        from meter_photo_qa.surveyor_notifications import submission_actor
+        record=pole(1100*1000)
+        record["created_date"]=1050*1000
+        record["last_edited_date"]=1100*1000
+        record["created_user"]="someone_else"
+        record["last_edited_user"]="ninamenye9683"
+        self.assertEqual(submission_actor(record),("ninamenye9683","EDIT"))
+        with tempfile.TemporaryDirectory() as folder:
+            state=State(Path(folder)/"s.sqlite")
+            try:
+                alerts=ready_alerts(
+                    [record],"pole",FIELDS,{},CONFIG,1400*1000,state
+                )
+                self.assertEqual(len(alerts),1)
+                self.assertEqual(alerts[0]["event_type"],"EDIT")
+                self.assertEqual(alerts[0]["created_user"],"someone_else")
+                record["created_user"]="ninamenye9683"
+                record["last_edited_user"]="different"
+                alerts=ready_alerts(
+                    [record],"pole",FIELDS,{},CONFIG,1400*1000,state
+                )
+                self.assertEqual(alerts,[])
+            finally:state.close()
+
     def test_nameplate_note_does_not_exempt_large_pole(self):
         with tempfile.TemporaryDirectory() as folder:
             state=State(Path(folder)/"s.sqlite")
