@@ -25,7 +25,10 @@
       "label": "Voltage Level",
       "field": "Voltage_Level_kV",
       "validation": "domain_not_placeholder",
-      "invalid_domain_labels": ["select value", "unknown"],
+      "invalid_domain_labels": [
+        "select value",
+        "unknown"
+      ],
       "template_domain": "400; 242; 230",
       "notes": "Validated against the live subtype domain."
     },
@@ -42,7 +45,10 @@
       "label": "Conductor Size",
       "field": "CondustorSize",
       "validation": "domain_not_placeholder",
-      "invalid_domain_labels": ["unknown", "select value"],
+      "invalid_domain_labels": [
+        "unknown",
+        "select value"
+      ],
       "template_domain": "2*16mm2; 2*25mm2; 2*35mm2; 3*35mm2; 3*25mm2+1*54.6mm2; 3*35mm2+1*54.6mm2; 4*16mm2; 4*25mm2; 4*35mm2; 4*50mm2; 4*70mm2; 4*75mm2; 4*95mm2; 4*120mm2; 4*150mm2; 4*185mm2; 1*240mm2; 1*300mm2; 1*400mm2; 1*630mm2; Others",
       "notes": "Validated against the applicable overhead or underground live domain."
     },
@@ -51,7 +57,10 @@
       "label": "Conductor Material",
       "field": "Material",
       "validation": "domain_not_placeholder",
-      "invalid_domain_labels": ["unknown", "select value"],
+      "invalid_domain_labels": [
+        "unknown",
+        "select value"
+      ],
       "template_domain": "Aluminium; Copper; ACSR; AAA; Steel; Others",
       "notes": "The populated live field is Material; Conductor_material is currently blank."
     },
@@ -80,15 +89,6 @@
       "notes": "All three phase-count choices are valid; domain code 0 means 1 phase."
     },
     {
-      "key": "supplying_lines",
-      "label": "Supplying Lines",
-      "field": "SupplyingLines",
-      "validation": "domain_not_placeholder",
-      "invalid_domain_labels": ["unknown", "select value"],
-      "template_domain": "Residential; Non Residential; Small Industries; Street lights in case transformer is shared",
-      "notes": "Unknown is incomplete."
-    },
-    {
       "key": "year_construction",
       "label": "Year of Construction",
       "field": "Year_construction",
@@ -106,6 +106,13 @@
     }
   ],
   "optional_attributes": [
+    {
+      "key": "supplying_lines",
+      "label": "Supplying Lines",
+      "field": "SupplyingLines",
+      "template_domain": "Residential; Non Residential; Small Industries; Street lights in case transformer is shared",
+      "notes": "Optional and excluded from completion score, mandatory gaps, and live QA notifications. Retained in LV Line Details for context."
+    },
     {
       "key": "lv_feeder_name",
       "label": "LV Feeder Name",

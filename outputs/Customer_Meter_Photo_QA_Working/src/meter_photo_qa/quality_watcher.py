@@ -299,12 +299,19 @@ def assess_line_quality(
     mandatory_failures = [item["label"] for item, rule in zip(checks, rules["scored_attributes"]) if rule.get("mandatory") and not item["valid"]]
     status = "MEETS_THRESHOLD" if completion_percent >= float(minimum_completion_percent) and not mandatory_failures else "FLAG"
     display_values = {item["key"]: item["display_value"] for item in checks}
-    display_values.update(
-        {
-            item["key"]: attributes.get(item["field"])
-            for item in rules.get("optional_attributes", [])
-        }
-    )
+    for item in rules.get("optional_attributes", []):
+        raw = attributes.get(item["field"])
+        # Optional values are informational, not missing/invalid findings.
+        # Preserve their human-readable coded label in Excel when available.
+        if item["key"] == "supplying_lines":
+            try:
+                code_group = int(attributes.get("ASSETGROUP") or 0)
+            except (ValueError, TypeError):
+                code_group = 0
+            decoded = domains.get(code_group, {}).get(item["field"], {}).get(raw, raw)
+            display_values[item["key"]] = decoded
+        else:
+            display_values[item["key"]] = raw
     return {
         "status": status,
         "completion_percent": completion_percent,

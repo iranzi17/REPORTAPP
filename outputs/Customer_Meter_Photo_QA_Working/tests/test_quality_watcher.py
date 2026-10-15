@@ -49,13 +49,13 @@ class QualityWatcherTests(unittest.TestCase):
     def setUpClass(cls):
         cls.rules = load_quality_rules()
 
-    def test_typical_eight_of_eleven_fields_passes(self):
+    def test_typical_eight_of_ten_fields_passes(self):
         result = assess_line_quality(
             typical_attributes(), self.rules, DOMAINS, 60, current_year=2026
         )
         self.assertEqual(result["completed_fields"], 8)
-        self.assertEqual(result["required_fields"], 11)
-        self.assertAlmostEqual(result["completion_percent"], 72.7272727)
+        self.assertEqual(result["required_fields"], 10)
+        self.assertAlmostEqual(result["completion_percent"], 80.0)
         self.assertEqual(result["status"], "MEETS_THRESHOLD")
 
     def test_transformer_name_is_mandatory_even_above_threshold(self):
@@ -65,7 +65,7 @@ class QualityWatcherTests(unittest.TestCase):
         attributes["Year_construction"] = 2025
         attributes["Year_of_commisioning"] = 2026
         result = assess_line_quality(attributes, self.rules, DOMAINS, 60, current_year=2026)
-        self.assertEqual(result["completed_fields"], 10)
+        self.assertEqual(result["completed_fields"], 9)
         self.assertEqual(result["status"], "FLAG")
         self.assertEqual(result["mandatory_failures"], ["Transformer Name"])
 
@@ -94,7 +94,30 @@ class QualityWatcherTests(unittest.TestCase):
         check_by_key = {item["key"]: item for item in result["checks"]}
         self.assertTrue(check_by_key["conductor_insulation"]["valid"])
         self.assertTrue(check_by_key["phases"]["valid"])
-        self.assertFalse(check_by_key["supplying_lines"]["valid"])
+        self.assertNotIn("supplying_lines",check_by_key)
+        self.assertNotIn("Supplying Lines",result["missing_attributes"])
+        self.assertEqual(result["display_values"]["supplying_lines"],"Unknown")
+
+    def test_supplying_lines_is_informational_and_not_an_alert(self):
+        from meter_photo_qa.surveyor_notifications import record_findings
+        attributes=typical_attributes()
+        full=assess_line_quality(attributes,self.rules,DOMAINS,60,current_year=2026)
+        self.assertEqual(full["required_fields"],10)
+        self.assertEqual(full["display_values"]["supplying_lines"],"Unknown")
+        self.assertNotIn("Supplying Lines",full["missing_attributes"])
+        self.assertTrue(any("Year of Construction" in x
+                            for x in full["missing_attributes"]))
+        self.assertTrue(any("Year of Commissioning" in x
+                            for x in full["missing_attributes"]))
+        alerts,unverified=record_findings(
+            "line",attributes,[],DOMAINS,self.rules,{},
+        )
+        self.assertNotIn("Supplying Lines",alerts)
+        self.assertEqual(unverified,[])
+        filled=dict(attributes, SupplyingLines=1)
+        full_filled=assess_line_quality(filled,self.rules,DOMAINS,60,current_year=2026)
+        self.assertEqual(full_filled["completion_percent"],full["completion_percent"])
+        self.assertEqual(full_filled["display_values"]["supplying_lines"],"Residential")
 
     def test_commissioning_before_construction_is_invalid(self):
         attributes = typical_attributes()
