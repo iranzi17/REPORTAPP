@@ -1264,12 +1264,22 @@ class AskReportApp:
         return [query, mode, report, service, boundary, destination,
                 feeder_method, endpoint_gap, qa_start, qa_end]
 
+    def updateParameters(self, params):
+        """Relative date phrases keep the visible QA date controls in sync."""
+        request=params[0].valueAsText or ""
+        if _smart_query.is_report_instruction(request):
+            try:
+                parsed=_smart_query.parse_lv_report_request(request)
+            except ValueError:
+                return
+            if parsed["date_start"] is not None:
+                params[8].value=datetime.combine(parsed["date_start"], datetime.min.time())
+                params[9].value=datetime.combine(parsed["date_end"], datetime.min.time())
+
     def updateMessages(self, params):
         if params[0].valueAsText:
             try:
-                if params[0].valueAsText.strip().lower().startswith(
-                    ("prepare ", "create ", "generate ", "make ")
-                ):
+                if _smart_query.is_report_instruction(params[0].valueAsText):
                     _smart_query.parse_lv_report_request(params[0].valueAsText)
                 elif re.search(r"\bsurveyors?\b", params[0].valueAsText, re.I):
                     _template_attribute_audit.parse_surveyor_template_request(
@@ -1282,7 +1292,7 @@ class AskReportApp:
 
     def execute(self, parameters, messages):
         request = parameters[0].valueAsText or ""
-        if request.strip().lower().startswith(("prepare ", "create ", "generate ", "make ")):
+        if _smart_query.is_report_instruction(request):
             parsed = _smart_query.parse_lv_report_request(request)
             destination = parameters[5].valueAsText
             if not destination:
@@ -1306,12 +1316,20 @@ class AskReportApp:
                 "Preparing the ORIGINAL three-asset QA checks in one Excel workbook: "
                 "LV Lines, Distribution Transformers, and LV Poles."
             )
+            period_from=parsed["date_start"] or parameters[8].value
+            period_to=parsed["date_end"] or parameters[9].value
+            if parsed["date_expression"]:
+                arcpy.AddMessage(
+                    f"Requested period ({parsed['date_expression']}): "
+                    f"{period_from} to {period_to}, inclusive. "
+                    "The date stated in the command overrides the QA date pickers."
+                )
             report = run_combined_qa_report(
                 output_folder=destination,
                 district=parsed["district"],
                 usernames=parsed["usernames"] or None,
-                start_date=parameters[8].value,
-                end_date=parameters[9].value,
+                start_date=period_from,
+                end_date=period_to,
                 service_url=parameters[3].valueAsText or None,
                 boundary_service_url=parameters[4].valueAsText or None,
                 include_continuity=(method=="geometry"),
