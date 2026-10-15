@@ -228,3 +228,103 @@ def update_monitored_surveyors(config_path, *, add=(), remove=(), now_ms=None):
         "original_enabled_at_utc_ms":cutoff,
         "new_account_start_utc_ms":stamp if added else None,
     }
+
+
+def update_monitored_assets(config_path, assets, *, now_ms=None, validator=None):
+    """Update ALL selected users' asset classes after a read-only live preflight.
+
+    Existing account and asset activation clocks, local inbox and sent state
+    remain intact. New asset classes start NOW, not at original monitor setup.
+    If live validation fails, the original config remains unchanged.
+    """
+    path=Path(config_path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Existing REPORTAPP monitor config not found: {path}")
+    original=json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(original,dict) or not original.get("usernames"):
+        raise ValueError("Monitoring config has no selected surveyors.")
+    previous=original.get("assets")
+    if not isinstance(previous,list) or not previous:
+        raise ValueError("Existing monitoring assets are missing.")
+    if "enabled_at_utc_ms" not in original:
+        raise ValueError("Existing monitoring start time is missing.")
+    supported={"line","transformer","pole"}
+    if isinstance(assets,str):
+        raise ValueError("Choose asset classes as a sequence, not a string.")
+    selected=list(dict.fromkeys(str(s).strip() for s in assets))
+    if not selected or not set(selected).issubset(supported):
+        raise ValueError("Select one or more of line, transformer and pole.")
+    if len(previous)!=len(set(previous)) or not set(previous).issubset(supported):
+        raise ValueError("Existing asset selection is invalid; not overwritten.")
+    if set(selected)==set(previous):
+        return {
+            "status":"UNCHANGED","assets":previous,"added":[],"removed":[],
+            "original_enabled_at_utc_ms":int(original["enabled_at_utc_ms"]),
+        }
+    start=int(original["enabled_at_utc_ms"])
+    stamp=int(now_ms if now_ms is not None else
+              datetime.now(timezone.utc).timestamp()*1000)
+    if stamp<start:
+        raise ValueError("New asset start time precedes original activation.")
+    previous_clocks=original.get("enabled_at_by_asset_utc_ms") or {}
+    if not isinstance(previous_clocks,dict):
+        raise ValueError("Previous per-asset start dates are invalid.")
+    current={a:int(previous_clocks.get(a,start)) for a in previous if a in selected}
+    added=[a for a in selected if a not in previous]
+    removed=[a for a in previous if a not in selected]
+    for asset in added:
+        current[asset]=stamp
+    candidate=dict(original)
+    candidate["assets"]=selected
+    candidate["enabled_at_by_asset_utc_ms"]=current
+    # Check ALL candidate layers before replacing the config. This fails
+    # closed on a broken REG schema or authentication error, and it never
+    # creates notifications or edits production features.
+    if validator is None:
+        from .surveyor_notifications import collect,record_findings
+        snapshots=collect(candidate,now_ms=stamp)
+        if set(snapshots)!=set(selected):
+            raise RuntimeError("REG preflight did not return all selected assets.")
+        for asset,(records,fields,domains,rules,expectations) in snapshots.items():
+            if records:
+                _issues,unverified=record_findings(
+                    asset,records[0],fields,domains,rules,expectations
+                )
+                if unverified:
+                    raise RuntimeError(
+                        f"{asset}: unresolved required field mapping: {unverified}"
+                    )
+        counts={asset:len(items[0]) for asset,items in snapshots.items()}
+    else:
+        counts=validator(candidate,stamp)
+    # Save backup and replace config atomically. The task reads the full
+    # previous or full new config, never a partially written JSON document.
+    backup=path.with_name(
+        path.stem+"_backup_"+datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        +path.suffix
+    )
+    shutil.copy2(path,backup)
+    temporary=None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",encoding="utf-8",dir=path.parent,
+            prefix="."+path.stem+"_",suffix=".tmp",delete=False
+        ) as handle:
+            temporary=Path(handle.name)
+            json.dump(candidate,handle,indent=2,ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary,path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    return {
+        "status":"UPDATED","assets":selected,"added":added,"removed":removed,
+        "asset_record_counts":counts,
+        "original_enabled_at_utc_ms":start,
+        "new_asset_start_utc_ms":stamp if added else None,
+        "usernames":list(original["usernames"]),
+        "backup":str(backup),
+        "config_path":str(path),
+    }

@@ -402,17 +402,16 @@ def launch_gui(config_path):
             return
         dialog=tk.Toplevel(root)
         dialog.title("REPORTAPP | Manage Surveyors")
-        dialog.geometry("800x555")
+        dialog.geometry("820x690")
+        dialog.minsize(770,610)
         dialog.transient(root)
         dialog.grab_set()
         shell=ttk.Frame(dialog,padding=12)
         shell.pack(fill="both",expand=True)
         ttk.Label(shell,text="Add or remove monitored surveyors",
                   font=("Segoe UI",14,"bold")).pack(anchor="w")
-        ttk.Label(shell,text=(
-            "Current assets: "+", ".join(current.get("assets",[]))+
-            "  |  Existing monitoring dates and inbox alerts stay unchanged."
-        )).pack(anchor="w",pady=(5,10))
+        asset_status=tk.StringVar()
+        ttk.Label(shell,textvariable=asset_status).pack(anchor="w",pady=(5,10))
         panes=ttk.Frame(shell)
         panes.pack(fill="both",expand=True)
         left=ttk.Frame(panes)
@@ -430,6 +429,10 @@ def launch_gui(config_path):
 
         def reload_lists():
             conf=json.loads(config.read_text(encoding="utf-8"))
+            asset_status.set(
+                "Current assets: "+", ".join(conf.get("assets",[]))+
+                "  |  Existing monitoring dates and inbox alerts preserved."
+            )
             monitored.delete(0,"end")
             for login in conf.get("usernames",[]):
                 monitored.insert("end",login+" — "+str(known.get(login,"(unknown name)")))
@@ -482,10 +485,70 @@ def launch_gui(config_path):
 
         ttk.Button(left,text="Remove Selected",command=lambda:apply_update("remove")).pack(anchor="w")
         ttk.Button(right,text="Add Selected",command=lambda:apply_update("add")).pack(anchor="w")
+        asset_panel=ttk.LabelFrame(shell,text="Asset classes for ALL selected surveyors",padding=9)
+        asset_panel.pack(fill="x",pady=(10,5))
+        asset_options=(
+            ("pole","LV Poles"),
+            ("line","LV Lines"),
+            ("transformer","Distribution Transformers"),
+        )
+        asset_flags={
+            a:tk.BooleanVar(value=a in current.get("assets",[]))
+            for a,_label in asset_options
+        }
+        for asset,label in asset_options:
+            ttk.Checkbutton(asset_panel,text=label,variable=asset_flags[asset]).pack(
+                side="left",padx=(0,18)
+            )
+
+        def apply_asset_classes():
+            from .notification_setup import update_monitored_assets
+            selected=[a for a,_label in asset_options if asset_flags[a].get()]
+            if not selected:
+                messagebox.showerror(
+                    "Asset selection","Select at least one asset class.",parent=dialog
+                )
+                return
+            original_assets=json.loads(config.read_text(encoding="utf-8")).get("assets",[])
+            if set(selected)==set(original_assets):
+                messagebox.showinfo("Asset selection","No changes needed.",parent=dialog)
+                return
+            if not messagebox.askyesno(
+                "Verify monitored assets",
+                "REPORTAPP will verify access to all selected REG asset layers "
+                "before saving.\nExisting start times and inbox alerts are preserved. "
+                "New asset types begin monitoring only from activation time.\n\n"
+                "Continue?",parent=dialog
+            ):
+                return
+            dialog.configure(cursor="watch")
+            dialog.update_idletasks()
+            try:
+                outcome=update_monitored_assets(config,selected)
+                reload_lists()
+                messagebox.showinfo(
+                    "Assets updated",
+                    "REG verification successful.\n"
+                    "Added: "+(", ".join(outcome["added"]) or "(none)")+"\n"
+                    "Removed: "+(", ".join(outcome["removed"]) or "(none)")+"\n"
+                    "Task Scheduler will use the updated monitoring list on its "
+                    "next cycle. Review history was preserved.",
+                    parent=dialog,
+                )
+            except Exception as exc:
+                messagebox.showerror(
+                    "REG preflight failed — no changes saved",str(exc),parent=dialog
+                )
+            finally:
+                dialog.configure(cursor="")
+
+        ttk.Button(
+            asset_panel,text="Verify & Apply Asset Classes",command=apply_asset_classes
+        ).pack(side="right")
         ttk.Label(shell,text=(
-            "New accounts start monitoring from the moment they are added. "
-            "Historical errors do not trigger retroactive alerts."
-        ),wraplength=750).pack(anchor="w",pady=(9,5))
+            "New surveyors and newly enabled asset classes start from their "
+            "activation time. Old records are not alerted retroactively."
+        ),wraplength=760).pack(anchor="w",pady=(6,6))
         ttk.Button(shell,text="Close",command=dialog.destroy).pack(anchor="e")
         reload_lists()
 
@@ -530,8 +593,15 @@ def main(argv=None):
     mode.add_argument("--reopen",type=int,metavar="ID",help="Reopen local alert")
     mode.add_argument("--add-user",action="append",metavar="USERNAME",help="Add monitored portal username without resetting the config")
     mode.add_argument("--remove-user",action="append",metavar="USERNAME",help="Remove monitored portal username without losing inbox history")
+    mode.add_argument("--set-assets",nargs="+",metavar="ASSET",
+                      help="Verify and set shared asset classes: line transformer pole")
     parser.add_argument("--note",help="Supervisor remark for --review/--reopen")
     options=parser.parse_args(argv)
+    if options.set_assets is not None:
+        from .notification_setup import update_monitored_assets
+        result=update_monitored_assets(options.config,options.set_assets)
+        print(json.dumps(result,indent=2,ensure_ascii=False))
+        return 0
     if options.add_user or options.remove_user:
         from .notification_setup import update_monitored_surveyors
         result=update_monitored_surveyors(

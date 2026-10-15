@@ -14,7 +14,7 @@ from meter_photo_qa.surveyor_notifications import (
 )
 from meter_photo_qa.notification_setup import (
     configure_monitoring,chosen_usernames,_powershell,_standalone_python,
-    update_monitored_surveyors,
+    update_monitored_surveyors,update_monitored_assets,
 )
 
 
@@ -345,6 +345,96 @@ class NotificationTests(unittest.TestCase):
                 self.assertEqual(len(ready_alerts(
                     [old],"pole",FIELDS,{},config,2400000,state
                 )),1)
+            finally:
+                state.close()
+
+    def test_add_line_transformer_preserves_existing_pole_and_user_clocks(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            path=Path(directory)/"monitor_config.json"
+            original={
+                "enabled":True,"enabled_at_utc_ms":1000000,
+                "enabled_at_by_username_utc_ms":{
+                    "ninamenye9683":1000000,
+                    "janviersafari515":1700000,
+                },
+                "usernames":["ninamenye9683","janviersafari515"],
+                "assets":["pole"],"channel":"desktop",
+            }
+            path.write_text(json.dumps(original),encoding="utf-8")
+            state=State(path.with_suffix(".sqlite3"))
+            state.close()
+            watched=[]
+            def validator(candidate,now_ms):
+                watched.append((candidate,now_ms))
+                return {"pole":9,"line":0,"transformer":1}
+            result=update_monitored_assets(
+                path,["pole","line","transformer"],
+                now_ms=2100000,validator=validator,
+            )
+            self.assertEqual(result["status"],"UPDATED")
+            self.assertEqual(result["added"],["line","transformer"])
+            self.assertEqual(result["asset_record_counts"]["transformer"],1)
+            saved=json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["enabled_at_utc_ms"],1000000)
+            self.assertEqual(saved["enabled_at_by_username_utc_ms"],
+                             original["enabled_at_by_username_utc_ms"])
+            self.assertEqual(saved["enabled_at_by_asset_utc_ms"],
+                             {"pole":1000000,"line":2100000,"transformer":2100000})
+            self.assertEqual(saved["usernames"],original["usernames"])
+            self.assertTrue(path.with_suffix(".sqlite3").is_file())
+            self.assertEqual(len(watched),1)
+            unchanged=update_monitored_assets(
+                path,["transformer","pole","line"],now_ms=2200000,
+                validator=lambda *_:self.fail("Unexpected preflight"),
+            )
+            self.assertEqual(unchanged["status"],"UNCHANGED")
+
+    def test_asset_preflight_error_leaves_config_and_db_unchanged(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            path=Path(directory)/"monitor_config.json"
+            initial=json.dumps(dict(CONFIG))
+            path.write_text(initial,encoding="utf-8")
+            sqlite=path.with_suffix(".sqlite3")
+            sqlite.write_bytes(b"EXISTING-DATA")
+            def error(candidate,stamp):
+                self.assertEqual(set(candidate["assets"]),{"pole","line"})
+                raise RuntimeError("Line schema validation failed")
+            with self.assertRaisesRegex(RuntimeError,"Line schema validation failed"):
+                update_monitored_assets(
+                    path,["pole","line"],now_ms=2000000,validator=error
+                )
+            self.assertEqual(path.read_text(encoding="utf-8"),initial)
+            self.assertEqual(sqlite.read_bytes(),b"EXISTING-DATA")
+            self.assertEqual(len(list(Path(directory).glob("*backup_*.json"))),0)
+
+    def test_asset_cutoff_ignores_old_records_for_new_asset(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            state=State(Path(directory)/"state.db")
+            try:
+                conf=dict(CONFIG)
+                conf["assets"]=["pole","line"]
+                conf["enabled_at_by_asset_utc_ms"]={
+                    "pole":1000000,"line":2000000
+                }
+                record={
+                    "OBJECTID":800,"GLOBALID":"{LINE-800}",
+                    "created_user":"ninamenye9683",
+                    "last_edited_user":"ninamenye9683",
+                    "created_date":1500000,"last_edited_date":1500000,
+                }
+                with patch(
+                    "meter_photo_qa.surveyor_notifications.record_findings",
+                    return_value=(["Missing conductor attribute"],[]),
+                ):
+                    self.assertEqual(ready_alerts(
+                        [record],"line",[],{},conf,2400000,state,
+                    ),[])
+                    record["created_date"]=2100000
+                    record["last_edited_date"]=2100000
+                    self.assertEqual(len(ready_alerts(
+                        [record],"line",[],{},conf,2400000,state,
+                    )),1)
             finally:
                 state.close()
 

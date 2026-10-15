@@ -172,6 +172,40 @@ class InboxTests(unittest.TestCase):
         finally:
             saved.close()
 
+    def test_cli_set_assets_preserves_alert_history_and_user_clocks(self):
+        from meter_photo_qa.notification_inbox import main
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        conn=connect_inbox(self.config)
+        try:
+            alert_id=record_alert(conn,self.sample(),1400000)
+        finally:
+            conn.close()
+        output=io.StringIO()
+        with patch(
+            "meter_photo_qa.surveyor_notifications.collect",
+            return_value={
+                "pole":([],[],{},None,None),
+                "line":([],[],{},None,None),
+                "transformer":([],[],{},None,None),
+            }
+        ),redirect_stdout(output):
+            self.assertEqual(main([
+                "--config",str(self.config),"--set-assets",
+                "pole","line","transformer",
+            ]),0)
+        result=json.loads(output.getvalue())
+        self.assertEqual(set(result["assets"]),{"pole","line","transformer"})
+        stored=json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertEqual(stored["enabled_at_utc_ms"],1000000)
+        self.assertEqual(stored["usernames"],["julesmugae72"])
+        conn=connect_inbox(self.config)
+        try:
+            self.assertIsNotNone(get_alert(conn,alert_id))
+        finally:
+            conn.close()
+
     def test_distinct_issue_or_edit_creates_separate_inbox_entries(self):
         conn=connect_inbox(self.config)
         try:
