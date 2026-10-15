@@ -859,3 +859,52 @@ are stored in the local outputs folder, excluded from Git.
 REPORTAPP Surveyor Quality Alerts. Live ArcGIS Pro verification is
 still required, particularly the actual pole-height field
 and noninteractive ArcGIS portal session access.
+
+
+## Ask REPORTAPP: flexible surveyor QA reports and relative dates (Oct 15, 2026)
+
+ArcGIS Pro rejects reports if the language interpreter does not recognize
+the entire phrase. The formerly rejected screenshot command is supported:
+
+- Prepare report for julesmugae72 in Gicumbi the last 2 weeks
+
+As of Oct 15, 2026, this requests **julesmugae72** (currently Mugabe Jules),
+starting district **Gicumbi**, date range **Oct 2–15, 2026 inclusive**.
+The tool performs the same original three-asset QA and optional provisional
+cross-district LV geometry annex, not just a feeder-only report.
+
+Additional supported report timeframes:
+- last 14 days / last two weeks / past 3 weeks: rolling inclusive
+  calendar days, including today (last 2 weeks = 14 days).
+- yesterday / today: one local calendar date.
+- this week: Monday through today.
+- last week: previous Monday–Sunday (not rolling seven days).
+- this month: first of month through today.
+- last month: previous full calendar month.
+- last N months: same calendar day N months ago + 1 day through today;
+  capped to 36 months to avoid huge scans.
+- since 2026-10-01; on 2026-10-01; from 2026-10-01 to 2026-10-15;
+  between 01/10/2026 and 15/10/2026 (DD/MM/YYYY for slash dates).
+
+The **Ask REPORTAPP** dropdown automatically switches to
+**Generate consolidated Excel QA report (Lines, Transformers, Poles)**
+for recognized report requests, and to
+**Generate surveyor attribute audit Excel report** for queries about
+surveyors' field values. The QA from/to date controls update when a
+report phrase has an explicit or relative period. At execution the
+stated period takes precedence over date picker values. Without a time
+phrase, the manually chosen QA date controls remain authoritative.
+
+The interpreter recognizes verified portal usernames or unique mapped
+real names, and only official Rwanda district names. Unrecognized,
+ambiguous or unsupported time expressions result in a validation
+error, rather than silently producing the wrong date scope. All
+source FeatureServer reads are read-only.
+
+For notifications on a Windows PC, use
+**Configure Surveyor Quality Notifications (5-minute)**:
+select the exact portal accounts, choose the default
+**Windows desktop notifications (when signed in)** option, and enable
+**Activate monitoring now** when ready. A real Windows scheduled task
+and working ArcGIS authentication are required; no cloud
+notification is guaranteed while the computer is asleep or offline.
