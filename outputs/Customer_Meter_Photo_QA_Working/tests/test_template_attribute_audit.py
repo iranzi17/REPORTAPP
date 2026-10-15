@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 from meter_photo_qa.template_attribute_audit import (
     parse_surveyor_template_request,resolve_live_field,compile_template_filter,
 )
@@ -33,6 +34,38 @@ class SurveyorTemplateAuditTests(unittest.TestCase):
                 self.assertIn("Pole_Height > 12",sql)
                 self.assertEqual(columns,("Pole_Height",))
                 self.assertEqual(resolved[0]["alias"],"Pole Height")
+
+    def test_surveyor_height_audit_with_last_two_weeks_filters_actual_dates(self):
+        plan=parse_surveyor_template_request(
+            "Give me surveyors who recorded pole height greater than 12 "
+            "in Gicumbi the last 2 weeks",
+            today=date(2026,10,15),
+        )
+        self.assertEqual(plan.date_start.isoformat(),"2026-10-02")
+        self.assertEqual(plan.date_end.isoformat(),"2026-10-15")
+        fields=[
+            *self.fields,
+            {"name":"created_date","type":"esriFieldTypeDate"},
+            {"name":"last_edited_date","type":"esriFieldTypeDate"},
+        ]
+        sql,cols,criteria=compile_template_filter(plan,fields)
+        self.assertIn("Pole_Height > 12",sql)
+        self.assertIn("created_date >= TIMESTAMP '2026-10-02 00:00:00'",sql)
+        self.assertIn("last_edited_date < TIMESTAMP '2026-10-16 00:00:00'",sql)
+        self.assertEqual(plan.serialize()["date_expression"],
+                         "last 2 weeks, including today")
+        with self.assertRaisesRegex(ValueError,"both created_date and last_edited_date"):
+            compile_template_filter(plan,self.fields)
+
+    def test_missing_multiple_pole_fields_with_date_range(self):
+        plan=parse_surveyor_template_request(
+            "Show surveyors missing manufacturer and append cable "
+            "on LV poles in Gicumbi sector Muko last month",
+            today=date(2026,10,15),
+        )
+        self.assertEqual(plan.sector,"Muko")
+        self.assertEqual(plan.date_start,date(2026,9,1))
+        self.assertEqual(plan.date_end,date(2026,9,30))
 
     def test_multiple_mandatory_missing_fields_in_sector(self):
         plan=parse_surveyor_template_request(
