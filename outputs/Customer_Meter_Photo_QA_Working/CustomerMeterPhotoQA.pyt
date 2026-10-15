@@ -1199,6 +1199,8 @@ class AskReportApp:
         mode.filter.list = [
             "Preview query and count only (read-only)",
             "Create local filtered layer and add to map (read-only source)",
+            "Generate consolidated Excel QA report (Lines, Transformers, Poles)",
+            "Generate surveyor attribute audit Excel report",
         ]
         mode.value = mode.filter.list[0]
         report = arcpy.Parameter(
@@ -1268,6 +1270,7 @@ class AskReportApp:
         """Relative date phrases keep the visible QA date controls in sync."""
         request=params[0].valueAsText or ""
         if _smart_query.is_report_instruction(request):
+            params[1].value="Generate consolidated Excel QA report (Lines, Transformers, Poles)"
             try:
                 parsed=_smart_query.parse_lv_report_request(request)
             except ValueError:
@@ -1275,6 +1278,10 @@ class AskReportApp:
             if parsed["date_start"] is not None:
                 params[8].value=datetime.combine(parsed["date_start"], datetime.min.time())
                 params[9].value=datetime.combine(parsed["date_end"], datetime.min.time())
+        elif re.search(r"\\bsurveyors?\\b",request,re.I):
+            params[1].value="Generate surveyor attribute audit Excel report"
+        elif (params[1].valueAsText or "").startswith("Generate "):
+            params[1].value="Preview query and count only (read-only)"
 
     def updateMessages(self, params):
         if params[0].valueAsText:
