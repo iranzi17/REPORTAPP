@@ -1514,6 +1514,14 @@ class ConfigureQualityNotifications:
         else:
             assets=("line","transformer","pole")
         channel="smtp" if (parameters[3].valueAsText or "").startswith("Email") else "desktop"
+        if channel=="desktop" and bool(parameters[6].value):
+            import importlib.util
+            if importlib.util.find_spec("winotify") is None:
+                raise RuntimeError(
+                    "Windows desktop alert library winotify is not installed in "
+                    "the ArcGIS Pro Python environment. Install it first with: "
+                    "python -m pip install winotify. No task was registered."
+                )
         result=configure_quality_notifications(
             usernames=names,
             output_folder=parameters[1].valueAsText,
