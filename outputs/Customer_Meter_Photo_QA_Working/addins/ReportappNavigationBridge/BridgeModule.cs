@@ -178,13 +178,13 @@ namespace ReportappNavigationBridge
             }
         }
 
-        private static Task<string?> ZoomToFeatureAsync(NavigationRequest req)
+        private static async Task<string?> ZoomToFeatureAsync(NavigationRequest req)
         {
-            return QueuedTask.Run(() =>
+            var view = MapView.Active;
+            if (view == null)
+                return "Open an ArcGIS Pro map before clicking the alert.";
+            var issue = await QueuedTask.Run(() =>
             {
-                var view = MapView.Active;
-                if (view == null || view.Map == null)
-                    return (string?)"Open an ArcGIS Pro map before clicking the alert.";
                 string url = Service + "/" +
                     req.LayerId.ToString(CultureInfo.InvariantCulture);
                 var matches = view.Map.GetLayersAsFlattenedList()
@@ -231,17 +231,26 @@ namespace ReportappNavigationBridge
                 view.Map.ClearSelection();
                 using var exactSelection = layer.Select(filter, SelectionCombinationMethod.New);
                 layer.SetVisibility(true);
-                if (!view.ZoomToSelected(TimeSpan.FromSeconds(1)))
-                    return (string?)"ArcGIS Pro did not complete the zoom.";
-                if (req.Asset != "line" && view.Map.MapType == MapType.Map)
-                {
-                    var camera = view.Camera;
-                    camera.Scale = 1500;
-                    if (!view.ZoomTo(camera, TimeSpan.FromSeconds(0.3)))
-                        return (string?)"Unable to set the point inspection scale.";
-                }
                 return (string?)null;
             });
+            if (issue != null) return issue;
+            // Await navigation outside the MCT. Instant navigation avoids
+            // animation interruption by map refreshes on the live REG map.
+            if (!await view.ZoomToSelectedAsync(TimeSpan.Zero))
+                return "ArcGIS Pro navigation was interrupted; request retained.";
+            if (req.Asset != "line")
+            {
+                var camera = await QueuedTask.Run(() =>
+                {
+                    if (view.Map.MapType != MapType.Map) return null;
+                    var camera = view.Camera;
+                    camera.Scale = 1500;
+                    return camera;
+                });
+                if (camera != null && !await view.ZoomToAsync(camera, TimeSpan.Zero))
+                    return "ArcGIS Pro inspection-scale navigation was interrupted.";
+            }
+            return null;
         }
 
         private void Finish(string source, string suffix, string explanation)

@@ -3,9 +3,12 @@
 Targets **ArcGIS Pro 3.4 / .NET 8 / Windows x64**. Release compilation against
 Esri.ArcGISPro.Extensions30 **3.4.0.55405** succeeded with zero warnings/errors
 on 2026-10-15. Package: `bin/Release/net8.0-windows/ReportappNavigationBridge.esriAddInX`.
-**Installation and live navigation remain unverified.** Follow-up inspection confirmed
+Follow-up inspection confirmed
 ArcGIS Pro **3.4.0.55405** is installed and running with MyProject12 open. The initial
 absence report was incorrect: the mapping DLL lives under bin/Extensions/Mapping.
+The add-in and URI handler are now installed. Live tests in MyProject12 succeeded
+for Transformer 1, LV Line 1 and LV Pole 1. The pole's Attributes pane confirms
+OBJECTID 1 / LV Pole / Wooden at 1:1500. See VALIDATION.md for remaining checks.
 
 ## Build
 
@@ -46,6 +49,7 @@ Use this computer's actual paths. Registration is per Windows user, needs no
 administrator and must be repeated after moving Python or REPORTAPP. The monitor's
 Python environment must still have winotify. No scheduler/configuration/database,
 surveyor selection, activation time, report or event log is replaced by these scripts.
+On this workstation, winotify 1.1.0 was installed for the current user of Pro Python.
 
 ## Behavior
 
@@ -96,8 +100,11 @@ no active map and definition-query exclusions require user correction in Pro.
 5. Obtain real LV Line and Distribution Transformer OBJECTIDs from an authenticated
    map or existing inbox, verifying the exact source layer first. Test
    `reportapp://zoom/line/<actual-id>` and `reportapp://zoom/transformer/<actual-id>`.
-   Do not substitute invented IDs. Unauthenticated REG access returned **499 Token
-   Required** here; neither these IDs nor the supplied pole could be verified.
+   Do not substitute invented IDs. Read-only queries using the installed Pro Python
+   verified valid geometry for LV Line **1**, Distribution Transformer **1**, and
+   LV Pole **1** in this map's source. Pole **4422434** was not returned by a direct
+   source query in the current access/version context; the layer has no definition
+   query. Its failed test request was retained as `.json.missing-feature` for diagnosis.
 6. Close Pro, enqueue a URL, confirm the JSON persists, then reopen with a map
    within 24 hours. No extra Pro instance should be launched by a click.
 7. Query an ID and confirm it has no record before using it for the missing-feature
