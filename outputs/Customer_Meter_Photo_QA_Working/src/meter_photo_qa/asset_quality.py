@@ -96,6 +96,9 @@ def has_explicit_mv_hv_note(note):
             continue
         if re.search(r"\b(?:not|no|without|never)\b.{0,16}$",previous,re.I):
             continue
+        following=text[found.end():found.end()+28]
+        if re.match(r"\s+(?:is\s+)?(?:not|never|absent|missing)\b",following,re.I):
+            continue
         return True
     return False
 
@@ -245,6 +248,8 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
         if height_field:
             height_status,height_issue=assess_pole_height(attributes.get(height_field),note)
             values["height_status"]=height_status
+            if height_status=="INVALID_NUMERIC":
+                issues.append("Pole height has an invalid nonnumeric value")
             if height_issue:
                 issues.append(height_issue)
         else:
