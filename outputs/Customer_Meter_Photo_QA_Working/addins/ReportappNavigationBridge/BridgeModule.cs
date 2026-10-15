@@ -116,13 +116,13 @@ namespace ReportappNavigationBridge
                 || req.Origin != "REPORTAPP_NOTIFICATION"
                 || !string.Equals(req.ServiceUrl.TrimEnd('/'), Service,
                                   StringComparison.OrdinalIgnoreCase)
-                || (req.Asset, req.LayerId) switch
+                || ((req.Asset, req.LayerId) switch
                 {
                     ("pole",12) => false,
                     ("line",10) => false,
                     ("transformer",7) => false,
                     _ => true
-                })
+                }))
             {
                 throw new InvalidDataException("Invalid REPORTAPP zoom request.");
             }
