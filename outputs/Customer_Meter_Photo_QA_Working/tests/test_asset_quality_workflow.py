@@ -23,7 +23,7 @@ class FakeLayer:
                  "Phase_Normal", "Transformer_Protection_Switch",
                  "Transformer_mounting_support", "Number_of_Low_Voltage_feeders",
                  "Manufacturer", "Serial_No", "Rated_kVA", "Notes",
-                 "Append_Cable",
+                 "Append_Cable", "Pole_Height",
                  "District", "Sector", "Cell"]
         self.properties = SimpleNamespace(
             fields=[{"name": x, "alias": x, "type": "esriFieldTypeString"} for x in names],
@@ -65,7 +65,7 @@ def pole(gid, oid, note="", manufacturer=None, atype=1,
         "ASSETTYPE": atype, "created_user": "pole.user",
         "created_date": 1789420000000, "last_edited_date": 1789420000000,
         "Manufacturer": manufacturer, "Notes": note,
-        "Append_Cable": append_cable,
+        "Append_Cable": append_cable, "Pole_Height": 10,
         "District": "Rulindo", "Sector": "Buyoga", "Cell": "Munyana",
     }
 
