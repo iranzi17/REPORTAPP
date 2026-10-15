@@ -48,9 +48,7 @@ def _powershell(config_path,python_path,src_path):
 # Task runs only when this Windows user is logged in (desktop notification visible).
 $ErrorActionPreference = 'Stop'
 $Action = New-ScheduledTaskAction -Execute {_ps_single(str(pyw))} -Argument {_ps_single('-m meter_photo_qa.surveyor_notifications --config "'+str(config_path)+'"')} -WorkingDirectory {_ps_single(str(src_path))}
-$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
-$Trigger.Repetition.Interval = 'PT1M'
-$Trigger.Repetition.Duration = 'P3650D'
+$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 4)
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" -LogonType Interactive -RunLevel LeastPrivilege
 Register-ScheduledTask -TaskName {_ps_single(TASK_NAME)} -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Force | Out-Null
@@ -64,6 +62,7 @@ def configure_monitoring(
     assets=("line","transformer","pole"),
     python_path=None,src_path=None,
     now_ms=None,
+    replace_existing=False,
 ):
     if channel not in ("desktop","smtp"):
         raise ValueError("Channel must be desktop or smtp.")
@@ -80,7 +79,7 @@ def configure_monitoring(
     dest.mkdir(parents=True,exist_ok=True)
     config=dest/"monitor_config.json"
     install=dest/"Install_One_Minute_Monitor.ps1"
-    if config.exists():
+    if config.exists() and not replace_existing:
         raise FileExistsError(
             "Monitoring config already exists. Back up current notification "
             "state and stop the scheduled task before reconfiguring monitored accounts."
