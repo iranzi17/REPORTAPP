@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 import sys
 import uuid
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 SCHEME="reportapp"
 REGISTRATION_KEY=r"Software\Classes\reportapp"
@@ -37,6 +37,8 @@ def zoom_uri(asset,objectid):
     asset=str(asset).strip().casefold()
     if asset not in ASSET_LAYER_IDS:
         raise ValueError("Unsupported REG asset type.")
+    if isinstance(objectid,bool) or not re.fullmatch(r"[0-9]{1,19}",str(objectid)):
+        raise ValueError("Invalid positive source OBJECTID.")
     try:
         oid=int(objectid)
     except (ValueError,TypeError,OverflowError) as exc:

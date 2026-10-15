@@ -53,5 +53,38 @@ class NavigationTests(unittest.TestCase):
                 raise FileNotFoundError
         self.assertFalse(is_registered(NoRegistry()))
 
+    def test_no_fractional_or_boolean_objectids(self):
+        for value in (True,False,1.2,"1.0","1;calc",None):
+            with self.subTest(value=value),self.assertRaises(ValueError):
+                zoom_uri("pole",value)
+
+    def test_click_cli_only_queues_validated_request(self):
+        from meter_photo_qa.alert_navigation import main
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("meter_photo_qa.alert_navigation.queue_folder",return_value=Path(folder)), \
+             patch("builtins.print"):
+            self.assertEqual(main(["--uri","reportapp://zoom/pole/4422434"]),0)
+            self.assertEqual(len(list(Path(folder).glob("*.json"))),1)
+            with self.assertRaises(ValueError):
+                main(["--uri","reportapp://zoom/pole/1?command=calc"])
+            self.assertEqual(len(list(Path(folder).glob("*.json"))),1)
+
+    def test_toast_body_and_action_use_identical_validated_uri(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from meter_photo_qa.surveyor_notifications import deliver
+        popup=Mock()
+        notification=Mock(return_value=popup)
+        alert=dict(asset="pole",objectid=4422434,username="tester",event_type="created",
+                   globalid="duplicate-globalid",issues=["missing"],created_user="tester",
+                   last_edited_user="tester")
+        with patch.dict("sys.modules",{"winotify":SimpleNamespace(Notification=notification)}), \
+             patch("meter_photo_qa.alert_navigation.is_registered",return_value=True):
+            deliver(alert,{"channel":"desktop"})
+        self.assertEqual(notification.call_args.kwargs["launch"],"reportapp://zoom/pole/4422434")
+        popup.add_actions.assert_called_once_with(label="Zoom in ArcGIS Pro",
+                                                 launch="reportapp://zoom/pole/4422434")
+        popup.show.assert_called_once()
+
 if __name__=="__main__":
     unittest.main()

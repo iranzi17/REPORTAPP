@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 *.pyo
+**/addins/**/bin/
+**/addins/**/obj/
 *.log
 
 /outputs/Customer_Meter_Photo_QA_Clean/outputs/

@@ -1,5 +1,5 @@
 // REPORTAPP ArcGIS Pro SDK add-in module (ArcGIS Pro 3.4 / .NET 8).
-// Add to a matching ArcGIS Pro SDK Module Add-in project. See README.md.
+// Build with Build.ps1; pinned to the ArcGIS Pro 3.4 SDK.
 // Reads ONLY the current Windows user's validated navigation request files.
 // Never calls editing APIs or writes to the REG FeatureServer.
 using System;
@@ -12,6 +12,9 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using ArcGIS.Core.Data;
+using ArcGIS.Core.CIM;
+using System.Data.Common;
+using System.Threading;
 using ArcGIS.Desktop.Framework.Contracts;
 using ArcGIS.Desktop.Framework.Threading.Tasks;
 using ArcGIS.Desktop.Mapping;
@@ -20,6 +23,7 @@ namespace ReportappNavigationBridge
 {
     internal sealed class NavigationRequest
     {
+        [JsonPropertyName("request_id")] public string RequestId { get; set; } = "";
         [JsonPropertyName("version")] public int Version { get; set; }
         [JsonPropertyName("asset")] public string Asset { get; set; } = "";
         [JsonPropertyName("objectid")] public long ObjectId { get; set; }
@@ -35,12 +39,20 @@ namespace ReportappNavigationBridge
             "https://gisweb.reg.rw/server/rest/services/REGUN_Service__Versio2/FeatureServer";
         private DispatcherTimer? _timer;
         private bool _busy;
+        private Mutex? _owner;
+        private readonly Dictionary<string, DateTime> _retry = new();
         private readonly string _incoming = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "REPORTAPP", "Navigation", "Requests");
 
         protected override bool Initialize()
         {
+            // Only one Pro process consumes this user's queue. OS releases on crash.
+            _owner = new Mutex(false, "Local\\REPORTAPP.Navigation.Bridge");
+            bool acquired;
+            try { acquired = _owner.WaitOne(0); }
+            catch (AbandonedMutexException) { acquired = true; }
+            if (!acquired) { _owner.Dispose(); _owner = null; return true; }
             Directory.CreateDirectory(_incoming);
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _timer.Tick += OnTick;
@@ -56,6 +68,8 @@ namespace ReportappNavigationBridge
                 _timer.Tick -= OnTick;
                 _timer = null;
             }
+            _owner?.ReleaseMutex();
+            _owner?.Dispose();
             base.Uninitialize();
         }
 
@@ -67,6 +81,7 @@ namespace ReportappNavigationBridge
             {
                 // Process at most one per tick; do not monopolize map UI.
                 var file = Directory.EnumerateFiles(_incoming, "*.json")
+                                    .Where(f => !_retry.TryGetValue(f, out var until) || until <= DateTime.UtcNow)
                                     .OrderBy(File.GetCreationTimeUtc)
                                     .FirstOrDefault();
                 if (file == null) return;
@@ -74,8 +89,11 @@ namespace ReportappNavigationBridge
                 try
                 {
                     request = JsonSerializer.Deserialize<NavigationRequest>(
-                        File.ReadAllText(file));
+                        (new FileInfo(file).Length <= 8192 ? File.ReadAllText(file) : throw new InvalidDataException("Oversized request")));
                     Validate(request);
+                    if (Path.GetFileNameWithoutExtension(file) != request!.RequestId ||
+                        File.Exists(file + ".done"))
+                        throw new InvalidDataException("Duplicate or mismatched request identity.");
                 }
                 catch (Exception ex)
                 {
@@ -83,13 +101,19 @@ namespace ReportappNavigationBridge
                     return;
                 }
 
-                string? issue = await ZoomToFeatureAsync(request!);
+                string? issue;
+                try { issue = await ZoomToFeatureAsync(request!); }
+                catch (Exception ex) { issue = "REG navigation failed: " + ex.Message; }
                 if (issue == null)
                 {
-                    File.Delete(file);
+                    ArcGIS.Desktop.Framework.FrameworkApplication.Current.MainWindow.Activate();
+                    Finish(file, ".done", "Selected " + request!.Asset + " OBJECTID " + request.ObjectId);
+                    _retry.Remove(file);
                 }
                 else
                 {
+                    Log(Path.GetFileName(file) + ": " + issue);
+                    _retry[file] = DateTime.UtcNow.AddMinutes(1);
                     // Don't delete the clicked request if the map isn't ready,
                     // the service is inaccessible or the feature is filtered.
                     // The request remains for another attempt.
@@ -111,7 +135,7 @@ namespace ReportappNavigationBridge
 
         private static void Validate(NavigationRequest? req)
         {
-            if (req == null || req.Version != 1
+            if (req == null || !Guid.TryParseExact(req.RequestId, "N", out _) || req.Version != 1
                 || req.ObjectId <= 0
                 || req.Origin != "REPORTAPP_NOTIFICATION"
                 || !string.Equals(req.ServiceUrl.TrimEnd('/'), Service,
@@ -135,12 +159,18 @@ namespace ReportappNavigationBridge
         {
             try
             {
-                string path = layer.GetPath()?.ToString() ?? "";
-                // Do NOT match by display-name only: Electric Device, Electric
-                // Line and Structure Junction can exist in other databases.
-                return string.Equals(
-                    path.TrimEnd('/'), exactUrl.TrimEnd('/'),
-                    StringComparison.OrdinalIgnoreCase);
+                // CIM connection verifies service, numeric dataset and version.
+                if (layer.GetDataConnection() is not CIMStandardDataConnection dc)
+                    return false;
+                var connection = new DbConnectionStringBuilder { ConnectionString = dc.WorkspaceConnectionString };
+                if (connection.TryGetValue("VERSION", out var version) &&
+                    !string.Equals(Convert.ToString(version), "sde.DEFAULT", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (!connection.TryGetValue("URL", out var source)) return false;
+                var root = Convert.ToString(source)?.TrimEnd('/') ?? "";
+                var candidate = root.EndsWith("/" + dc.Dataset, StringComparison.OrdinalIgnoreCase)
+                    ? root : root + "/" + dc.Dataset;
+                return string.Equals(candidate, exactUrl, StringComparison.OrdinalIgnoreCase);
             }
             catch
             {
@@ -173,6 +203,18 @@ namespace ReportappNavigationBridge
                     if (layer == null)
                         return (string?)"Unable to add REG source layer to the active map.";
                 }
+                using (var featureClass = layer.GetFeatureClass())
+                using (var datastore = featureClass.GetDatastore())
+                {
+                    if (datastore is not Geodatabase database ||
+                        database.GetConnector() is not ServiceConnectionProperties properties ||
+                        !string.Equals(properties.URL.ToString().TrimEnd('/'), Service,
+                                       StringComparison.OrdinalIgnoreCase))
+                        return (string?)"Cannot verify the REG feature service connection.";
+                    if (!string.IsNullOrEmpty(properties.Version) &&
+                        !string.Equals(properties.Version, "sde.DEFAULT", StringComparison.OrdinalIgnoreCase))
+                        return (string?)"Switch the REG layer to sde.DEFAULT and retry.";
+                }
                 var filter = new QueryFilter
                 {
                     ObjectIDs = new List<long> { req.ObjectId }
@@ -180,13 +222,24 @@ namespace ReportappNavigationBridge
                 // Select only the requested record and zoom to selection.
                 // MapView.ZoomTo(layer, objectid) is NOT an ArcGIS Pro 3.4
                 // API overload; ZoomToSelected() is supported by SDK 3.4.
-                view.Map.ClearSelection();
                 using var selected = layer.Select(
                     filter, SelectionCombinationMethod.New);
                 if (selected.GetCount() != 1)
                     return (string?)"OBJECTID not selectable (possibly filtered or deleted).";
+                // ZoomToSelected considers every map selection. Clear unrelated
+                // selections only after the requested record is confirmed.
+                view.Map.ClearSelection();
+                using var exactSelection = layer.Select(filter, SelectionCombinationMethod.New);
+                layer.SetVisibility(true);
                 if (!view.ZoomToSelected(TimeSpan.FromSeconds(1)))
                     return (string?)"ArcGIS Pro did not complete the zoom.";
+                if (req.Asset != "line" && view.Map.MapType == MapType.Map)
+                {
+                    var camera = view.Camera;
+                    camera.Scale = 1500;
+                    if (!view.ZoomTo(camera, TimeSpan.FromSeconds(0.3)))
+                        return (string?)"Unable to set the point inspection scale.";
+                }
                 return (string?)null;
             });
         }

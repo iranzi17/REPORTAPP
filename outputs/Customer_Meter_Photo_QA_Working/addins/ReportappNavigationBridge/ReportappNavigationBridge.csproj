@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ReportappNavigationBridge</AssemblyName>
+    <RootNamespace>ReportappNavigationBridge</RootNamespace>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Esri's legacy CodeTaskFactory packaging requires full MSBuild. Use
+         the same Config.daml + Install layout with portable ZipDirectory. -->
+    <PackageReference Include="Esri.ArcGISPro.Extensions30" Version="3.4.0.55405" ExcludeAssets="build;buildTransitive;runtime" />
+  </ItemGroup>
+  <Target Name="PackageReportapp" AfterTargets="Build">
+    <MakeDir Directories="$(IntermediateOutputPath)package/Install" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(IntermediateOutputPath)package/Install" />
+    <Copy SourceFiles="Config.daml" DestinationFolder="$(IntermediateOutputPath)package" />
+    <ZipDirectory SourceDirectory="$(IntermediateOutputPath)package" DestinationFile="$(TargetDir)ReportappNavigationBridge.esriAddInX" Overwrite="true" />
+  </Target>
+</Project>

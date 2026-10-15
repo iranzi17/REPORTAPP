@@ -556,6 +556,27 @@ def launch_gui(config_path):
     ttk.Button(controls,text="Manage Surveyors",command=manage_surveyors).pack(
         side="left",padx=(8,0)
     )
+    def zoom_selected():
+        from .alert_navigation import enqueue, zoom_uri
+        if selected_id[0] is None:
+            return
+        conn,_=open_db()
+        try:
+            rec=get_alert(conn,selected_id[0])
+        finally:
+            conn.close()
+        if rec is None:
+            return
+        try:
+            enqueue(zoom_uri(rec["asset"],rec["objectid"]))
+            messagebox.showinfo("REPORTAPP navigation",
+                "Navigation queued. Open ArcGIS Pro with the REPORTAPP add-in and a map. "
+                "If navigation fails, inspect Navigation/bridge-errors.log under LOCALAPPDATA.",
+                parent=root)
+        except Exception as exc:
+            messagebox.showerror("REPORTAPP navigation",str(exc),parent=root)
+
+    ttk.Button(buttons,text="Zoom in ArcGIS Pro",command=zoom_selected).pack(side="left",padx=9)
     ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
     ttk.Button(buttons,text="Mark Reviewed",command=lambda:update("REVIEWED")).pack(side="left",padx=9)
     ttk.Button(buttons,text="Reopen",command=lambda:update("OPEN")).pack(side="left",padx=9)
