@@ -216,12 +216,14 @@ class AssetQualityTests(unittest.TestCase):
                 self.assertEqual(assess_pole_height(13.2,note)[0],
                                  "MV_HV_NOTES_DOCUMENTED")
         for note in ("", "No nameplate", "not for MV lines",
-                     "No HV tower is installed", "LV only", "MV unknown"):
+                     "No HV tower is installed", "HV tower not installed",
+                     "LV only", "MV unknown"):
             with self.subTest(note=note):
                 self.assertEqual(assess_pole_height(13,note)[0],
                                  "MV_HV_NOTES_REQUIRED")
         self.assertEqual(assess_pole_height(12,"")[0],"WITHIN_THRESHOLD")
         self.assertEqual(assess_pole_height(None,"")[0],"UNRECORDED")
+        self.assertEqual(assess_pole_height("wrong","")[0],"INVALID_NUMERIC")
 
     def test_zero_phase_code_is_valid_when_domain_label_one(self):
         self.assertFalse(missing_value(0, {0:"1 phase", 1:"3 phases"}))
