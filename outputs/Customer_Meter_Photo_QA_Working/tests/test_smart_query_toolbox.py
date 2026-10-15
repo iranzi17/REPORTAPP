@@ -58,6 +58,65 @@ class SmartToolUiTests(unittest.TestCase):
             tool.updateMessages(params)
             self.assertIn("not supported",params[0].error)
 
+    def test_screenshot_report_updates_action_dates_and_executes_combined(self):
+        from datetime import date, datetime, timedelta
+        with patch.dict(sys.modules,{"arcpy":self.fake}):
+            app=self.toolbox()
+            tool=app["AskReportApp"]()
+            params=tool.getParameterInfo()
+            self.assertIn("Generate consolidated Excel QA report (Lines, Transformers, Poles)",
+                          params[1].filter.list)
+            params[0].value="prepare report for julesmugae72 in Gicumbi the last 2 weeks"
+            params[5].value="C:/ReportDestination"
+            tool.updateParameters(params)
+            self.assertEqual(params[1].valueAsText,
+                             "Generate consolidated Excel QA report (Lines, Transformers, Poles)")
+            expected_start=date.today()-timedelta(days=13)
+            self.assertEqual(params[8].value.date(),expected_start)
+            self.assertEqual(params[9].value.date(),date.today())
+            tool.updateMessages(params)
+            self.assertIsNone(params[0].error)
+            observed={}
+            original=tool.execute.__globals__["run_combined_qa_report"]
+            def combined(**kwargs):
+                observed.update(kwargs)
+                return {
+                    "status":"COMPLETE","district":"Gicumbi",
+                    "output_xlsx":"C:/ReportDestination/Combined/Report.xlsx",
+                    "components_folder":"C:/ReportDestination/Combined/Components",
+                    "start_date":str(expected_start),"end_date":str(date.today()),
+                    "geometry":{"status":"COMPLETE"},
+                }
+            tool.execute.__globals__["run_combined_qa_report"]=combined
+            try:
+                # Manual date picker modifications cannot silently override
+                # explicitly requested periods written in the command.
+                params[8].value=datetime(2026,1,1)
+                tool.execute(params,None)
+            finally:
+                tool.execute.__globals__["run_combined_qa_report"]=original
+            self.assertEqual(observed["usernames"],["julesmugae72"])
+            self.assertEqual(observed["district"],"Gicumbi")
+            self.assertEqual(observed["start_date"],expected_start)
+            self.assertEqual(observed["end_date"],date.today())
+            self.assertTrue(any("Requested period" in m for m in self.output))
+            params[0].value="show LV poles in Gicumbi with missing manufacturer"
+            tool.updateParameters(params)
+            self.assertEqual(params[1].valueAsText,
+                             "Preview query and count only (read-only)")
+
+    def test_surveyor_templates_auto_choose_excel_action(self):
+        with patch.dict(sys.modules,{"arcpy":self.fake}):
+            app=self.toolbox()
+            tool=app["AskReportApp"]()
+            params=tool.getParameterInfo()
+            params[0].value="Show surveyors missing manufacturer on LV poles in Gicumbi"
+            tool.updateParameters(params)
+            self.assertEqual(params[1].valueAsText,
+                             "Generate surveyor attribute audit Excel report")
+            tool.updateMessages(params)
+            self.assertIsNone(params[0].error)
+
     def test_execute_passes_query_and_local_copy_only_when_selected(self):
         with patch.dict(sys.modules,{"arcpy":self.fake}):
             app=self.toolbox()
