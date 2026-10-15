@@ -448,7 +448,7 @@ def launch_gui(config_path):
                     messagebox.showinfo("Manage Surveyors","Select surveyors to add.",parent=dialog)
                     return
             else:
-                conf=reload_lists() if False else json.loads(config.read_text(encoding="utf-8"))
+                conf=json.loads(config.read_text(encoding="utf-8"))
                 choices=[conf["usernames"][i] for i in monitored.curselection()]
                 if not choices:
                     messagebox.showinfo("Manage Surveyors","Select surveyors to remove.",parent=dialog)
