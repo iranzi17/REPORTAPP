@@ -46,6 +46,15 @@ def event_timestamp(attrs):
     return max((v for v in values if v is not None),default=None)
 
 
+def submission_actor(attrs):
+    """Latest create/edit actor; do not attribute another user's edit to creator."""
+    created=timestamp_ms(attrs.get("created_date"))
+    edited=timestamp_ms(attrs.get("last_edited_date"))
+    if edited is not None and (created is None or edited>created):
+        return str(attrs.get("last_edited_user") or "").strip(),"EDIT"
+    return str(attrs.get("created_user") or "").strip(),"CREATE"
+
+
 def record_findings(asset, attrs, fields,domains, line_rules=None,phase_expectations=None):
     """Existing QA gaps only, including pole height and Appendix Cable.
 
@@ -90,8 +99,8 @@ class State:
         self.db.commit()
     def close(self):
         self.db.close()
-    def should_alert(self,asset,oid,gid,issues):
-        payload=json.dumps(sorted(set(issues)),sort_keys=True,ensure_ascii=False)
+    def should_alert(self,asset,oid,gid,issues,actor):
+        payload=json.dumps({"issues":sorted(set(issues)),"actor":actor},sort_keys=True,ensure_ascii=False)
         digest=hashlib.sha256(payload.encode("utf-8")).hexdigest()
         row=self.db.execute(
             "SELECT issue_digest FROM sent WHERE asset=? AND objectid=? AND globalid=?",
@@ -122,7 +131,7 @@ def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=Non
     watch={str(u).casefold() for u in config["usernames"]}
     for a in records:
         oid=a.get("OBJECTID");gid=a.get("GLOBALID")
-        username=str(a.get("created_user") or "").strip()
+        username,event_type=submission_actor(a)
         submitted=event_timestamp(a)
         if username.casefold() not in watch or oid is None or not gid or submitted is None:
             continue
@@ -139,11 +148,13 @@ def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=Non
         if not issues:
             state.clear_fixed(asset,oid,gid)
             continue
-        digest=state.should_alert(asset,oid,gid,issues)
+        digest=state.should_alert(asset,oid,gid,issues,username)
         if digest:
             output.append({
                 "asset":asset,"objectid":int(oid),"globalid":str(gid),
-                "username":username,"last_edited_user":str(a.get("last_edited_user") or ""),
+                "username":username,"event_type":event_type,
+                "created_user":str(a.get("created_user") or ""),
+                "last_edited_user":str(a.get("last_edited_user") or ""),
                 "event_time_utc_ms":submitted,"issues":issues,"issue_digest":digest,
             })
     return output
@@ -222,7 +233,7 @@ def collect(config,now_ms=None,gis=None,source_url=None):
         groups=",".join(map(str,spec_group))
         where=(
             f"ASSETGROUP IN ({groups}) AND "
-            f"created_user IN ({quoted}) AND "
+            f"(created_user IN ({quoted}) OR last_edited_user IN ({quoted})) AND "
             "((created_date >= TIMESTAMP '"+start_day+"') OR "
             "(last_edited_date >= TIMESTAMP '"+start_day+"'))"
         )
@@ -243,11 +254,12 @@ def collect(config,now_ms=None,gis=None,source_url=None):
 
 def _alert_text(alert):
     return (
-        f"{alert['asset'].upper()} | {alert['username']} | "
+        f"{alert['asset'].upper()} | {alert['username']} ({alert['event_type']}) | "
         f"ObjectID {alert['objectid']}\n"
         f"GlobalID {alert['globalid']}\n"
         +"Missing/invalid: "+"; ".join(alert["issues"])
-        +"\nSource created_user is an account; verify edit ownership."
+        +f"\nCreated by: {alert['created_user']} | Last edited by: {alert['last_edited_user']}"
+        +"\nLogin attribution may require historical account transfer review."
     )
 
 
