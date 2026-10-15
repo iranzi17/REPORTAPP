@@ -10,7 +10,7 @@ from meter_photo_qa.surveyor_notifications import (
     State,ready_alerts,run_once,event_timestamp,preflight,_monitor_gis,
 )
 from meter_photo_qa.notification_setup import (
-    configure_monitoring,chosen_usernames,_powershell,
+    configure_monitoring,chosen_usernames,_powershell,_standalone_python,
 )
 
 
@@ -207,6 +207,26 @@ class NotificationTests(unittest.TestCase):
                 sender=lambda alert,config:sent.append(alert)
             )["alerts_sent"],1)
             self.assertEqual(len(sent),2)
+
+    def test_embedded_arcgispro_process_is_not_scheduled_as_python(self):
+        import sys
+        with tempfile.TemporaryDirectory() as folder:
+            prog=Path(folder)/"ArcGISPro.exe"
+            prog.touch()
+            env=Path(folder)/"arcgispro-py3"
+            env.mkdir()
+            standalone=env/"python.exe"
+            standalone.touch()
+            with patch.object(sys,"prefix",str(env)), \
+                 patch.object(sys,"exec_prefix",str(env)):
+                self.assertEqual(_standalone_python(prog),standalone)
+                script=_powershell("C:/test/config.json",prog,folder)
+                self.assertIn(str(standalone),script)
+                self.assertNotIn(str(prog),script)
+            with patch.object(sys,"prefix",str(Path(folder)/"missing")), \
+                 patch.object(sys,"exec_prefix",str(Path(folder)/"missing")):
+                with self.assertRaisesRegex(RuntimeError,"standalone Python"):
+                    _standalone_python(prog)
 
     def test_setup_selects_explicit_accounts_and_does_not_start_task(self):
         with tempfile.TemporaryDirectory() as folder:

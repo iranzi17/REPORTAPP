@@ -38,8 +38,24 @@ def chosen_usernames(raw):
     return accounts
 
 
+def _standalone_python(python_path):
+    """Avoid scheduling ArcGISPro.exe from its embedded Python session."""
+    supplied=Path(python_path or sys.executable).expanduser().resolve()
+    if supplied.name.casefold() in ("python.exe", "pythonw.exe") and supplied.is_file():
+        return supplied
+    for prefix in (sys.prefix, sys.exec_prefix):
+        candidate=Path(prefix).expanduser().resolve()/"python.exe"
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError(
+        f"Cannot identify a standalone Python interpreter from {supplied}. "
+        "Run setup from an ArcGIS Pro Python environment containing python.exe; "
+        "do not register ArcGISPro.exe as a scheduled Python task."
+    )
+
+
 def _powershell(config_path,python_path,src_path):
-    executable=Path(python_path)
+    executable=_standalone_python(python_path)
     pyw=executable.with_name("pythonw.exe")
     if not pyw.exists():
         pyw=executable
@@ -101,12 +117,13 @@ def configure_monitoring(
         "source_data_edits":False,
     }
     source=Path(src_path or Path(__file__).resolve().parents[1]).resolve()
-    py=Path(python_path or sys.executable).resolve()
+    py=_standalone_python(python_path or sys.executable)
     config.write_text(json.dumps(data,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
     install.write_text(_powershell(config,py,source),encoding="utf-8-sig")
     return {
         "configuration":str(config),
         "installation_script":str(install),
+        "python_executable":str(py),
         "watching_usernames":selected,
         "selected_asset_classes":list(assets),
         "notification_channel":channel,
