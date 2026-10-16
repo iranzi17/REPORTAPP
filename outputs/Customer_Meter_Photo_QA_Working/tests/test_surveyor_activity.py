@@ -191,6 +191,8 @@ class CleanSurveyorActivityTests(unittest.TestCase):
             logs=list_recent_activity(state.db)
             self.assertEqual(len(logs),1)
             self.assertEqual(logs[0]["objectid"],12)
+            from meter_photo_qa.notification_inbox import ensure_schema
+            ensure_schema(state.db)
             self.assertEqual(state.db.execute("SELECT COUNT(*) FROM alert_inbox").fetchone()[0],0)
         finally:
             state.close()
