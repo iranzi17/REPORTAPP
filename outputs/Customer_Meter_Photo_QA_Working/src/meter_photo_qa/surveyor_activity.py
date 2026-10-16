@@ -102,11 +102,11 @@ def clean_activity_candidates(snapshots, config, now_ms, db):
                 SELECT 1 FROM clean_surveyor_activity
                 WHERE asset=? AND objectid=? AND globalid=? AND source_event_ms=?
             """,key).fetchone()
-            pending=db.execute("""
+            pending_exists=db.execute("""
                 SELECT 1 FROM pending_clean_digest
                 WHERE asset=? AND objectid=? AND globalid=? AND event_time_utc_ms=?
             """,key).fetchone()
-            if already or pending:
+            if already or pending_exists:
                 continue
             issues,unverified=record_findings(
                 asset,attrs,fields,domains,rules,expectations
