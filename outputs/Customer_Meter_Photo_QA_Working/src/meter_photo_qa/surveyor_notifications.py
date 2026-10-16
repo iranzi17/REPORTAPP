@@ -446,6 +446,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
         )
         sent=0
         failed=0
+        historical_sent=0
         for item in deliveries:
             # Persist first so any transient popup cannot be the only record.
             inbox_id=record_alert(state.db,item,now_ms)
@@ -475,6 +476,8 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                     "issues":item["issues"],
                 },ensure_ascii=False)+"\n")
             sent+=1
+            if is_historical(item["event_time_utc_ms"],now_ms):
+                historical_sent+=1
         activity_result={}
         if config.get("activity_notifications_enabled"):
             from .surveyor_activity import process_activity
@@ -490,10 +493,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                 "records_scanned":scanned,
                 "channel":config.get("channel","desktop"),
                 "historical_alerts_queued":deferred_count,
-                "historical_alerts_released_this_scan":sum(
-                    1 for item in deliveries
-                    if is_historical(item["event_time_utc_ms"],now_ms)
-                ),
+                "historical_alerts_released_this_scan":historical_sent,
                 **activity_result}
     finally:
         state.close()

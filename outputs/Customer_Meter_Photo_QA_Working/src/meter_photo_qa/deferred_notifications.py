@@ -195,7 +195,7 @@ def change_site_mode(config_path,mode,*,schedule=None):
         if validate_times(info["start"])>=validate_times(info["end"]):
             raise ValueError("Site end must be after start.")
         days=info["weekdays"]
-        if not isinstance(days,list) or any(type(d) is not int or d not in range(7) for d in days):
+        if not isinstance(days,list) or not days or any(type(d) is not int or d not in range(7) for d in days):
             raise ValueError("Invalid site weekdays.")
     if conf==changed:
         return {"status":"UNCHANGED","site_mode":mode}

@@ -808,7 +808,16 @@ def launch_gui(config_path):
 
     def configure_site_presence():
         """Set manual on-site/off-site mode or a confirmed Rwanda work schedule."""
-        from .deferred_notifications import change_site_mode
+        try:
+            from .deferred_notifications import change_site_mode
+        except ImportError:
+            messagebox.showinfo(
+                "Maintenance upgrade required",
+                "The site-hours watcher is not installed yet. "
+                "Click Install Approved Update first, then reopen this Inbox.",
+                parent=root,
+            )
+            return
         try:
             current=json.loads(config.read_text(encoding="utf-8"))
         except Exception as exc:
