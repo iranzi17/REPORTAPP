@@ -202,6 +202,10 @@ def _render_kml(index,geometry_by_key,buffer_rings_by_key=None):
             _add(child,"color",value)
             if tag=="LineStyle":_add(child,"width","4")
             else:_add(child,"scale","1.1")
+        if kind=="line":
+            fill=_add(style,"PolyStyle")
+            _add(fill,"color","550000ff")
+            _add(fill,"outline","0")
     for kind in SOURCE:
         selected=sorted((x for x in index if x[0]==kind and x in geometry_by_key),key=lambda x:x[1])
         if not selected:continue
@@ -210,7 +214,11 @@ def _render_kml(index,geometry_by_key,buffer_rings_by_key=None):
         for key in selected:
             entry=index[key]
             place=_add(folder,"Placemark")
-            _add(place,"name",f"{SOURCE[kind]['title']} OBJECTID {entry['objectid']}")
+            issue=entry["issues"].split(";",1)[0].strip()
+            label=f"{SOURCE[kind]['title']} OBJECTID {entry['objectid']}"
+            if issue:
+                label+=" — "+issue[:72]
+            _add(place,"name",label)
             _add(place,"styleUrl","#style_"+kind)
             _add(place,"description",
                 "Outstanding issues: "+entry["issues"]+"\n"+
