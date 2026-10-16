@@ -34,6 +34,15 @@ CREATE TABLE IF NOT EXISTS monitor_heartbeat (
     id INTEGER PRIMARY KEY CHECK(id=1),
     notified_at_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS delayed_clean_activity(
+    asset TEXT NOT NULL,
+    objectid INTEGER NOT NULL,
+    globalid TEXT NOT NULL,
+    event_time_utc_ms INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    queued_at_utc_ms INTEGER NOT NULL,
+    PRIMARY KEY(asset,objectid,globalid,event_time_utc_ms)
+);
 """
 
 
@@ -98,7 +107,7 @@ def clean_activity_candidates(snapshots, config, now_ms, db):
             })
     # Process oldest unsent events first to avoid starvation in busy sites.
     pending.sort(key=lambda a:(a["event_time_utc_ms"],a["asset"],a["objectid"]))
-    return pending[:MAX_CLEAN_TOASTS_PER_SCAN]
+    return pending
 
 
 def record_clean_activity(db,entry,now_ms):
@@ -135,11 +144,22 @@ def deliver_clean_activity(entry,config):
     from winotify import Notification
     from .alert_navigation import is_registered,zoom_uri
     kind="created" if entry["event_type"]=="CREATE" else "edited"
-    title=f"REG QA CHECKED: {entry['asset'].upper()} — no gaps found"
+    historical=bool(entry.get("deferred_historical"))
+    title=(
+        f"REG QA HISTORICAL: {entry['asset'].upper()} — no gaps at scan"
+        if historical else
+        f"REG QA CHECKED: {entry['asset'].upper()} — no gaps found"
+    )
+    original=datetime.fromtimestamp(
+        int(entry["event_time_utc_ms"])/1000,timezone.utc
+    ).strftime("%Y-%m-%d %H:%M UTC")
     message=(
         f"{entry['username']} {kind} OBJECTID {entry['objectid']}.\n"
-        "No outstanding issues in the currently verified QA rules.\n"
-        "Source attributes were not changed by REPORTAPP."
+        f"Source event: {original}.\n"
+        +("Historical event; verify current condition before relying on it. "
+          if historical else "")
+        +"No outstanding issues in REPORTAPP's verified QA rules. "
+        "No REG source data changed."
     )
     launch=(zoom_uri(entry["asset"],entry["objectid"]) if is_registered() else "")
     popup=Notification(
@@ -228,24 +248,101 @@ def record_heartbeat(db,now_ms):
     db.commit()
 
 
+def _queue_old_clean(db,entry,now_ms):
+    db.execute("""
+        INSERT OR IGNORE INTO delayed_clean_activity
+        (asset,objectid,globalid,event_time_utc_ms,payload_json,queued_at_utc_ms)
+        VALUES(?,?,?,?,?,?)
+    """,(
+        entry["asset"],int(entry["objectid"]),entry["globalid"],
+        int(entry["event_time_utc_ms"]),json.dumps(entry,ensure_ascii=False),
+        int(now_ms),
+    ))
+    db.commit()
+
+
+def _remove_delayed_clean(db,entry):
+    db.execute("""
+        DELETE FROM delayed_clean_activity
+        WHERE asset=? AND objectid=? AND globalid=? AND event_time_utc_ms=?
+    """,(
+        entry["asset"],int(entry["objectid"]),entry["globalid"],
+        int(entry["event_time_utc_ms"]),
+    ))
+    db.commit()
+
+
 def process_activity(snapshots,config,now_ms,db,stats,
                      clean_sender=None,heartbeat_sender=None):
-    """Send non-flagged activity without modifying existing flag notifications."""
+    """Notify today's clean activity now; hold prior-day clean events off site.
+
+    Separate source-event journal means previously notified results never
+    reappear on repeated minute scans. Unsent historical events are durable
+    and can outlive the 24h REG retrieval window.
+    """
+    from .deferred_notifications import site_active,is_historical
     if not config.get("activity_notifications_enabled"):
         return {"clean_notifications_sent":0,"clean_notifications_failed":0,
                 "heartbeat_sent":0,"heartbeat_failed":0}
     clean_sender=clean_sender or deliver_clean_activity
     heartbeat_sender=heartbeat_sender or deliver_heartbeat
-    entries=clean_activity_candidates(snapshots,config,now_ms,db)
-    sent=failed=0
-    for entry in entries:
+    candidates=clean_activity_candidates(snapshots,config,now_ms,db)
+    occupied=site_active(config,now_ms)
+    current=[item for item in candidates if not is_historical(
+        item["event_time_utc_ms"],now_ms)]
+    for item in candidates:
+        if is_historical(item["event_time_utc_ms"],now_ms):
+            _queue_old_clean(db,item,now_ms)
+    from .surveyor_notifications import event_timestamp
+    # If a queued event is visible today but no longer the QA-clean latest
+    # version, cancel obsolete "clean" history. Do not mark it delivered.
+    latest={
+        (asset,int(attrs["OBJECTID"]),str(attrs.get("GLOBALID") or "").strip()):
+        int(event_timestamp(attrs) or 0)
+        for asset,(records,*_) in snapshots.items() for attrs in records
+        if attrs.get("OBJECTID") is not None and attrs.get("GLOBALID")
+    }
+    acceptable={
+        (entry["asset"],entry["objectid"],entry["globalid"],
+         entry["event_time_utc_ms"]) for entry in candidates
+    }
+    all_pending=[
+        json.loads(row[0]) for row in db.execute(
+            "SELECT payload_json FROM delayed_clean_activity"
+        ).fetchall()
+    ]
+    for item in all_pending:
+        key=(item["asset"],int(item["objectid"]),item["globalid"])
+        event=(key[0],key[1],key[2],int(item["event_time_utc_ms"]))
+        if key in latest and (
+            latest[key]!=int(item["event_time_utc_ms"]) or event not in acceptable
+        ):
+            _remove_delayed_clean(db,item)
+    outgoing=list(current[:MAX_CLEAN_TOASTS_PER_SCAN])
+    if not occupied and len(outgoing)<MAX_CLEAN_TOASTS_PER_SCAN:
+        remaining=MAX_CLEAN_TOASTS_PER_SCAN-len(outgoing)
+        older=[
+            json.loads(row[0]) for row in db.execute("""
+              SELECT payload_json FROM delayed_clean_activity
+              ORDER BY queued_at_utc_ms,event_time_utc_ms LIMIT ?
+            """,(remaining,)).fetchall()
+        ]
+        for item in older:
+            item["deferred_historical"]=True
+        outgoing.extend(older)
+    sent=failed=historical_sent=0
+    for entry in outgoing:
         try:
             clean_sender(entry,config)
             record_clean_activity(db,entry,now_ms)
+            _remove_delayed_clean(db,entry)
             sent+=1
+            historical_sent+=int(bool(entry.get("deferred_historical")))
         except Exception:
-            # Do not mark sent on failure; retry next minute.
             failed+=1
+    historical_waiting=db.execute(
+        "SELECT COUNT(*) FROM delayed_clean_activity"
+    ).fetchone()[0]
     heartbeat_sent=heartbeat_failed=0
     if heartbeat_due(db,config,now_ms):
         mins=int(config.get("activity_heartbeat_minutes",DEFAULT_HEARTBEAT_MINUTES))
@@ -261,8 +358,14 @@ def process_activity(snapshots,config,now_ms,db,stats,
             heartbeat_sent=1
         except Exception:
             heartbeat_failed=1
-    return {"clean_notifications_sent":sent,"clean_notifications_failed":failed,
-            "heartbeat_sent":heartbeat_sent,"heartbeat_failed":heartbeat_failed}
+    return {
+        "clean_notifications_sent":sent,
+        "clean_notifications_failed":failed,
+        "clean_historical_queued":historical_waiting,
+        "clean_historical_delivered_this_scan":historical_sent,
+        "heartbeat_sent":heartbeat_sent,
+        "heartbeat_failed":heartbeat_failed,
+    }
 
 
 def change_activity_mode(config_path,enabled,*,now_ms=None,heartbeat_minutes=60):
