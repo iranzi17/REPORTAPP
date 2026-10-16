@@ -1,0 +1,85 @@
+name: REPORTAPP Navigation No-Hijack Safety
+
+on:
+  push:
+    branches: [main, fix/navigation-expire-no-retry]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/addins/ReportappNavigationBridge/**'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/alert_navigation.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_alert_navigation.py'
+      - '.github/workflows/reportapp-navigation-safety.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  navigation-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install existing test dependencies
+        run: python -m pip install openpyxl pillow
+      - name: Test URL identity, pause, one-shot navigation and Inbox
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_alert_navigation.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
+
+  windows-sdk-build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore Esri SDK 3.4 and build the .NET 8 add-in
+        shell: pwsh
+        run: |
+          $project = 'outputs/Customer_Meter_Photo_QA_Working/addins/ReportappNavigationBridge/ReportappNavigationBridge.csproj'
+          dotnet restore $project
+          if ($LASTEXITCODE -ne 0) { throw 'ArcGIS SDK restore failed' }
+          dotnet build $project -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'ArcGIS Pro 3.4 Add-in compilation failed' }
+          $package = 'outputs/Customer_Meter_Photo_QA_Working/addins/ReportappNavigationBridge/bin/Release/net8.0-windows/ReportappNavigationBridge.esriAddInX'
+          if (-not (Test-Path $package)) { throw 'Add-in archive was not produced' }
+          Get-FileHash $package -Algorithm SHA256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReportappNavigationBridge-v1.0.3
+          path: outputs/Customer_Meter_Photo_QA_Working/addins/ReportappNavigationBridge/bin/Release/net8.0-windows/ReportappNavigationBridge.esriAddInX
+          if-no-files-found: error
+
+  publish-verified-addin:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'iranzi17/REPORTAPP'
+    needs: [navigation-tests, windows-sdk-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ReportappNavigationBridge-v1.0.3
+          path: dist
+      - name: Publish verified installer for user-approved installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view reportapp-bridge-v1.0.3 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Already published; refusing to replace a previous verified release.'
+            exit 0
+          fi
+          gh release create reportapp-bridge-v1.0.3 \
+            dist/ReportappNavigationBridge.esriAddInX \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title 'REPORTAPP Navigation Bridge 1.0.3 — no delayed zooms' \
+            --notes 'ArcGIS Pro 3.4 verified .NET 8 add-in build. A zoom click expires after 15 seconds, never retries, and newer clicks supersede older requests. User-initiated pause support. Close ArcGIS Pro, back up and pause pending navigation files, install this package through the Esri installer, restart ArcGIS Pro, and test in a noncritical map. Never modifies REG data or watcher history.'

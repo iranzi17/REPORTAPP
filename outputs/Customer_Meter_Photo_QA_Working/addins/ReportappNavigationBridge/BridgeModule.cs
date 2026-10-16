@@ -40,7 +40,12 @@ namespace ReportappNavigationBridge
         private DispatcherTimer? _timer;
         private bool _busy;
         private Mutex? _owner;
-        private readonly Dictionary<string, DateTime> _retry = new();
+        // Navigation is strictly one-shot: never silently retry a failed click.
+        // A late retry can change the supervisor's active selection minutes later.
+        private const long MaxNavigationAgeMs = 15000;
+        private readonly string _pausedFlag = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "REPORTAPP", "Navigation", "navigation-paused.flag");
         private readonly string _incoming = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "REPORTAPP", "Navigation", "Requests");
@@ -75,16 +80,21 @@ namespace ReportappNavigationBridge
 
         private async void OnTick(object? sender, EventArgs args)
         {
-            if (_busy) return;
+            if (_busy || File.Exists(_pausedFlag)) return;
             _busy = true;
             try
             {
                 // Process at most one per tick; do not monopolize map UI.
-                var file = Directory.EnumerateFiles(_incoming, "*.json")
-                                    .Where(f => !_retry.TryGetValue(f, out var until) || until <= DateTime.UtcNow)
-                                    .OrderBy(File.GetCreationTimeUtc)
-                                    .FirstOrDefault();
+                var requests = Directory.EnumerateFiles(_incoming, "*.json")
+                                        .OrderByDescending(File.GetCreationTimeUtc)
+                                        .ToList();
+                var file = requests.FirstOrDefault();
                 if (file == null) return;
+                // Latest explicit click wins. Earlier unprocessed requests
+                // must never zoom the map later, even if their source exists.
+                foreach (var previous in requests.Skip(1))
+                    Finish(previous, ".superseded",
+                           "Ignored older navigation click; newer request exists.");
                 NavigationRequest? request;
                 try
                 {
@@ -108,19 +118,13 @@ namespace ReportappNavigationBridge
                 {
                     ArcGIS.Desktop.Framework.FrameworkApplication.Current.MainWindow.Activate();
                     Finish(file, ".done", "Selected " + request!.Asset + " OBJECTID " + request.ObjectId);
-                    _retry.Remove(file);
+                    // Success is terminal; no retry queue exists.
                 }
                 else
                 {
-                    Log(Path.GetFileName(file) + ": " + issue);
-                    _retry[file] = DateTime.UtcNow.AddMinutes(1);
-                    // Don't delete the clicked request if the map isn't ready,
-                    // the service is inaccessible or the feature is filtered.
-                    // The request remains for another attempt.
-                    var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                              - request!.CreatedUtcMs;
-                    if (age > TimeSpan.FromHours(24).TotalMilliseconds)
-                        Finish(file, ".expired", issue);
+                    // Failure is terminal. Never replay after the user has
+                    // returned to a different map or engineering task.
+                    Finish(file, ".failed", issue);
                 }
             }
             catch (Exception ex)
@@ -151,8 +155,31 @@ namespace ReportappNavigationBridge
                 throw new InvalidDataException("Invalid REPORTAPP zoom request.");
             }
             var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - req.CreatedUtcMs;
-            if (age < -60000 || age > TimeSpan.FromHours(24).TotalMilliseconds)
-                throw new InvalidDataException("Request outside allowed time window.");
+            if (age < -1000 || age > MaxNavigationAgeMs)
+                throw new InvalidDataException(
+                    "Navigation click expired after 15 seconds; use Zoom again.");
+        }
+
+        private static bool FreshAndCurrent(NavigationRequest request, MapView view)
+        {
+            var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                      - request.CreatedUtcMs;
+            if (age < -1000 || age > MaxNavigationAgeMs ||
+                !ReferenceEquals(MapView.Active, view) ||
+                File.Exists(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "REPORTAPP", "Navigation", "navigation-paused.flag")))
+                return false;
+            // If the supervisor clicked a newer item while a FeatureServer
+            // query was running, discard this old navigation before selection.
+            var requestedAt = request.CreatedUtcMs;
+            return !Directory.EnumerateFiles(
+                    Path.Combine(Environment.GetFolderPath(
+                        Environment.SpecialFolder.LocalApplicationData),
+                        "REPORTAPP", "Navigation", "Requests"), "*.json")
+                .Where(file => Path.GetFileNameWithoutExtension(file) != request.RequestId)
+                .Any(file => File.GetCreationTimeUtc(file).Ticks >
+                             DateTimeOffset.FromUnixTimeMilliseconds(requestedAt).UtcDateTime.Ticks);
         }
 
         private static bool MatchesSource(FeatureLayer layer, string exactUrl)
@@ -227,6 +254,8 @@ namespace ReportappNavigationBridge
                     if (!rows.MoveNext())
                         return (string?)"OBJECTID not found in the current layer/version or excluded by a filter; manual selection preserved.";
                 }
+                if (!FreshAndCurrent(req,view))
+                    return (string?)"A newer request or map activity superseded this click; manual selection preserved.";
                 // Add first instead of New: if the feature stops being
                 // selectable between Search and Select, existing selections
                 // remain unchanged. GetObjectIDs may include earlier selections.
@@ -238,6 +267,8 @@ namespace ReportappNavigationBridge
                 // Once the target is verified selectable, select *only* this
                 // record so ZoomToSelected does not zoom to unrelated features.
                 // MapView.ZoomTo(layer, objectid) is not a Pro 3.4 overload.
+                if (!FreshAndCurrent(req,view))
+                    return (string?)"Click expired before selection; manual map extent preserved.";
                 view.Map.ClearSelection();
                 using (var exactSelection = layer.Select(filter, SelectionCombinationMethod.New))
                 {
@@ -248,6 +279,8 @@ namespace ReportappNavigationBridge
                 return (string?)null;
             });
             if (issue != null) return issue;
+            if (!FreshAndCurrent(req,view))
+                return "Click expired or view changed before zoom; request discarded.";
             // Await navigation outside the MCT. Instant navigation avoids
             // animation interruption by map refreshes on the live REG map.
             if (!await view.ZoomToSelectedAsync(TimeSpan.Zero))
@@ -261,7 +294,8 @@ namespace ReportappNavigationBridge
                     camera.Scale = 1500;
                     return camera;
                 });
-                if (camera != null && !await view.ZoomToAsync(camera, TimeSpan.Zero))
+                if (camera != null && FreshAndCurrent(req,view) &&
+                    !await view.ZoomToAsync(camera, TimeSpan.Zero))
                     return "ArcGIS Pro inspection-scale navigation was interrupted.";
             }
             return null;

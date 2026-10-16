@@ -1,5 +1,39 @@
 # REPORTAPP ArcGIS Pro notification navigation
 
+## Critical safety change in v1.0.3
+
+A reported office issue showed ArcGIS Pro jumping back to an older pole or
+line **minutes after** the supervisor clicked another notification. The v1.0.2
+bridge retried failed requests every minute for up to 24 hours; old requests
+could later execute successfully, hijacking the current map. This version
+**does not retry any request**. Every click is attempted once and expires
+after **15 seconds**. When several requests exist, the newest click takes
+priority and older ones are marked `.superseded`. A failed request is moved
+to `.failed`, not retried. The bridge checks again before selection and
+before zooming that the request is still fresh, that the active map did not
+change, and that navigation was not paused.
+
+REPORTAPP's Inbox now exposes **Pause Map Zoom / Resume Map Zoom**.
+Pausing sets `%LOCALAPPDATA%\REPORTAPP\Navigation\navigation-paused.flag`
+and renames any pending `*.json` to `*.json.paused` without deleting
+history. Resuming allows only fresh new explicit requests; no paused
+file is replayed. Pausing while a v1.0.2 add-in is already performing a
+slow query may not stop that one operation: restart Pro at your next safe
+break and install the rebuilt v1.0.3 add-in for full protection.
+
+**Installation is separate from Python/watcher maintenance** because the
+current safe updater is not authorized to install `.esriAddInX` packages.
+For a no-CMD upgrade, download
+`ReportappNavigationBridge.esriAddInX` from the verified
+`reportapp-bridge-v1.0.3` GitHub release, close ArcGIS Pro,
+double-click the package and accept the Esri installer, then reopen Pro.
+Use the Inbox **Pause Map Zoom** until you finish installation.
+
+The source event time on a surveyor notification describes when REG recorded
+the asset edit; it is **not** the time that Zoom was clicked or queued.
+
+
+
 Targets **ArcGIS Pro 3.4 / .NET 8 / Windows x64**. Release compilation against
 Esri.ArcGISPro.Extensions30 **3.4.0.55405** succeeded with zero warnings/errors
 on 2026-10-15. Package: `bin/Release/net8.0-windows/ReportappNavigationBridge.esriAddInX`.
@@ -78,12 +112,12 @@ points in 2D maps use 1:1500. Selection remains available for inspection. The Pr
 window is activated after success, subject to Windows foreground restrictions.
 An active map is required; a layout-only view is insufficient.
 
-Failures retry once per minute, allowing other requests to proceed. Requests expire
-after 24 hours. Success receipts end in `.json.done`, rejected requests in
-`.json.invalid`, and requests expiring during retries in `.json.expired` (already
-expired when first read are invalid). Receipts prevent normal replay. A crash between
-selection and receipt can repeat the harmless selection after restart. Receipts and
-logs are retained for manual archival; they are not automatically deleted.
+**v1.0.3:** Each click is one-shot and expires after 15 seconds. No minute-later
+retry is permitted. Newer clicks supersede earlier pending requests. Success
+receipts end in `.json.done`, failed one-shot requests in `.json.failed`,
+invalid or expired requests in `.json.invalid`, superseded requests in
+`.json.superseded`, and operator-paused requests in `.json.paused`. Older
+receipt/log files are retained for audit but never replayed.
 
 Diagnostics: `%LOCALAPPDATA%/REPORTAPP/Navigation/bridge-errors.log` and
 `navigation-errors.log`. Missing authentication, missing features, wrong versions,

@@ -940,6 +940,44 @@ def launch_gui(config_path):
     ttk.Button(controls,text="Site Status",command=configure_site_presence).pack(
         side="left",padx=(8,0)
     )
+    def toggle_navigation_pause():
+        from .alert_navigation import (
+            is_navigation_paused,pause_navigation,resume_navigation,
+        )
+        try:
+            if is_navigation_paused():
+                outcome=resume_navigation()
+                messagebox.showinfo(
+                    "Navigation resumed",
+                    "REPORTAPP will navigate only when you click Zoom again. "
+                    "Previously paused requests will not replay.",
+                    parent=root,
+                )
+            else:
+                outcome=pause_navigation()
+                messagebox.showinfo(
+                    "Navigation paused",
+                    "REPORTAPP map navigation is paused. "
+                    "Pending requests were preserved, not replayed. "
+                    "If a request was already running, it can still "
+                    "complete until the patched add-in is installed.",
+                    parent=root,
+                )
+            pause_button.configure(text=(
+                "Resume Map Zoom" if outcome["paused"] else "Pause Map Zoom"
+            ))
+        except Exception as exc:
+            messagebox.showerror("Navigation pause",str(exc),parent=root)
+    from .alert_navigation import is_navigation_paused
+    # Place the emergency control next to Find & Zoom: the top toolbar
+    # is already crowded on 1366px/1150px office displays.
+    pause_button=ttk.Button(
+        find_panel,
+        text="Resume Map Zoom" if is_navigation_paused() else "Pause Map Zoom",
+        command=toggle_navigation_pause,
+    )
+    pause_button.pack(side="right",padx=(8,0))
+
     def upgrade_maintainer():
         if not messagebox.askyesno(
             "REPORTAPP Maintenance Upgrade",

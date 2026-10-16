@@ -62,10 +62,45 @@ def parse_uri(uri):
     oid=int(match.group(2))
     return asset,oid,zoom_uri(asset,oid)
 
+def paused_flag(folder=None):
+    requests=Path(folder).resolve() if folder is not None else queue_folder()
+    return requests.parent/"navigation-paused.flag"
+
+
+def is_navigation_paused(folder=None):
+    return paused_flag(folder).exists()
+
+
+def pause_navigation(folder=None):
+    """Emergency stop: block new zoom requests and preserve pending old clicks."""
+    requests=Path(folder).resolve() if folder is not None else queue_folder()
+    requests.mkdir(parents=True,exist_ok=True)
+    flag=paused_flag(requests)
+    flag.write_text("REPORTAPP navigation paused by user.\n",encoding="utf-8")
+    moved=0
+    for item in requests.glob("*.json"):
+        try:
+            item.rename(item.with_name(item.name+".paused"))
+            moved+=1
+        except FileNotFoundError:
+            # ArcGIS Pro consumed or renamed the request concurrently.
+            continue
+    return {"paused":True,"pending_requests_paused":moved}
+
+
+def resume_navigation(folder=None):
+    """Resume only NEW explicit zoom clicks; never replay old paused requests."""
+    flag=paused_flag(folder)
+    flag.unlink(missing_ok=True)
+    return {"paused":False,"previous_requests_replayed":0}
+
+
 def enqueue(uri,folder=None,now=None):
     asset,oid,canonical=parse_uri(uri)
     destination=Path(folder) if folder is not None else queue_folder()
     destination.mkdir(parents=True,exist_ok=True)
+    if is_navigation_paused(destination):
+        raise RuntimeError("REPORTAPP map navigation is paused; resume it in the Inbox first.")
     identity=uuid.uuid4().hex
     timestamp=int(now if now is not None
                   else datetime.now(timezone.utc).timestamp()*1000)
