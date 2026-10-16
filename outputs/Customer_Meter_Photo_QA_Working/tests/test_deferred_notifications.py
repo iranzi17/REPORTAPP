@@ -72,6 +72,7 @@ class DeferredNotificationTests(unittest.TestCase):
         self.conf["surveyor_site_mode"]="off_site"
         deliveries,_=plan_delivery([],snapshot(),self.conf,after,self.state.db)
         self.assertEqual([x["objectid"] for x in deliveries],[11])
+        self.assertTrue(deliveries[0]["deferred_historical"])
         mark_delivered(self.state.db,deliveries[0])
         again,_=plan_delivery([],snapshot(),self.conf,after+60000,self.state.db)
         self.assertEqual(again,[])

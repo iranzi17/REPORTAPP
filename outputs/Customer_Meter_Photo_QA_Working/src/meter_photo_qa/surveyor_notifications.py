@@ -347,7 +347,16 @@ def preflight(config_path, *, collector=None, now_ms=None, check_delivery=True):
 
 
 def _alert_text(alert):
+    source_date=_dt.datetime.fromtimestamp(
+        int(alert.get("event_time_utc_ms") or 0)/1000,
+        _dt.timezone(_dt.timedelta(hours=2))
+    ).strftime("%Y-%m-%d %H:%M Rwanda time")
+    prefix=(
+        "HISTORICAL RECORD — for retrospective review.\n"
+        if alert.get("deferred_historical") else ""
+    )
     return (
+        prefix+f"Source event: {source_date}\n"
         f"{alert['asset'].upper()} | {alert['username']} ({alert['event_type']}) | "
         f"ObjectID {alert['objectid']}\n"
         f"GlobalID {alert['globalid']}\n"
@@ -360,7 +369,11 @@ def _alert_text(alert):
 def deliver(alert,config):
     """Selected local desktop notification or recipient email. Never silent."""
     channel=config.get("channel","desktop")
-    subject=f"REG QA: {alert['asset']} gaps - {alert['username']}"
+    subject=(
+        f"REG QA HISTORICAL: {alert['asset']} - {alert['username']}"
+        if alert.get("deferred_historical") else
+        f"REG QA: {alert['asset']} gaps - {alert['username']}"
+    )
     message=_alert_text(alert)
     if channel=="desktop":
         try:

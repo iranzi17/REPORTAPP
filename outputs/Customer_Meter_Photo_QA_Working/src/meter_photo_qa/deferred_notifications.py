@@ -156,6 +156,8 @@ def plan_delivery(notices, snapshots, config, now_ms, db):
             (MAX_LATE_PER_CYCLE,)
         ).fetchall()
     ]
+    for entry in pending:
+        entry["deferred_historical"]=True
     return normal + pending,db.execute(
         "SELECT COUNT(*) FROM delayed_qa_notifications").fetchone()[0]
 
