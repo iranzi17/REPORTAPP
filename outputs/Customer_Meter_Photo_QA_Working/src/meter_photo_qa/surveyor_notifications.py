@@ -508,15 +508,30 @@ def main(argv=None):
         help="Stop clean activity and heartbeat popups; keep watcher and error alerts running.",
     )
     operation.add_argument(
+        "--send-activity-test",action="store_true",
+        help="One clearly marked Windows TEST popup; no scan, no QA result, no database change.",
+    )
+    operation.add_argument(
         "--list-activity",action="store_true",
         help="List previously delivered clean feature activity without changing QA alert inbox.",
     )
+    parser.add_argument("--test-asset",choices=("line","pole","transformer"),
+                        default="line",help="Navigation asset for --send-activity-test")
+    parser.add_argument("--test-objectid",type=int,
+                        help="Navigation OBJECTID for --send-activity-test")
     parser.add_argument("--heartbeat-minutes",type=int,default=60,
                         help="When enabling activity, send watcher status every 10–240 minutes (default 60).")
     options=parser.parse_args(argv)
     path=Path(options.config).resolve()
     log=path.with_suffix(".monitor.log")
     try:
+        if options.send_activity_test:
+            if options.test_objectid is None or options.test_objectid<=0:
+                raise ValueError("--send-activity-test requires --test-objectid (a positive integer).")
+            from .surveyor_activity import deliver_activity_test
+            deliver_activity_test(options.test_asset,options.test_objectid)
+            print("REPORTAPP_ACTIVITY_TEST_SENT (no QA evaluation or history write)")
+            return 0
         if options.enable_activity or options.disable_activity:
             from .surveyor_activity import change_activity_mode
             result=change_activity_mode(
