@@ -39,7 +39,11 @@ ALLOWED = frozenset({
     "outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py",
     "outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py",
     "maintenance/self_monitor.py",
-
+    # Reviewed read-only report visualization, not REG source editing.
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/gap_kmz.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/combined_qa_report.py",
+    "outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt",
+    "outputs/Customer_Meter_Photo_QA_Working/tests/test_gap_kmz.py",
 })
 CONFIG = WORK / "outputs" / "REPORTAPP_Surveyor_Notifications" / "monitor_config.json"
 NAV = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "REPORTAPP" / "Navigation"
@@ -49,6 +53,8 @@ MAX_SOURCE = 300_000
 CREATE_ALLOWED = frozenset({
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py",
     "outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/gap_kmz.py",
+    "outputs/Customer_Meter_Photo_QA_Working/tests/test_gap_kmz.py",
 })
 
 
@@ -257,8 +263,9 @@ def _validate_zip(data, tag):
                     or not re.fullmatch(r"[0-9a-f]{64}", str(expected))
                     or hashlib.sha256(content).hexdigest() != expected):
                 raise ValueError("Invalid file hash or oversized update.")
-            if not path.endswith(".py"):
-                raise ValueError("Updater permits Python UI source only.")
+            if not (path.endswith(".py") or path ==
+                    "outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt"):
+                raise ValueError("Updater permits only approved Python source and toolbox.")
             compile(content, path, "exec")
             payload[path] = content
         return payload
@@ -274,6 +281,8 @@ def _smoke_test(python):
         "test_surveyor_notifications.py",
         "test_surveyor_activity.py",
         "test_deferred_notifications.py",
+        "test_gap_kmz.py",
+        "test_combined_qa_report.py",
     ):
         result = subprocess.run(
             [str(python), "-m", "unittest", "discover",
