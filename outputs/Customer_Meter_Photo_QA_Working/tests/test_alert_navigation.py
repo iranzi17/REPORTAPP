@@ -46,6 +46,40 @@ class NavigationTests(unittest.TestCase):
             self.assertNotEqual(first["queue_file"],second["queue_file"])
             self.assertEqual(len(list(Path(folder).glob("*.json"))),2)
             self.assertEqual(len(list(Path(folder).glob("*.tmp"))),0)
+    def test_pause_preserves_pending_and_blocks_new_navigation(self):
+        from meter_photo_qa.alert_navigation import (
+            pause_navigation,resume_navigation,is_navigation_paused,
+        )
+        with tempfile.TemporaryDirectory() as location:
+            folder=Path(location)/"Navigation"/"Requests"
+            first=enqueue("reportapp://zoom/pole/563892",folder=folder,now=1000000)
+            self.assertFalse(is_navigation_paused(folder))
+            stopped=pause_navigation(folder)
+            self.assertTrue(stopped["paused"])
+            self.assertEqual(stopped["pending_requests_paused"],1)
+            self.assertTrue(Path(first["queue_file"]+".paused").exists())
+            self.assertFalse(list(folder.glob("*.json")))
+            with self.assertRaisesRegex(RuntimeError,"paused"):
+                enqueue("reportapp://zoom/line/3510143",folder=folder)
+            resumed=resume_navigation(folder)
+            self.assertFalse(resumed["paused"])
+            self.assertFalse(list(folder.glob("*.json")))
+            self.assertEqual(resumed["previous_requests_replayed"],0)
+            second=enqueue("reportapp://zoom/line/3510143",folder=folder)
+            self.assertTrue(Path(second["queue_file"]).is_file())
+
+    def test_bridge_must_not_retry_or_replay_old_clicks(self):
+        source=(Path(__file__).resolve().parents[1]/
+                "addins"/"ReportappNavigationBridge"/"BridgeModule.cs").read_text(
+                    encoding="utf-8")
+        self.assertIn("MaxNavigationAgeMs = 15000",source)
+        self.assertIn('Finish(file, ".failed", issue)',source)
+        self.assertIn('Finish(previous, ".superseded"',source)
+        self.assertIn("FreshAndCurrent(req,view)",source)
+        self.assertIn("navigation-paused.flag",source)
+        self.assertNotIn("DateTime.UtcNow.AddMinutes(1)",source)
+        self.assertNotIn("FromHours(24)",source)
+
     def test_missing_registry_means_no_clickable_toast_claim(self):
         class NoRegistry:
             HKEY_CURRENT_USER=1
