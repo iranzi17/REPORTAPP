@@ -43,6 +43,9 @@ namespace ReportappNavigationBridge
         // Navigation is strictly one-shot: never silently retry a failed click.
         // A late retry can change the supervisor's active selection minutes later.
         private const long MaxNavigationAgeMs = 15000;
+        private readonly string _pausedFlag = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "REPORTAPP", "Navigation", "navigation-paused.flag");
         private readonly string _incoming = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "REPORTAPP", "Navigation", "Requests");
@@ -77,7 +80,7 @@ namespace ReportappNavigationBridge
 
         private async void OnTick(object? sender, EventArgs args)
         {
-            if (_busy) return;
+            if (_busy || File.Exists(_pausedFlag)) return;
             _busy = true;
             try
             {
@@ -162,7 +165,10 @@ namespace ReportappNavigationBridge
             var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                       - request.CreatedUtcMs;
             if (age < -1000 || age > MaxNavigationAgeMs ||
-                !ReferenceEquals(MapView.Active, view))
+                !ReferenceEquals(MapView.Active, view) ||
+                File.Exists(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "REPORTAPP", "Navigation", "navigation-paused.flag")))
                 return false;
             // If the supervisor clicked a newer item while a FeatureServer
             // query was running, discard this old navigation before selection.
