@@ -145,7 +145,8 @@ namespace ReportappNavigationBridge
         {
             if (req == null || !Guid.TryParseExact(req.RequestId, "N", out _) || req.Version != 1
                 || req.ObjectId <= 0
-                || req.Origin != "REPORTAPP_NOTIFICATION"
+                || (req.Origin != "REPORTAPP_VERIFIED_ALERT" &&
+                    req.Origin != "REPORTAPP_MANUAL_FIND")
                 || !string.Equals(req.ServiceUrl.TrimEnd('/'), Service,
                                   StringComparison.OrdinalIgnoreCase)
                 || ((req.Asset, req.LayerId) switch
@@ -160,14 +161,19 @@ namespace ReportappNavigationBridge
             }
             var hasContext = req.ExpectedEventUtcMs != 0 || req.ExpectedGlobalId.Length != 0 ||
                 req.ExpectedActor.Length != 0 || req.SourceGdbVersion.Length != 0;
-            if (hasContext &&
-                (!Guid.TryParse(req.ExpectedGlobalId,out _) ||
-                 req.ExpectedEventUtcMs < 946684800000 ||
-                 req.ExpectedEventUtcMs > 4102444800000 ||
-                 string.IsNullOrWhiteSpace(req.ExpectedActor) ||
-                 !string.Equals(req.SourceGdbVersion,"sde.DEFAULT",
-                                StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidDataException("Incomplete trusted source edit identity.");
+            if (req.Origin == "REPORTAPP_VERIFIED_ALERT")
+            {
+                if (!hasContext ||
+                    !Guid.TryParse(req.ExpectedGlobalId,out _) ||
+                    req.ExpectedEventUtcMs < 946684800000 ||
+                    req.ExpectedEventUtcMs > 4102444800000 ||
+                    string.IsNullOrWhiteSpace(req.ExpectedActor) ||
+                    !string.Equals(req.SourceGdbVersion,"sde.DEFAULT",
+                                   StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Alert has no verifiable edit identity.");
+            }
+            else if (hasContext)
+                throw new InvalidDataException("Manual navigation cannot claim a surveyor edit.");
             var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - req.CreatedUtcMs;
             if (age < -1000 || age > MaxNavigationAgeMs)
                 throw new InvalidDataException(
