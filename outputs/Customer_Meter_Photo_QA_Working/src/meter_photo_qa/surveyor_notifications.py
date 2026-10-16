@@ -438,9 +438,15 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                 records,asset,fields,domains,config,now_ms,state,
                 rules,phase_expectations
             ))
+        # Previous-day (Rwanda local date) notifications are retained for
+        # off-site delivery; today's alerts remain immediate.
+        from .deferred_notifications import plan_delivery, mark_delivered, is_historical
+        deliveries,deferred_count=plan_delivery(
+            notices,snapshots,config,now_ms,state.db
+        )
         sent=0
         failed=0
-        for item in notices:
+        for item in deliveries:
             # Persist first so any transient popup cannot be the only record.
             inbox_id=record_alert(state.db,item,now_ms)
             try:
@@ -459,6 +465,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                 item["asset"],item["objectid"],item["globalid"],
                 item["issue_digest"],now_ms
             )
+            mark_delivered(state.db,item)
             mark_delivery(state.db,inbox_id,"SENT")
             with logfile.open("a",encoding="utf-8") as fh:
                 fh.write(json.dumps({
@@ -482,6 +489,11 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                                      +activity_result.get("heartbeat_failed",0),
                 "records_scanned":scanned,
                 "channel":config.get("channel","desktop"),
+                "historical_alerts_queued":deferred_count,
+                "historical_alerts_released_this_scan":sum(
+                    1 for item in deliveries
+                    if is_historical(item["event_time_utc_ms"],now_ms)
+                ),
                 **activity_result}
     finally:
         state.close()
