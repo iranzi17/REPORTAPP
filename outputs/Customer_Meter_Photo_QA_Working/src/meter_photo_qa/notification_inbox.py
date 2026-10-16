@@ -969,12 +969,14 @@ def launch_gui(config_path):
         except Exception as exc:
             messagebox.showerror("Navigation pause",str(exc),parent=root)
     from .alert_navigation import is_navigation_paused
+    # Place the emergency control next to Find & Zoom: the top toolbar
+    # is already crowded on 1366px/1150px office displays.
     pause_button=ttk.Button(
-        controls,
+        find_panel,
         text="Resume Map Zoom" if is_navigation_paused() else "Pause Map Zoom",
         command=toggle_navigation_pause,
     )
-    pause_button.pack(side="left",padx=(8,0))
+    pause_button.pack(side="right",padx=(8,0))
 
     def upgrade_maintainer():
         if not messagebox.askyesno(
