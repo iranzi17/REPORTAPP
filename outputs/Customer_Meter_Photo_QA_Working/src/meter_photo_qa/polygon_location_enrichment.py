@@ -218,13 +218,9 @@ def enrich_report(report_path,*,output_path=None,apply=False,resolver=None,
                         "Asset Details location blanks filled from verified cell polygons; original values and conflicts in Polygon Location Audit. REG data unchanged."])
         summary.append(["Polygon-enriched records",result["records_filled"]])
         summary.append(["Polygon-enriched cells",result["cells_filled"]])
-        if details.tables:
-            for table in details.tables.values():
-                from openpyxl.utils import get_column_letter
-                table.ref=f"A1:{get_column_letter(details.max_column)}{details.max_row}"
-                # Adding a column requires matching table metadata; let Excel
-                # rebuild table column metadata when opening.
-                table.tableColumns=[]
+        # Keep existing Excel table definitions unchanged. The audit/provenance
+        # column sits immediately to the right of the original table, avoiding
+        # invalid tableColumn metadata in a protected source report.
         output.parent.mkdir(parents=True,exist_ok=True)
         wb.save(output)
         result["output_xlsx"]=str(output)
