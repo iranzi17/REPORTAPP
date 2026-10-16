@@ -37,6 +37,7 @@ ALLOWED = frozenset({
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py",
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py",
     "outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py",
+    "outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py",
     "maintenance/self_monitor.py",
 
 })
