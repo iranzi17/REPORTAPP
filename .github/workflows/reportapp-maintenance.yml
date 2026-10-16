@@ -1,0 +1,33 @@
+name: REPORTAPP self-maintenance checks
+
+on:
+  push:
+    branches: [main, development/reportapp-self-maintenance]
+    paths:
+      - 'maintenance/**'
+      - '.github/workflows/reportapp-maintenance.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'maintenance/**'
+      - '.github/workflows/reportapp-maintenance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safe-agent-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile maintenance sources
+        run: |
+          python -m py_compile maintenance/self_monitor.py
+          python -m py_compile maintenance/build_safe_release.py
+          python -m py_compile maintenance/tests/test_self_monitor.py
+      - name: Run deployment safety and rollback tests
+        run: python -m unittest discover -s maintenance/tests -v
