@@ -41,4 +41,5 @@ jobs:
         run: |
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_combined_qa_report.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_asset_quality_workflow.py -v
-          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_toolbox_ui.py -v
+          # ArcGIS Pro toolbox UI tests require arcpy on a licensed Windows
+          # installation. The .pyt is syntax-checked above in Linux CI.
