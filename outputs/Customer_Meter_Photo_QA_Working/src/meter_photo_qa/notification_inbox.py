@@ -940,40 +940,54 @@ def launch_gui(config_path):
     ttk.Button(controls,text="Site Status",command=configure_site_presence).pack(
         side="left",padx=(8,0)
     )
+    def _navigation_paused():
+        from .alert_navigation import queue_folder
+        return (queue_folder().parent/"navigation-paused.flag").exists()
+
     def toggle_navigation_pause():
-        from .alert_navigation import (
-            is_navigation_paused,pause_navigation,resume_navigation,
-        )
+        # Self-contained for the older local alert_navigation.py on v2
+        # maintainer machines: the authorized GUI-only update must work
+        # before any separate navigation-handler source is pulled.
+        from .alert_navigation import queue_folder
         try:
-            if is_navigation_paused():
-                outcome=resume_navigation()
-                messagebox.showinfo(
-                    "Navigation resumed",
-                    "REPORTAPP will navigate only when you click Zoom again. "
-                    "Previously paused requests will not replay.",
-                    parent=root,
-                )
-            else:
-                outcome=pause_navigation()
-                messagebox.showinfo(
-                    "Navigation paused",
-                    "REPORTAPP map navigation is paused. "
-                    "Pending requests were preserved, not replayed. "
-                    "If a request was already running, it can still "
-                    "complete until the patched add-in is installed.",
-                    parent=root,
-                )
+            requests=queue_folder()
+            requests.mkdir(parents=True,exist_ok=True)
+            flag=requests.parent/"navigation-paused.flag"
+            was_paused=flag.exists()
+            if not was_paused:
+                flag.write_text("Paused by REPORTAPP supervisor.\\n",encoding="utf-8")
+            moved=0
+            for item in requests.glob("*.json"):
+                try:
+                    item.rename(item.with_name(item.name+".paused"))
+                    moved+=1
+                except FileNotFoundError:
+                    continue
+            if was_paused:
+                # Clear pending requests BEFORE lifting the C# pause flag.
+                flag.unlink(missing_ok=True)
+            messagebox.showinfo(
+                "Navigation " + ("resumed" if was_paused else "paused"),
+                (
+                    "Map zoom is enabled only for new explicit clicks. "
+                    "Previously pending requests were not replayed."
+                    if was_paused else
+                    "Map zoom has been paused; "+
+                    str(moved)+" pending clicks were preserved. "
+                    "With the older add-in, restart ArcGIS Pro at a safe "
+                    "break to stop any request already in progress."
+                ),
+                parent=root,
+            )
             pause_button.configure(text=(
-                "Resume Map Zoom" if outcome["paused"] else "Pause Map Zoom"
+                "Pause Map Zoom" if was_paused else "Resume Map Zoom"
             ))
         except Exception as exc:
             messagebox.showerror("Navigation pause",str(exc),parent=root)
-    from .alert_navigation import is_navigation_paused
-    # Place the emergency control next to Find & Zoom: the top toolbar
-    # is already crowded on 1366px/1150px office displays.
+
     pause_button=ttk.Button(
         find_panel,
-        text="Resume Map Zoom" if is_navigation_paused() else "Pause Map Zoom",
+        text="Resume Map Zoom" if _navigation_paused() else "Pause Map Zoom",
         command=toggle_navigation_pause,
     )
     pause_button.pack(side="right",padx=(8,0))
