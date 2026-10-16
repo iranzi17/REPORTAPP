@@ -497,6 +497,10 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                     "at_utc_ms":now_ms,"status":"SENT",
                     "asset":item["asset"],"objectid":item["objectid"],
                     "globalid":item["globalid"],"username":item["username"],
+                    "source_event_utc_ms":item["event_time_utc_ms"],
+                    "source_gdb_version":config.get("version","sde.DEFAULT"),
+                    "source_event_type":item["event_type"],
+                    "source_last_editor":item["last_edited_user"],
                     "issues":item["issues"],
                 },ensure_ascii=False)+"\n")
             sent+=1
