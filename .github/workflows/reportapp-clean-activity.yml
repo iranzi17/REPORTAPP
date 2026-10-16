@@ -1,0 +1,49 @@
+name: REPORTAPP Clean Surveyor Activity Checks
+
+on:
+  push:
+    branches: [main, feature/surveyor-clean-activity-notifications]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
+      - '.github/workflows/reportapp-clean-activity.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
+      - '.github/workflows/reportapp-clean-activity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  activity-regression-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies for existing watcher tests
+        run: python -m pip install openpyxl pillow
+      - name: Compile new notification module and local Inbox UI
+        run: |
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py
+      - name: Test clean activity and hourly scan heartbeats
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_activity.py -v
+      - name: Test existing quality alerts, event history and Inbox
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v

@@ -406,7 +406,8 @@ def deliver(alert,config):
         raise ValueError("Notification channel must be desktop or smtp.")
 
 
-def run_once(config_path,now_ms=None,collector=None,sender=None):
+def run_once(config_path,now_ms=None,collector=None,sender=None,
+             activity_sender=None,heartbeat_sender=None):
     """One atomic-quality survey cycle; source scan succeeds before deliveries.
 
     Existing issues prior to monitor enable time are not notified. Desktop
@@ -467,9 +468,21 @@ def run_once(config_path,now_ms=None,collector=None,sender=None):
                     "issues":item["issues"],
                 },ensure_ascii=False)+"\n")
             sent+=1
+        activity_result={}
+        if config.get("activity_notifications_enabled"):
+            from .surveyor_activity import process_activity
+            activity_result=process_activity(
+                snapshots,config,now_ms,state.db,
+                {"records_scanned":scanned,"qa_alerts_sent":sent},
+                clean_sender=activity_sender,
+                heartbeat_sender=heartbeat_sender,
+            )
         return {"alerts_sent":sent,"alerts_considered":len(notices),
-                "alerts_delivery_failed":failed,"records_scanned":scanned,
-                "channel":config.get("channel","desktop")}
+                "alerts_delivery_failed":failed+activity_result.get("clean_notifications_failed",0)
+                                     +activity_result.get("heartbeat_failed",0),
+                "records_scanned":scanned,
+                "channel":config.get("channel","desktop"),
+                **activity_result}
     finally:
         state.close()
 
@@ -486,10 +499,41 @@ def main(argv=None):
         "--preflight",action="store_true",
         help="Verify GIS access, schemas and delivery dependency without alerts.",
     )
+    operation.add_argument(
+        "--enable-activity",action="store_true",
+        help="Start desktop notifications for newly clean surveyor events, from NOW; keep error alerts unchanged.",
+    )
+    operation.add_argument(
+        "--disable-activity",action="store_true",
+        help="Stop clean activity and heartbeat popups; keep watcher and error alerts running.",
+    )
+    operation.add_argument(
+        "--list-activity",action="store_true",
+        help="List previously delivered clean feature activity without changing QA alert inbox.",
+    )
+    parser.add_argument("--heartbeat-minutes",type=int,default=60,
+                        help="When enabling activity, send watcher status every 10–240 minutes (default 60).")
     options=parser.parse_args(argv)
     path=Path(options.config).resolve()
     log=path.with_suffix(".monitor.log")
     try:
+        if options.enable_activity or options.disable_activity:
+            from .surveyor_activity import change_activity_mode
+            result=change_activity_mode(
+                path,options.enable_activity,
+                heartbeat_minutes=options.heartbeat_minutes,
+            )
+            print(json.dumps(result,indent=2,ensure_ascii=False))
+            return 0
+        if options.list_activity:
+            from .surveyor_activity import list_recent_activity
+            state=State(path.with_suffix(".sqlite3"))
+            try:
+                print(json.dumps({"clean_activity":list_recent_activity(state.db)},
+                                 indent=2,ensure_ascii=False))
+            finally:
+                state.close()
+            return 0
         if options.send_test:
             config=json.loads(path.read_text(encoding="utf-8"))
             test={
