@@ -683,11 +683,96 @@ def launch_gui(config_path):
         except Exception as exc:
             messagebox.showerror("Activity history",str(exc),parent=window)
 
+    def configure_site_presence():
+        """Set manual on-site/off-site mode or a confirmed Rwanda work schedule."""
+        from .deferred_notifications import change_site_mode
+        try:
+            current=json.loads(config.read_text(encoding="utf-8"))
+        except Exception as exc:
+            messagebox.showerror("Site Presence",str(exc),parent=root)
+            return
+        popup=tk.Toplevel(root)
+        popup.title("REPORTAPP | Site Presence & Historical Alerts")
+        popup.geometry("590x430")
+        popup.transient(root)
+        popup.grab_set()
+        frame=ttk.Frame(popup,padding=18)
+        frame.pack(fill="both",expand=True)
+        ttk.Label(frame,text="When are surveyors on site?",
+                  font=("Segoe UI",13,"bold")).pack(anchor="w")
+        ttk.Label(
+            frame,text=(
+                "Today’s data-quality issues are notified immediately. "
+                "Previous-day issues are queued and delivered only off-site. "
+                "This setting does not pause quality scanning or edit REG data."
+            ),wraplength=530,
+        ).pack(anchor="w",pady=(6,15))
+        mode=tk.StringVar(value=current.get("surveyor_site_mode","on_site"))
+        for value,label in (
+            ("on_site","Surveyors are on site — hold older notifications"),
+            ("off_site","Surveyors have left — deliver queued older notifications"),
+            ("schedule","Automatic — use confirmed Rwanda working hours"),
+        ):
+            ttk.Radiobutton(frame,text=label,variable=mode,
+                            value=value).pack(anchor="w",pady=3)
+        timing=ttk.Frame(frame)
+        timing.pack(fill="x",pady=(12,8))
+        schedule=current.get("surveyor_site_schedule") or {}
+        start=tk.StringVar(value=schedule.get("start",""))
+        end=tk.StringVar(value=schedule.get("end",""))
+        ttk.Label(timing,text="Start (HH:MM)").grid(row=0,column=0,sticky="w")
+        ttk.Entry(timing,textvariable=start,width=12).grid(row=1,column=0,padx=(0,16))
+        ttk.Label(timing,text="End (HH:MM)").grid(row=0,column=1,sticky="w")
+        ttk.Entry(timing,textvariable=end,width=12).grid(row=1,column=1,padx=(0,16))
+        ttk.Label(timing,text="Rwanda local time (UTC+2)").grid(
+            row=1,column=2,sticky="w"
+        )
+        selected_days=set(schedule.get("weekdays",[]))
+        days_frame=ttk.Frame(frame)
+        days_frame.pack(fill="x",pady=(6,12))
+        ttk.Label(days_frame,text="Work days: ").pack(side="left",padx=(0,12))
+        labels=("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
+        flags=[]
+        for index,name in enumerate(labels):
+            state=tk.BooleanVar(value=index in selected_days)
+            flags.append(state)
+            ttk.Checkbutton(days_frame,text=name,variable=state).pack(
+                side="left",padx=(0,7)
+            )
+        def save_mode():
+            try:
+                selected=mode.get()
+                planned=(
+                    {"start":start.get(),"end":end.get(),
+                     "weekdays":[i for i,flag in enumerate(flags) if flag.get()]}
+                    if selected=="schedule" else None
+                )
+                outcome=change_site_mode(config,selected,schedule=planned)
+                messagebox.showinfo(
+                    "Site status updated",
+                    "Site mode: "+selected+"\n"
+                    "The watcher will apply this from its next scheduled scan.\n"
+                    "No existing alerts or surveyor histories were deleted.",
+                    parent=popup,
+                )
+                popup.destroy()
+            except Exception as exc:
+                messagebox.showerror("Site mode not saved",str(exc),parent=popup)
+        actions=ttk.Frame(frame)
+        actions.pack(fill="x",pady=(10,0))
+        ttk.Button(actions,text="Save Site Status",command=save_mode).pack(
+            side="left"
+        )
+        ttk.Button(actions,text="Cancel",command=popup.destroy).pack(side="right")
+
     ttk.Button(controls,text="Refresh",command=refresh).pack(side="left")
     ttk.Button(controls,text="Manage Surveyors",command=manage_surveyors).pack(
         side="left",padx=(8,0)
     )
     ttk.Button(controls,text="Clean Activity History",command=show_clean_activity).pack(
+        side="left",padx=(8,0)
+    )
+    ttk.Button(controls,text="Site Status",command=configure_site_presence).pack(
         side="left",padx=(8,0)
     )
     def zoom_selected():
