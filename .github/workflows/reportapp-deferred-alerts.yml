@@ -1,0 +1,41 @@
+name: REPORTAPP Delayed Historical Alerts
+
+on:
+  push:
+    branches: [main, feature/office-hours-alert-delivery]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py'
+      - '.github/workflows/reportapp-deferred-alerts.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  delayed-alert-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install required dependencies
+        run: python -m pip install openpyxl pillow
+      - name: Verify source compiles
+        run: |
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py
+      - name: Test delayed alerts, scheduled off-site handling and regressions
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_deferred_notifications.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_activity.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
