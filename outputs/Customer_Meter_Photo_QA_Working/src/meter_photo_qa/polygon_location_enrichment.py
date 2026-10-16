@@ -39,6 +39,8 @@ def _headers(sheet):
 
 
 def _prepare(workbook):
+    if AUDIT_SHEET in workbook.sheetnames:
+        raise ValueError("This report was already polygon-enriched; run the tool on the original report.")
     if "Asset Details" not in workbook.sheetnames or "Summary" not in workbook.sheetnames:
         raise ValueError("Expected an original REPORTAPP asset QA workbook with Asset Details and Summary.")
     summary=workbook["Summary"]
