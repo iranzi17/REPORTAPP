@@ -158,53 +158,6 @@ def _write_geometry(mark,asset,geometry):
         point=_add(mark,"Point")
         _add(point,"coordinates",_xy([geometry["x"],geometry["y"]]))
 
-def _kml(index, geometry_by_key):
-    root=_add(ET.Element(_n("kml")),"Document")
-    _add(root,"name","REG Outstanding QA Gaps — source geometry")
-    _add(root,"description",
-         "Read-only source OBJECTID locations. QA gaps from accompanying Excel, "
-         "not a Utility Network trace. Geometries in WGS84.")
-    for kind in SOURCE:
-        style=_add(root,"Style",None,id="style_"+kind)
-        line_style=_add(style,"LineStyle")
-        _add(line_style,"color",COLORS[kind])
-        _add(line_style,"width","4")
-        iconstyle=_add(style,"IconStyle")
-        _add(iconstyle,"color",COLORS[kind])
-        _add(iconstyle,"scale","1.1")
-    for kind in SOURCE:
-        relevant=[(key,rec) for key,rec in index.items() if key[0]==kind
-                  and key in geometry_by_key]
-        if not relevant:continue
-        folder=_add(root,"Folder")
-        _add(folder,"name",SOURCE[kind]["title"]+" — Outstanding Gaps")
-        for key,item in relevant:
-            mark=_add(folder,"Placemark")
-            _add(mark,"name",f"{SOURCE[kind]['title'][:-1]} OBJECTID {item['objectid']}")
-            _add(mark,"styleUrl","#style_"+kind)
-            # Plain text serialized as XML, no HTML balloon scripts.
-            _add(mark,"description",
-                 "Outstanding: "+_s(item["issues"])+"\n"+
-                 "Surveyor: "+_s(item["surveyor"])+"\n"+
-                 "Source OBJECTID: "+str(item["objectid"])+"\n"+
-                 "Source GlobalID: "+_s(item["globalid"]))
-            extended=_add(mark,"ExtendedData")
-            for field,val in (
-                ("Asset class",SOURCE[kind]["title"]),
-                ("Source OBJECTID",str(item["objectid"])),
-                ("Source GlobalID",item["globalid"]),
-                ("Surveyor",item["surveyor"]),
-                ("Outstanding issues",item["issues"]),
-                ("Recorded District",item["recorded_district"]),
-                ("Recorded Sector",item["recorded_sector"]),
-                ("Recorded Cell",item["recorded_cell"]),
-            ):
-                attr=_add(extended,"Data",None,name=field)
-                _add(attr,"value",_s(val))
-            _write_geometry(mark,kind,geometry_by_key[key])
-    return ET.tostring(root.getparent() if hasattr(root,"getparent") else
-        root,encoding="utf-8",xml_declaration=True)
-
 def _render_kml(index,geometry_by_key):
     # Build KML root separately so ElementTree emits correct KML element nesting.
     kml=ET.Element(_n("kml"))
@@ -278,7 +231,7 @@ def _lookup(index, service_url, version, gis=None, layer_factory=None):
                 if oid not in requested:continue
                 expected=requested[oid]
                 group=attrs.get("ASSETGROUP")
-                if int(group) not in SOURCE[kind]["groups"]:
+                if group is None or int(group) not in SOURCE[kind]["groups"]:
                     failures[(kind,oid)]="WRONG_ASSET_GROUP"
                     continue
                 if _gid(attrs.get("GLOBALID"))!=_gid(expected["globalid"]):

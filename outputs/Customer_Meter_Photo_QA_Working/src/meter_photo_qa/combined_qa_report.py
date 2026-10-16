@@ -16,6 +16,7 @@ from .progress_report import _as_date
 from .quality_watcher import run_quality_watcher
 from .asset_quality_runner import run_asset_quality
 from .lv_feeder_report import run_lv_feeder_report
+from .gap_kmz import export_gap_kmz
 
 SHEET_PREFIXES = {
     "lv_line": "LV",
@@ -399,9 +400,28 @@ def run_combined_qa_report(
         outcome["failure"]="Merge: "+str(exc)
         checkpoint()
         raise
+    # Companion KMZ uses the exact gap registers already captured in
+    # the mandatory Excel reports. Never substitute continuity estimates.
+    kmz_result={"status":"UNAVAILABLE","output_kmz":None}
+    try:
+        destination=output.with_name(output.stem+"_Gaps.kmz")
+        kmz_result=export_gap_kmz(
+            {"line":reports["lv_line"]["output_xlsx"],
+             "transformer":reports["transformer"]["output_xlsx"],
+             "pole":reports["pole"]["output_xlsx"]},
+            destination,service_url=service_url,version=version,gis=gis,
+        )
+        kmz_result["status"]="COMPLETE"
+        outcome["components"]["kmz"]=kmz_result["output_kmz"]
+        notify(f"Google Earth KMZ saved: {kmz_result['output_kmz']}")
+    except Exception as exc:
+        kmz_result={"status":"UNAVAILABLE","output_kmz":None,"reason":str(exc)}
+        notify("WARNING: Matching KMZ unavailable: "+str(exc)+
+               ". Excel QA remains complete. Missing map geometry is not a clean result.")
     outcome["status"]="COMPLETE"
     outcome["combined_report"]=str(output)
     outcome["geometry"]=geometry.get("status")
+    outcome["kmz"]=kmz_result["status"]
     checkpoint()
     return {
         "status":"COMPLETE","read_only":True,
@@ -410,4 +430,5 @@ def run_combined_qa_report(
         "start_date":start.isoformat(),"end_date":end.isoformat(),
         "surveyor_filter":users,"asset_reports":reports,
         "geometry":geometry,
+        "kmz":kmz_result,
     }
