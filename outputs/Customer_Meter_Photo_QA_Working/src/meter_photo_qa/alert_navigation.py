@@ -55,7 +55,7 @@ def _validate_event_context(globalid,event_time_utc_ms,actor,gdb_version):
 
 
 def zoom_uri(asset,objectid,*,globalid=None,event_time_utc_ms=None,
-             actor=None,gdb_version=None):
+             actor=None,gdb_version=None,manual=False):
     asset=str(asset).strip().casefold()
     if asset not in ASSET_LAYER_IDS:
         raise ValueError("Unsupported REG asset type.")
@@ -65,8 +65,12 @@ def zoom_uri(asset,objectid,*,globalid=None,event_time_utc_ms=None,
     if not 0<oid<=MAX_OBJECTID:
         raise ValueError("Invalid positive source OBJECTID.")
     base=f"{SCHEME}://zoom/{asset}/{oid}"
+    if manual:
+        if any(x is not None for x in (globalid,event_time_utc_ms,actor,gdb_version)):
+            raise ValueError("Manual navigation cannot claim a source edit.")
+        return base+"?mode=manual"
     if all(x is None for x in (globalid,event_time_utc_ms,actor,gdb_version)):
-        return base  # Legacy user-entered "Find Asset" has no edit identity.
+        return base  # Old unverified alert; bridge will refuse to execute.
     gid,event,by,ver=_validate_event_context(
         globalid,event_time_utc_ms,actor,gdb_version
     )
@@ -91,16 +95,19 @@ def _parse_components(uri):
     options={}
     if parts.query:
         params=parse_qs(parts.query,strict_parsing=True,keep_blank_values=True)
-        if set(params)!={"gid","event_ms","actor","ver"} or any(
-            len(v)!=1 for v in params.values()
-        ):
-            raise ValueError("Unrecognized or incomplete source event context.")
-        gid,event,by,ver=_validate_event_context(
-            params["gid"][0],params["event_ms"][0],
-            params["actor"][0],params["ver"][0],
-        )
-        options={"globalid":gid,"event_time_utc_ms":event,
-                 "actor":by,"gdb_version":ver}
+        if params=={"mode":["manual"]}:
+            options={"manual":True}
+        else:
+            if set(params)!={"gid","event_ms","actor","ver"} or any(
+                len(v)!=1 for v in params.values()
+            ):
+                raise ValueError("Unrecognized or incomplete source event context.")
+            gid,event,by,ver=_validate_event_context(
+                params["gid"][0],params["event_ms"][0],
+                params["actor"][0],params["ver"][0],
+            )
+            options={"globalid":gid,"event_time_utc_ms":event,
+                     "actor":by,"gdb_version":ver}
     canonical=zoom_uri(asset,oid,**options)
     return asset,oid,canonical,options
 
@@ -155,9 +162,12 @@ def enqueue(uri,folder=None,now=None):
     request={
         "version":1,"request_id":identity,"asset":asset,"objectid":oid,
         "layer_id":ASSET_LAYER_IDS[asset],"service_url":SERVICE_URL,
-        "created_utc_ms":timestamp,"origin":"REPORTAPP_NOTIFICATION",
+        "created_utc_ms":timestamp,
+        "origin":("REPORTAPP_VERIFIED_ALERT" if "globalid" in metadata else
+                  "REPORTAPP_MANUAL_FIND" if metadata.get("manual") else
+                  "REPORTAPP_LEGACY_UNVERIFIED"),
     }
-    if metadata:
+    if "globalid" in metadata:
         request.update({
             "expected_globalid":metadata["globalid"],
             "expected_event_utc_ms":metadata["event_time_utc_ms"],
