@@ -12,7 +12,7 @@ from unittest.mock import patch
 import zipfile
 
 from maintenance import self_monitor as m
-from maintenance.build_safe_release import build
+from maintenance.build_safe_release import build, ALLOWED as RELEASE_FILES
 
 TARGET = "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py"
 TAG = "reportapp-safe-v20261016-001"
@@ -63,7 +63,11 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_valid_release_package(self):
         payload = m._validate_zip(self.package(), TAG)
-        self.assertEqual(set(payload), set(m.ALLOWED))
+        # Stage 1 rollout: old release builder intentionally packages the
+        # previous allowlist so office v2 can install the new maintainer
+        # without exposing toolbox paths before review.
+        self.assertEqual(set(payload), set(RELEASE_FILES))
+        self.assertTrue(set(payload).issubset(m.ALLOWED))
         self.assertEqual(payload[TARGET], b"IMPROVED = 2\n")
 
     def test_new_allowlisted_module_is_installed_and_removed_on_failure(self):
@@ -99,6 +103,25 @@ class MaintenanceTests(unittest.TestCase):
                 z.writestr(name,contents_bytes+(b"# modified" if name==TARGET else b""))
         with self.assertRaisesRegex(ValueError, "hash"):
             m._validate_zip(archive.getvalue(), TAG)
+
+    def test_allowlisted_python_toolbox_and_kmz_source_only(self):
+        toolbox="outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt"
+        helper="outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/gap_kmz.py"
+        payloads={
+            toolbox:b"print('safe ArcGIS toolbox')\n",
+            helper:b"print('read only helper')\n",
+        }
+        manifest={
+            "format":1,"repository":m.REPO,"tag":TAG,
+            "files":{p:hashlib.sha256(v).hexdigest() for p,v in payloads.items()},
+        }
+        archive=io.BytesIO()
+        with zipfile.ZipFile(archive,"w") as z:
+            z.writestr("manifest.json",json.dumps(manifest))
+            for p,v in payloads.items():
+                z.writestr(p,v)
+        result=m._validate_zip(archive.getvalue(),TAG)
+        self.assertEqual(set(result),set(payloads))
 
     def test_forbidden_files_not_accepted(self):
         forbidden = [
