@@ -186,8 +186,8 @@ class NavigationTests(unittest.TestCase):
                    event_time_utc_ms=1792161960000,
                    issues=["Append Cable missing"],created_user="ninamenye9683",
                    last_edited_user="ninamenye9683")
-        with patch.dict("sys.modules",{"winotify":SimpleNamespace(Notification=mock_notify)}), \\
-             patch("meter_photo_qa.alert_navigation.is_registered",return_value=True), \\
+        with patch.dict("sys.modules",{"winotify":SimpleNamespace(Notification=mock_notify)}), \
+             patch("meter_photo_qa.alert_navigation.is_registered",return_value=True), \
              patch("meter_photo_qa.alert_navigation.zoom_uri",
                    side_effect=TypeError("unexpected keyword argument")):
             deliver(alert,{"channel":"desktop","version":"sde.DEFAULT"})
