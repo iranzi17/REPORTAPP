@@ -8,7 +8,7 @@ from pathlib import Path
 
 from meter_photo_qa.notification_inbox import (
     connect_inbox,record_alert,mark_delivery,import_legacy_events,
-    list_alerts,set_review,get_alert,format_details,
+    list_alerts,set_review,get_alert,format_details,queue_find_asset,
 )
 from meter_photo_qa.surveyor_notifications import run_once
 
@@ -33,6 +33,43 @@ class InboxTests(unittest.TestCase):
                       "Manufacturer missing: Notes must state no name plate"],
             "issue_digest":"example-digest",
         }
+
+    def test_find_asset_queues_any_accessible_asset_without_alert(self):
+        with tempfile.TemporaryDirectory() as request_folder:
+            for label,asset,layer in (
+                ("LV Pole","pole",12),
+                ("LV Line","line",10),
+                ("Transformer","transformer",7),
+            ):
+                with self.subTest(label=label):
+                    queued=queue_find_asset(
+                        label," 3510143 ",folder=request_folder)
+                    request=queued["request"]
+                    self.assertEqual(request["asset"],asset)
+                    self.assertEqual(request["objectid"],3510143)
+                    self.assertEqual(request["layer_id"],layer)
+                    self.assertEqual(request["origin"],"REPORTAPP_NOTIFICATION")
+                    self.assertTrue(Path(queued["queue_file"]).exists())
+            # Find Asset must not create a quality alert.
+            conn=connect_inbox(self.config)
+            try:
+                self.assertEqual(list_alerts(conn,status="ALL"),[])
+            finally:
+                conn.close()
+            self.assertEqual(len(list(Path(request_folder).glob("*.json"))),3)
+
+    def test_find_asset_rejects_bad_inputs_without_writing_requests(self):
+        with tempfile.TemporaryDirectory() as request_folder:
+            for label,objectid in (
+                ("Electric Line","5"),("LV Line",""),
+                ("LV Pole","0"),("LV Line","-1"),
+                ("Transformer","1.25"),("LV Line","42;DROP"),
+                ("LV Pole","9223372036854775808"),
+            ):
+                with self.subTest(label=label,objectid=objectid):
+                    with self.assertRaises(ValueError):
+                        queue_find_asset(label,objectid,folder=request_folder)
+            self.assertEqual(list(Path(request_folder).glob("*")),[])
 
     def test_inbox_persists_review_and_reopen_without_source_writes(self):
         conn=connect_inbox(self.config)

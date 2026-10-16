@@ -89,6 +89,22 @@ Diagnostics: `%LOCALAPPDATA%/REPORTAPP/Navigation/bridge-errors.log` and
 `navigation-errors.log`. Missing authentication, missing features, wrong versions,
 no active map and definition-query exclusions require user correction in Pro.
 
+## Find Asset in the Quality Notification Inbox
+
+The Inbox includes a separate **Find Asset** control for **LV Pole, LV Line,
+and Transformer**. Enter the REG source OBJECTID and click
+**Find & Zoom in ArcGIS Pro**. This works without a corresponding QA alert:
+the request goes into the existing validated local navigation queue and
+the active Pro 3.4 bridge checks the matching FeatureServer sublayer.
+
+The control reports **queued**, not successful, until ArcGIS Pro actually
+selects the source feature. The source must be available in the active map's
+authorized version and pass layer filtering. This does not insert alerts,
+change the alert search/list/counts, alter review notes, change monitoring
+configuration, or edit REG features. The Python Inbox must be restarted
+after pulling updated source. The existing installed 1.0.2 add-in can handle
+the request; no C# rebuild is needed for the Find Asset control.
+
 ## Selection-safety correction (requires rebuild)
 
 A live office test on 2026-10-16 found that failed navigation requests

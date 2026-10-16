@@ -244,6 +244,26 @@ def format_details(record):
                   "REVIEWED means reviewed in REPORTAPP only; no REG asset is modified."])
     return "\n".join(lines)
 
+FIND_ASSET_OPTIONS = {
+    "LV Pole": "pole",
+    "LV Line": "line",
+    "Transformer": "transformer",
+}
+
+def queue_find_asset(asset_label, objectid, *, folder=None):
+    """Queue a read-only zoom for ANY accessible REG asset, not just QA alerts.
+
+    No inbox query, alert insertion, monitor configuration change, or REG write.
+    The ArcGIS Pro add-in performs source/version and availability checks.
+    """
+    from .alert_navigation import enqueue, zoom_uri
+    asset=FIND_ASSET_OPTIONS.get(str(asset_label).strip())
+    if asset is None:
+        raise ValueError("Choose LV Pole, LV Line or Transformer.")
+    uri=zoom_uri(asset,str(objectid).strip())
+    return enqueue(uri,folder=folder)
+
+
 def launch_gui(config_path):
     # Import lazily so scheduled monitoring never imports GUI components.
     import tkinter as tk
@@ -275,6 +295,48 @@ def launch_gui(config_path):
     ttk.Label(controls,text="Search username / OBJECTID / GlobalID").pack(side="left")
     search=ttk.Entry(controls,textvariable=search_value,width=35)
     search.pack(side="left",padx=(8,10))
+
+    # Independent from the alert-only search. Do not create an alert for
+    # a clean asset; the bridge can open any accessible source OBJECTID.
+    find_panel=ttk.LabelFrame(
+        root,text="Find Asset — any REG feature (even without a quality alert)",
+        padding=(10,7),
+    )
+    find_panel.pack(fill="x",padx=12,pady=(0,8))
+    asset_choice=tk.StringVar(value="LV Line")
+    find_oid=tk.StringVar()
+    find_status=tk.StringVar(value="Select asset type and enter its source OBJECTID.")
+    ttk.Label(find_panel,text="Asset").pack(side="left")
+    asset_picker=ttk.Combobox(
+        find_panel,textvariable=asset_choice,
+        values=tuple(FIND_ASSET_OPTIONS),state="readonly",width=15,
+    )
+    asset_picker.pack(side="left",padx=(6,12))
+    ttk.Label(find_panel,text="OBJECTID").pack(side="left")
+    oid_entry=ttk.Entry(find_panel,textvariable=find_oid,width=19)
+    oid_entry.pack(side="left",padx=(6,12))
+
+    def find_asset():
+        try:
+            result=queue_find_asset(asset_choice.get(),find_oid.get())
+            request=result["request"]
+            find_status.set(
+                f"Queued {asset_choice.get()} OBJECTID {request['objectid']}; "
+                "ArcGIS Pro will zoom if the record is accessible."
+            )
+        except Exception as exc:
+            find_status.set("Unable to queue navigation. Check asset and OBJECTID.")
+            messagebox.showerror("Find Asset",str(exc),parent=root)
+
+    ttk.Button(
+        find_panel,text="Find & Zoom in ArcGIS Pro",command=find_asset
+    ).pack(side="left")
+    # This feedback is deliberately 'queued', not 'found', until the
+    # separate ArcGIS Pro bridge finishes its selection.
+    ttk.Label(root,textvariable=find_status).pack(
+        fill="x",padx=18,pady=(0,6)
+    )
+    oid_entry.bind("<Return>",lambda _event:find_asset())
 
     tree_frame=ttk.Frame(root,padding=(12,0,12,0))
     tree_frame.pack(fill="both",expand=True)
