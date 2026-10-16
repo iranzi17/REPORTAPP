@@ -347,7 +347,16 @@ def preflight(config_path, *, collector=None, now_ms=None, check_delivery=True):
 
 
 def _alert_text(alert):
+    source_date=_dt.datetime.fromtimestamp(
+        int(alert.get("event_time_utc_ms") or 0)/1000,
+        _dt.timezone(_dt.timedelta(hours=2))
+    ).strftime("%Y-%m-%d %H:%M Rwanda time")
+    prefix=(
+        "HISTORICAL RECORD — for retrospective review.\n"
+        if alert.get("deferred_historical") else ""
+    )
     return (
+        prefix+f"Source event: {source_date}\n"
         f"{alert['asset'].upper()} | {alert['username']} ({alert['event_type']}) | "
         f"ObjectID {alert['objectid']}\n"
         f"GlobalID {alert['globalid']}\n"
@@ -360,7 +369,11 @@ def _alert_text(alert):
 def deliver(alert,config):
     """Selected local desktop notification or recipient email. Never silent."""
     channel=config.get("channel","desktop")
-    subject=f"REG QA: {alert['asset']} gaps - {alert['username']}"
+    subject=(
+        f"REG QA HISTORICAL: {alert['asset']} - {alert['username']}"
+        if alert.get("deferred_historical") else
+        f"REG QA: {alert['asset']} gaps - {alert['username']}"
+    )
     message=_alert_text(alert)
     if channel=="desktop":
         try:
@@ -438,9 +451,16 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                 records,asset,fields,domains,config,now_ms,state,
                 rules,phase_expectations
             ))
+        # Previous-day (Rwanda local date) notifications are retained for
+        # off-site delivery; today's alerts remain immediate.
+        from .deferred_notifications import plan_delivery, mark_delivered, is_historical
+        deliveries,deferred_count=plan_delivery(
+            notices,snapshots,config,now_ms,state.db
+        )
         sent=0
         failed=0
-        for item in notices:
+        historical_sent=0
+        for item in deliveries:
             # Persist first so any transient popup cannot be the only record.
             inbox_id=record_alert(state.db,item,now_ms)
             try:
@@ -459,6 +479,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                 item["asset"],item["objectid"],item["globalid"],
                 item["issue_digest"],now_ms
             )
+            mark_delivered(state.db,item)
             mark_delivery(state.db,inbox_id,"SENT")
             with logfile.open("a",encoding="utf-8") as fh:
                 fh.write(json.dumps({
@@ -468,6 +489,8 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                     "issues":item["issues"],
                 },ensure_ascii=False)+"\n")
             sent+=1
+            if is_historical(item["event_time_utc_ms"],now_ms):
+                historical_sent+=1
         activity_result={}
         if config.get("activity_notifications_enabled"):
             from .surveyor_activity import process_activity
@@ -482,6 +505,8 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                                      +activity_result.get("heartbeat_failed",0),
                 "records_scanned":scanned,
                 "channel":config.get("channel","desktop"),
+                "historical_alerts_queued":deferred_count,
+                "historical_alerts_released_this_scan":historical_sent,
                 **activity_result}
     finally:
         state.close()

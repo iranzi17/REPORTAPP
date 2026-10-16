@@ -264,6 +264,156 @@ def queue_find_asset(asset_label, objectid, *, folder=None):
     return enqueue(uri,folder=folder)
 
 
+def bootstrap_maintainer_update(*,repository=None):
+    """One-time user-confirmed GitHub fast-forward; never reset hard or force.
+
+    Needed ONLY because the already-installed v1 maintainer can auto-install
+    Inbox UI updates but intentionally rejects live watcher code updates.
+    Backups go outside Git, all changed paths are reviewed against the
+    explicit upgrade allowlist, and local regression failures restore bytes.
+    """
+    import subprocess
+    import shutil
+    import sys
+    from datetime import datetime,timezone
+
+    repo=(Path(repository).resolve() if repository else
+          Path(__file__).resolve().parents[4])
+    prefix="outputs/Customer_Meter_Photo_QA_Working/"
+    allowed={
+        ".github/workflows/reportapp-deferred-alerts.yml",
+        ".github/workflows/reportapp-bootstrap-inbox.yml",
+        ".github/workflows/reportapp-managed-release.yml",
+        "maintenance/build_bootstrap_inbox_release.py",
+        "maintenance/README.md",
+        ".github/workflows/reportapp-safe-release.yml",
+        "maintenance/self_monitor.py",
+        "maintenance/build_safe_release.py",
+        "maintenance/tests/test_self_monitor.py",
+        prefix+"src/meter_photo_qa/surveyor_notifications.py",
+        prefix+"src/meter_photo_qa/surveyor_activity.py",
+        prefix+"src/meter_photo_qa/deferred_notifications.py",
+        prefix+"src/meter_photo_qa/notification_inbox.py",
+        prefix+"tests/test_deferred_notifications.py",
+        prefix+"docs/DEFERRED_ALERTS.md",
+    }
+    def git(*args):
+        result=subprocess.run(
+            ["git","-C",str(repo),*args],
+            capture_output=True,text=True,timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                "Git operation failed: "+str(args[0])+
+                " (exit "+str(result.returncode)+"). "+
+                result.stderr[:350]
+            )
+        return result.stdout.strip()
+    if not (repo/".git").is_dir():
+        raise RuntimeError("REPORTAPP is not an ordinary Git working tree.")
+    if git("branch","--show-current")!="main":
+        raise RuntimeError("Only the tested REPORTAPP main branch may be upgraded.")
+    origin=git("remote","get-url","origin")
+    if origin.rstrip("/").removesuffix(".git") not in (
+        "https://github.com/iranzi17/REPORTAPP",
+        "git@github.com:iranzi17/REPORTAPP",
+    ):
+        raise RuntimeError("Unexpected Git remote; update blocked.")
+    git("fetch","--no-tags","origin","main")
+    # v1 self-maintenance writes the *approved Inbox source* into the checkout.
+    # That one tracked file is expected to appear modified before git HEAD is
+    # advanced; verify it is byte-for-byte identical to origin/main.
+    inbox_file=prefix+"src/meter_photo_qa/notification_inbox.py"
+    dirty=[line[3:] for line in git(
+        "status","--porcelain","--untracked-files=no"
+    ).splitlines() if line]
+    if dirty and set(dirty)!={inbox_file}:
+        raise RuntimeError(
+            "Unrelated tracked local files are modified; preserving them. "
+            "An engineer must review the changes before upgrading."
+        )
+    def git_blob(revision,path):
+        result=subprocess.run(
+            ["git","-C",str(repo),"show",revision+":"+path],
+            capture_output=True,timeout=30,
+        )
+        if result.returncode:
+            raise RuntimeError("Unable to verify approved Inbox file.")
+        return result.stdout
+    if dirty and (repo/inbox_file).read_bytes()!=git_blob("origin/main",inbox_file):
+        raise RuntimeError(
+            "Local Inbox differs from the approved GitHub release; "
+            "update blocked to protect local work."
+        )
+    git("merge-base","--is-ancestor","HEAD","origin/main")
+    names=[x for x in git("diff","--name-only","HEAD","origin/main").splitlines() if x]
+    if not names:
+        return {"status":"UP_TO_DATE","files_changed":0}
+    disallowed=sorted(set(names)-allowed)
+    if disallowed:
+        raise RuntimeError(
+            "Update includes unrelated paths and was blocked: "+
+            ", ".join(disallowed[:5])
+        )
+    if "maintenance/self_monitor.py" not in names:
+        raise RuntimeError("Approved maintainer upgrade not present on main.")
+    local=Path(os.environ.get("LOCALAPPDATA") or Path.home())/"REPORTAPP"/"Maintenance"
+    backup=local/"bootstrap_backups"/datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    backup.mkdir(parents=True,exist_ok=False)
+    originals={}
+    for name in names:
+        source=repo/name
+        originals[name]=source.read_bytes() if source.is_file() else None
+        if originals[name] is not None:
+            archived=backup/name
+            archived.parent.mkdir(parents=True,exist_ok=True)
+            archived.write_bytes(originals[name])
+    try:
+        if dirty:
+            # Safely normalize only the already-backed-up, verified Inbox
+            # so Git can fast-forward. NEVER discard any other tracked file.
+            (repo/inbox_file).write_bytes(git_blob("HEAD",inbox_file))
+        git("merge","--ff-only","origin/main")
+        python=Path(sys.prefix)/("python.exe" if os.name=="nt" else "bin/python")
+        if not python.is_file():
+            raise RuntimeError("Standalone ArcGIS Pro Python missing for smoke tests.")
+        source_tests=repo/prefix/"tests"
+        environment=os.environ.copy()
+        environment["PYTHONPATH"]=str(repo/prefix/"src")
+        for name in (
+            "test_deferred_notifications.py",
+            "test_surveyor_notifications.py",
+            "test_surveyor_activity.py",
+            "test_notification_inbox.py",
+        ):
+            result=subprocess.run(
+                [str(python),"-m","unittest","discover",
+                 "-s",str(source_tests),"-p",name],
+                cwd=str(repo),env=environment,
+                capture_output=True,text=True,timeout=120,
+            )
+            if result.returncode:
+                raise RuntimeError("Local regression failure in "+name)
+    except Exception:
+        # Do not reset --hard: that can erase unrelated local GIS work.
+        # Restore only the exact upgraded paths from preserved original bytes.
+        for name,prior in originals.items():
+            target=repo/name
+            if prior is None:
+                target.unlink(missing_ok=True)
+            else:
+                temporary=target.with_name(target.name+".reportapp-restore")
+                temporary.write_bytes(prior)
+                os.replace(temporary,target)
+        raise
+    return {
+        "status":"UPGRADED_AND_TESTED",
+        "files_changed":len(names),
+        "backup_folder":str(backup),
+        "maintainer_auto_releases_enabled":True,
+    }
+
+
 def launch_gui(config_path):
     # Import lazily so scheduled monitoring never imports GUI components.
     import tkinter as tk
@@ -683,6 +833,97 @@ def launch_gui(config_path):
         except Exception as exc:
             messagebox.showerror("Activity history",str(exc),parent=window)
 
+    def configure_site_presence():
+        """Set manual on-site/off-site mode or a confirmed Rwanda work schedule."""
+        try:
+            from .deferred_notifications import change_site_mode
+        except ImportError:
+            messagebox.showinfo(
+                "Maintenance upgrade required",
+                "The site-hours watcher is not installed yet. "
+                "Click Install Approved Update first, then reopen this Inbox.",
+                parent=root,
+            )
+            return
+        try:
+            current=json.loads(config.read_text(encoding="utf-8"))
+        except Exception as exc:
+            messagebox.showerror("Site Presence",str(exc),parent=root)
+            return
+        popup=tk.Toplevel(root)
+        popup.title("REPORTAPP | Site Presence & Historical Alerts")
+        popup.geometry("590x430")
+        popup.transient(root)
+        popup.grab_set()
+        frame=ttk.Frame(popup,padding=18)
+        frame.pack(fill="both",expand=True)
+        ttk.Label(frame,text="When are surveyors on site?",
+                  font=("Segoe UI",13,"bold")).pack(anchor="w")
+        ttk.Label(
+            frame,text=(
+                "Today’s data-quality issues are notified immediately. "
+                "Previous-day issues are queued and delivered only off-site. "
+                "This setting does not pause quality scanning or edit REG data."
+            ),wraplength=530,
+        ).pack(anchor="w",pady=(6,15))
+        mode=tk.StringVar(value=current.get("surveyor_site_mode","on_site"))
+        for value,label in (
+            ("on_site","Surveyors are on site — hold older notifications"),
+            ("off_site","Surveyors have left — deliver queued older notifications"),
+            ("schedule","Automatic — use confirmed Rwanda working hours"),
+        ):
+            ttk.Radiobutton(frame,text=label,variable=mode,
+                            value=value).pack(anchor="w",pady=3)
+        timing=ttk.Frame(frame)
+        timing.pack(fill="x",pady=(12,8))
+        schedule=current.get("surveyor_site_schedule") or {}
+        start=tk.StringVar(value=schedule.get("start",""))
+        end=tk.StringVar(value=schedule.get("end",""))
+        ttk.Label(timing,text="Start (HH:MM)").grid(row=0,column=0,sticky="w")
+        ttk.Entry(timing,textvariable=start,width=12).grid(row=1,column=0,padx=(0,16))
+        ttk.Label(timing,text="End (HH:MM)").grid(row=0,column=1,sticky="w")
+        ttk.Entry(timing,textvariable=end,width=12).grid(row=1,column=1,padx=(0,16))
+        ttk.Label(timing,text="Rwanda local time (UTC+2)").grid(
+            row=1,column=2,sticky="w"
+        )
+        selected_days=set(schedule.get("weekdays",[]))
+        days_frame=ttk.Frame(frame)
+        days_frame.pack(fill="x",pady=(6,12))
+        ttk.Label(days_frame,text="Work days: ").pack(side="left",padx=(0,12))
+        labels=("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
+        flags=[]
+        for index,name in enumerate(labels):
+            state=tk.BooleanVar(value=index in selected_days)
+            flags.append(state)
+            ttk.Checkbutton(days_frame,text=name,variable=state).pack(
+                side="left",padx=(0,7)
+            )
+        def save_mode():
+            try:
+                selected=mode.get()
+                planned=(
+                    {"start":start.get(),"end":end.get(),
+                     "weekdays":[i for i,flag in enumerate(flags) if flag.get()]}
+                    if selected=="schedule" else None
+                )
+                outcome=change_site_mode(config,selected,schedule=planned)
+                messagebox.showinfo(
+                    "Site status updated",
+                    "Site mode: "+selected+"\n"
+                    "The watcher will apply this from its next scheduled scan.\n"
+                    "No existing alerts or surveyor histories were deleted.",
+                    parent=popup,
+                )
+                popup.destroy()
+            except Exception as exc:
+                messagebox.showerror("Site mode not saved",str(exc),parent=popup)
+        actions=ttk.Frame(frame)
+        actions.pack(fill="x",pady=(10,0))
+        ttk.Button(actions,text="Save Site Status",command=save_mode).pack(
+            side="left"
+        )
+        ttk.Button(actions,text="Cancel",command=popup.destroy).pack(side="right")
+
     ttk.Button(controls,text="Refresh",command=refresh).pack(side="left")
     ttk.Button(controls,text="Manage Surveyors",command=manage_surveyors).pack(
         side="left",padx=(8,0)
@@ -690,6 +931,43 @@ def launch_gui(config_path):
     ttk.Button(controls,text="Clean Activity History",command=show_clean_activity).pack(
         side="left",padx=(8,0)
     )
+    ttk.Button(controls,text="Site Status",command=configure_site_presence).pack(
+        side="left",padx=(8,0)
+    )
+    def upgrade_maintainer():
+        if not messagebox.askyesno(
+            "REPORTAPP Maintenance Upgrade",
+            "Install reviewed REPORTAPP maintenance and watcher updates?\n\n"
+            "This is a one-time guarded upgrade from GitHub main. "
+            "All changed application files will be backed up and tests will "
+            "run locally. Surveyor accounts, REG data, monitor configuration "
+            "and notification history will not be overwritten.\n\n"
+            "Changes to unrelated or locally modified tracked files will be "
+            "refused. If tests fail, prior code bytes will be restored.\n\n"
+            "Continue?",parent=root
+        ):
+            return
+        root.configure(cursor="watch")
+        root.update_idletasks()
+        try:
+            result=bootstrap_maintainer_update()
+            messagebox.showinfo(
+                "Maintenance upgrade",
+                "Status: "+result["status"]+"\n"
+                "Files changed: "+str(result["files_changed"])+"\n"
+                "Close and reopen the Inbox to load any new code.\n"
+                "The one-minute watcher continues to use its existing task.",
+                parent=root,
+            )
+        except Exception as exc:
+            messagebox.showerror("Safe upgrade stopped",str(exc),parent=root)
+        finally:
+            root.configure(cursor="")
+    ttk.Button(
+        controls,text="Install Approved Update",
+        command=upgrade_maintainer,
+    ).pack(side="left",padx=(8,0))
+
     def zoom_selected():
         from .alert_navigation import enqueue, zoom_uri
         if selected_id[0] is None:

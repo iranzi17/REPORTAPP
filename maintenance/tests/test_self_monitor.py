@@ -14,7 +14,7 @@ import zipfile
 from maintenance import self_monitor as m
 from maintenance.build_safe_release import build
 
-TARGET = next(iter(m.ALLOWED))
+TARGET = "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py"
 TAG = "reportapp-safe-v20261016-001"
 
 
@@ -26,6 +26,13 @@ class MaintenanceTests(unittest.TestCase):
         self.target = self.root / TARGET
         self.target.parent.mkdir(parents=True)
         self.target.write_text("ORIGINAL = 1\n", encoding="utf-8")
+        from maintenance.build_safe_release import ALLOWED
+        for rel in ALLOWED:
+            if rel == TARGET:
+                continue
+            source=self.root / rel
+            source.parent.mkdir(parents=True,exist_ok=True)
+            source.write_text("SAFE_STUB = True\n",encoding="utf-8")
         self.work = self.root / "outputs" / "Customer_Meter_Photo_QA_Working"
         self.local = Path(self.temp.name) / "local"
         self.nav = Path(self.temp.name) / "navigation"
@@ -56,8 +63,26 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_valid_release_package(self):
         payload = m._validate_zip(self.package(), TAG)
-        self.assertEqual(list(payload), [TARGET])
+        self.assertEqual(set(payload), set(m.ALLOWED))
         self.assertEqual(payload[TARGET], b"IMPROVED = 2\n")
+
+    def test_new_allowlisted_module_is_installed_and_removed_on_failure(self):
+        source="outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py"
+        file=self.root/source
+        file.unlink()
+        self.assertFalse(file.exists())
+        archive=io.BytesIO()
+        payload=b"SAFE_NEW_MODULE = True\n"
+        meta={"format":1,"repository":m.REPO,"tag":TAG,"files":{
+            source:hashlib.sha256(payload).hexdigest()
+        }}
+        with zipfile.ZipFile(archive,"w") as z:
+            z.writestr("manifest.json",json.dumps(meta))
+            z.writestr(source,payload)
+        with patch.object(m,"_smoke_test",side_effect=RuntimeError("validation failed")):
+            with self.assertRaises(RuntimeError):
+                m.apply_update({"tag_name":TAG},archive.getvalue())
+        self.assertFalse(file.exists())
 
     def test_different_tag_and_tampered_content_rejected(self):
         data = self.package()
@@ -65,18 +90,20 @@ class MaintenanceTests(unittest.TestCase):
             m._validate_zip(data, "reportapp-safe-v20261016-002")
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             original = json.loads(z.read("manifest.json"))
-            blob = z.read(TARGET)
+            contents={name:z.read(name) for name in z.namelist()
+                      if name!="manifest.json"}
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as z:
             z.writestr("manifest.json", json.dumps(original))
-            z.writestr(TARGET, blob + b"# modified")
+            for name,contents_bytes in contents.items():
+                z.writestr(name,contents_bytes+(b"# modified" if name==TARGET else b""))
         with self.assertRaisesRegex(ValueError, "hash"):
             m._validate_zip(archive.getvalue(), TAG)
 
     def test_forbidden_files_not_accepted(self):
         forbidden = [
             "outputs/Customer_Meter_Photo_QA_Working/outputs/REPORTAPP_Surveyor_Notifications/monitor_config.json",
-            "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py",
+            "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_setup.py",
             "outputs/Customer_Meter_Photo_QA_Working/addins/ReportappNavigationBridge/BridgeModule.cs",
             "../other.py",
         ]

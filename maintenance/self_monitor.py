@@ -1,7 +1,7 @@
 """REPORTAPP local health and guarded, release-only updater.
 
 No REG writes, account secrets, database migrations, or arbitrary git pull.
-Automatic deployments are limited to the Quality Inbox Python UI file.
+Automatic deployments are limited to explicitly published QA watcher and Inbox Python files.
 """
 from __future__ import annotations
 
@@ -29,15 +29,26 @@ POLICY = LOCAL / "policy.json"
 REPORT = LOCAL / "health_latest.json"
 LAST_UPDATE = LOCAL / "last_deployment.json"
 REPO = "iranzi17/REPORTAPP"
-TAG_RE = re.compile(r"^reportapp-safe-v[0-9]{8}-[0-9]{3}$")
+TAG_RE = re.compile(r"^reportapp-(?:safe|watcher)-v[0-9]{8}-[0-9]{3,9}$")
 ASSET_NAME = "reportapp-safe-update.zip"
 ALLOWED = frozenset({
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py",
+    "outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py",
+    "maintenance/self_monitor.py",
+
 })
 CONFIG = WORK / "outputs" / "REPORTAPP_Surveyor_Notifications" / "monitor_config.json"
 NAV = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "REPORTAPP" / "Navigation"
 MAX_PACKAGE = 1_000_000
 MAX_SOURCE = 300_000
+# Exact names eligible to be created by a reviewed update release.
+CREATE_ALLOWED = frozenset({
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py",
+    "outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py",
+})
 
 
 def write_json(path, obj):
@@ -250,7 +261,13 @@ def _smoke_test(python):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(WORK / "src")
     tests = WORK / "tests"
-    for name in ("test_alert_navigation.py", "test_notification_inbox.py"):
+    for name in (
+        "test_alert_navigation.py",
+        "test_notification_inbox.py",
+        "test_surveyor_notifications.py",
+        "test_surveyor_activity.py",
+        "test_deferred_notifications.py",
+    ):
         result = subprocess.run(
             [str(python), "-m", "unittest", "discover",
              "-s", str(tests), "-p", name],
@@ -274,11 +291,16 @@ def apply_update(release, data, python=None):
             target = (ROOT / rel).resolve()
             if target.parent.is_symlink() or target.is_symlink():
                 raise ValueError("Symlinked update target not allowed.")
-            if not target.is_file() or ROOT.resolve() not in target.parents:
+            if ROOT.resolve() not in target.parents or (
+                not target.is_file() and rel not in CREATE_ALLOWED
+            ):
                 raise ValueError("Target is missing or outside REPORTAPP.")
-            prior = target.read_bytes()
+            if not target.parent.is_dir():
+                raise ValueError("Update parent directory is missing.")
+            prior = target.read_bytes() if target.is_file() else None
             backup = backups / Path(rel).name
-            backup.write_bytes(prior)
+            if prior is not None:
+                backup.write_bytes(prior)
             staging = target.with_name(target.name + ".reportapp-new")
             try:
                 with staging.open("xb") as f:
@@ -294,8 +316,11 @@ def apply_update(release, data, python=None):
         for target, prior in reversed(replaced):
             rollback = target.with_name(target.name + ".reportapp-rollback")
             try:
-                rollback.write_bytes(prior)
-                os.replace(rollback, target)
+                if prior is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    rollback.write_bytes(prior)
+                    os.replace(rollback, target)
             finally:
                 rollback.unlink(missing_ok=True)
         # Retain backups for diagnostics and manual inspection.
@@ -378,7 +403,7 @@ def cycle(fetch_json=_read_json, download=_download_asset):
         tag = release["tag_name"]
         if LAST_UPDATE.exists():
             previous = json.loads(LAST_UPDATE.read_text(encoding="utf-8"))
-            if previous.get("tag") >= tag and previous.get("status") == "DEPLOYED_TESTED":
+            if previous.get("tag") == tag and previous.get("status") == "DEPLOYED_TESTED":
                 outcome["deployment"] = "UP_TO_DATE"
                 return outcome
         # Failed releases require manual review; never retry unattended.

@@ -1,0 +1,61 @@
+name: Publish CI-approved REPORTAPP watcher release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/reportapp-managed-release.yml'
+      - 'maintenance/self_monitor.py'
+      - 'maintenance/build_safe_release.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reportapp-watcher-promotion
+  cancel-in-progress: false
+
+jobs:
+  publish-after-tests:
+    if: github.repository == 'iranzi17/REPORTAPP' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install openpyxl pillow
+      - name: Validate restricted installer and rollback
+        run: python -m unittest discover -s maintenance/tests -v
+      - name: Validate quality monitor and Inbox
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_alert_navigation.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_activity.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_deferred_notifications.py -v
+      - name: Build reviewed allowlisted watcher package
+        id: package
+        run: |
+          TAG="reportapp-watcher-v$(date -u +%Y%m%d)-$(printf '%06d' "$GITHUB_RUN_NUMBER")"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          python maintenance/build_safe_release.py --tag "$TAG" --output build/reportapp-safe-update.zip
+      - name: Publish immutable versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" build/reportapp-safe-update.zip \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$RELEASE_TAG" \
+            --notes 'CI-validated REPORTAPP watcher and Inbox update. Strict allowlist, SHA256 validation, local backups, regression smoke checks and rollback. Existing v1 office agent ignores watcher releases until an explicitly confirmed one-time upgrade.'
