@@ -150,7 +150,7 @@ def collect_health(now=None):
 def _load_policy():
     if not POLICY.exists():
         return {"auto_deploy": False}
-    p = json.loads(POLICY.read_text(encoding="utf-8"))
+    p = json.loads(POLICY.read_text(encoding="utf-8-sig"))
     return p if isinstance(p, dict) else {"auto_deploy": False}
 
 
@@ -232,6 +232,8 @@ def _validate_zip(data, tag):
             raise ValueError("Update contains a forbidden or unexpected file.")
         payload = {}
         for path, expected in hashes.items():
+            if z.getinfo(path).file_size > MAX_SOURCE:
+                raise ValueError("Expanded file exceeds size limit.")
             content = z.read(path)
             if (len(content) > MAX_SOURCE
                     or not re.fullmatch(r"[0-9a-f]{64}", str(expected))
@@ -309,11 +311,62 @@ def apply_update(release, data, python=None):
     return receipt
 
 
+def report_health_issue(health, *, now=None):
+    """Optional GitHub issue upload: ONLY a sanitized issue-code summary.
+
+    Uses an explicitly authenticated GitHub CLI; never sends raw logs,
+    record IDs, usernames, service URLs, credentials, or feature attributes.
+    """
+    codes = sorted(set(health.get("issues") or []))
+    if not codes:
+        return "NO_NEW_ISSUE"
+    executable = shutil.which("gh")
+    if not executable:
+        return "GH_CLI_NOT_INSTALLED"
+    now = now or dt.datetime.now(dt.timezone.utc)
+    fingerprint = hashlib.sha256("|".join(codes).encode()).hexdigest()
+    path = LOCAL / "github_issue_state.json"
+    if path.exists():
+        prev = json.loads(path.read_text(encoding="utf-8"))
+        if prev.get("fingerprint") == fingerprint:
+            try:
+                sent = dt.datetime.fromisoformat(prev["reported_at"])
+                if now - sent < dt.timedelta(hours=12):
+                    return "ALREADY_REPORTED"
+            except (KeyError, ValueError, TypeError):
+                pass
+    body = (
+        "Automated sanitized REPORTAPP health report. No REG content included.\n\n"
+        "Issue codes: " + ", ".join(codes) + "\n"
+        "Watcher task state: " + str(health.get("watcher_task_state")) + "\n"
+        "Latest scan age (minutes): " + str(health.get("scan_age_minutes")) + "\n"
+        "Delivery failures in latest scan: "
+        + str(health.get("delivery_failures_last_scan")) + "\n"
+        "Manual diagnosis required before any watcher or service change."
+    )
+    result = subprocess.run(
+        [executable, "issue", "create", "--repo", REPO,
+         "--title", "[REPORTAPP HEALTH] " + ", ".join(codes),
+         "--body", body],
+        text=True, capture_output=True, timeout=45,
+    )
+    if result.returncode:
+        return "GH_ISSUE_REPORT_FAILED"
+    write_json(path, {"fingerprint": fingerprint, "reported_at": now.isoformat()})
+    return "GH_ISSUE_CREATED"
+
+
 def cycle(fetch_json=_read_json, download=_download_asset):
     health = collect_health()
     write_json(REPORT, health)
     outcome = {"health": health, "deployment": "DISABLED"}
-    if _load_policy().get("auto_deploy") is not True:
+    policy = _load_policy()
+    if policy.get("github_issue_reporting") is True:
+        try:
+            outcome["github_reporting"] = report_health_issue(health)
+        except Exception as exc:
+            outcome["github_reporting"] = "FAILED_" + type(exc).__name__
+    if policy.get("auto_deploy") is not True:
         return outcome
     try:
         release, asset = _load_approved_release(fetch_json)
