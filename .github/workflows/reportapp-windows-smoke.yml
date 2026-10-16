@@ -1,0 +1,37 @@
+name: REPORTAPP Windows 8.3 path smoke tests
+
+on:
+  push:
+    branches: [main, fix/windows-short-path-maintenance-smoke]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_notifications.py'
+      - '.github/workflows/reportapp-windows-smoke.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-path-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python test dependencies
+        run: python -m pip install openpyxl pillow
+      - name: Test monitor setup on Windows
+        shell: pwsh
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
+      - name: Test legacy maintenance regression gate
+        shell: pwsh
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s maintenance/tests -p test_self_monitor.py -v

@@ -314,10 +314,12 @@ class NotificationTests(unittest.TestCase):
             standalone.touch()
             with patch.object(sys,"prefix",str(env)), \
                  patch.object(sys,"exec_prefix",str(env)):
-                self.assertEqual(_standalone_python(prog),standalone)
+                # A Windows 8.3 temp root (AKIOLI~1) can resolve to a long root
+                # (AKIOLI TECHNOLOGY). Compare canonical paths, not strings.
+                self.assertEqual(_standalone_python(prog).resolve(),standalone.resolve())
                 script=_powershell("C:/test/config.json",prog,folder)
-                self.assertIn(str(standalone),script)
-                self.assertNotIn(str(prog),script)
+                self.assertIn(str(standalone.resolve()),script)
+                self.assertNotIn(str(prog.resolve()),script)
             with patch.object(sys,"prefix",str(Path(folder)/"missing")), \
                  patch.object(sys,"exec_prefix",str(Path(folder)/"missing")):
                 with self.assertRaisesRegex(RuntimeError,"standalone Python"):
@@ -343,7 +345,9 @@ class NotificationTests(unittest.TestCase):
             self.assertIn("Interactive",script)
             self.assertIn("-RunLevel Limited",script)
             self.assertNotIn("-RunLevel LeastPrivilege",script)
-            self.assertIn(str(source),script)
+            # configure_monitoring resolves the source directory before writing
+            # its PowerShell script, so compare against that canonical path.
+            self.assertIn(str(source.resolve()),script)
             with self.assertRaises(FileExistsError):
                 configure_monitoring(["ninamenye9683"],folder,
                     src_path=source,python_path=py)
