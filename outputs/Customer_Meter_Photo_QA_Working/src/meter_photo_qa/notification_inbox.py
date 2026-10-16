@@ -317,12 +317,32 @@ def bootstrap_maintainer_update(*,repository=None):
         "git@github.com:iranzi17/REPORTAPP",
     ):
         raise RuntimeError("Unexpected Git remote; update blocked.")
-    if git("status","--porcelain","--untracked-files=no"):
+    git("fetch","--no-tags","origin","main")
+    # v1 self-maintenance writes the *approved Inbox source* into the checkout.
+    # That one tracked file is expected to appear modified before git HEAD is
+    # advanced; verify it is byte-for-byte identical to origin/main.
+    inbox_file=prefix+"src/meter_photo_qa/notification_inbox.py"
+    dirty=[line[3:] for line in git(
+        "status","--porcelain","--untracked-files=no"
+    ).splitlines() if line]
+    if dirty and set(dirty)!={inbox_file}:
         raise RuntimeError(
-            "Tracked local files were modified; preserving them. "
+            "Unrelated tracked local files are modified; preserving them. "
             "An engineer must review the changes before upgrading."
         )
-    git("fetch","--no-tags","origin","main")
+    def git_blob(revision,path):
+        result=subprocess.run(
+            ["git","-C",str(repo),"show",revision+":"+path],
+            capture_output=True,timeout=30,
+        )
+        if result.returncode:
+            raise RuntimeError("Unable to verify approved Inbox file.")
+        return result.stdout
+    if dirty and (repo/inbox_file).read_bytes()!=git_blob("origin/main",inbox_file):
+        raise RuntimeError(
+            "Local Inbox differs from the approved GitHub release; "
+            "update blocked to protect local work."
+        )
     git("merge-base","--is-ancestor","HEAD","origin/main")
     names=[x for x in git("diff","--name-only","HEAD","origin/main").splitlines() if x]
     if not names:
@@ -347,6 +367,10 @@ def bootstrap_maintainer_update(*,repository=None):
             archived.parent.mkdir(parents=True,exist_ok=True)
             archived.write_bytes(originals[name])
     try:
+        if dirty:
+            # Safely normalize only the already-backed-up, verified Inbox
+            # so Git can fast-forward. NEVER discard any other tracked file.
+            (repo/inbox_file).write_bytes(git_blob("HEAD",inbox_file))
         git("merge","--ff-only","origin/main")
         python=Path(sys.prefix)/("python.exe" if os.name=="nt" else "bin/python")
         if not python.is_file():
