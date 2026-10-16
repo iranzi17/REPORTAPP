@@ -317,6 +317,8 @@ def report_health_issue(health, *, now=None):
     Uses an explicitly authenticated GitHub CLI; never sends raw logs,
     record IDs, usernames, service URLs, credentials, or feature attributes.
     """
+    if health.get("status") == "PAUSED":
+        return "WATCHER_PAUSED"
     codes = sorted(set(health.get("issues") or []))
     if not codes:
         return "NO_NEW_ISSUE"
@@ -406,10 +408,14 @@ def main(argv=None):
                         help="Read-only current health report")
     opts = parser.parse_args(argv)
     if opts.cycle:
-        print(json.dumps(cycle(), indent=2))
+        outcome = cycle()
+        write_json(LOCAL / "cycle_latest.json", outcome)
+        if sys.stdout is not None:
+            print(json.dumps(outcome, indent=2))
     else:
         report = collect_health()
-        print(json.dumps(report, indent=2))
+        if sys.stdout is not None:
+            print(json.dumps(report, indent=2))
     return 0
 
 
