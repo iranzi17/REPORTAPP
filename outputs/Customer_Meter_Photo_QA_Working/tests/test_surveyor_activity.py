@@ -213,7 +213,12 @@ class CleanSurveyorActivityTests(unittest.TestCase):
                    return_value=([],[])):
             run_once(self.config,now_ms=1_600_000,
                 collector=lambda *_a,**_k:snapshots(pole(1_300_000)),
-                activity_sender=lambda *_:None)
+                activity_sender=lambda *_:self.fail("premature toast"),
+                heartbeat_sender=lambda *_:None)
+            run_once(self.config,now_ms=3_400_000,
+                collector=lambda *_a,**_k:snapshots(pole(1_300_000)),
+                activity_sender=lambda *_:None,
+                heartbeat_sender=lambda *_:None)
         state=State(self.config.with_suffix(".sqlite3"))
         try:
             logs=list_recent_activity(state.db)
