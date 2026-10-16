@@ -355,8 +355,9 @@ def _alert_text(alert):
         "HISTORICAL RECORD — for retrospective review.\n"
         if alert.get("deferred_historical") else ""
     )
+    version=str(alert.get("source_gdb_version") or "sde.DEFAULT")
     return (
-        prefix+f"Source event: {source_date}\n"
+        prefix+f"Source event: {source_date} [GIS version: {version}]\n"
         f"{alert['asset'].upper()} | {alert['username']} ({alert['event_type']}) | "
         f"ObjectID {alert['objectid']}\n"
         f"GlobalID {alert['globalid']}\n"
@@ -388,8 +389,18 @@ def deliver(alert,config):
         # registered the reportapp:// handler. The ArcGIS Pro add-in is a
         # separate required component; without it the request stays queued.
         from .alert_navigation import is_registered,zoom_uri
-        launch=(zoom_uri(alert["asset"],alert["objectid"])
-                if is_registered() else "")
+        launch=""
+        if is_registered():
+            context={
+                "globalid":alert.get("globalid"),
+                "event_time_utc_ms":alert.get("event_time_utc_ms"),
+                "actor":alert.get("username"),
+                "gdb_version":config.get("version","sde.DEFAULT"),
+            }
+            if all(context.values()):
+                launch=zoom_uri(alert["asset"],alert["objectid"],**context)
+            # Do not show an unverified clickable link for a legacy alert
+            # missing source-event identity.
         popup=Notification(
             app_id="REPORTAPP Quality Alerts",title=subject,
             msg=message[:400],duration="long",launch=launch,
@@ -486,6 +497,10 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                     "at_utc_ms":now_ms,"status":"SENT",
                     "asset":item["asset"],"objectid":item["objectid"],
                     "globalid":item["globalid"],"username":item["username"],
+                    "source_event_utc_ms":item["event_time_utc_ms"],
+                    "source_gdb_version":config.get("version","sde.DEFAULT"),
+                    "source_event_type":item["event_type"],
+                    "source_last_editor":item["last_edited_user"],
                     "issues":item["issues"],
                 },ensure_ascii=False)+"\n")
             sent+=1

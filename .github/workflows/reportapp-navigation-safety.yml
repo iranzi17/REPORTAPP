@@ -57,7 +57,7 @@ jobs:
           Get-FileHash $package -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
-          name: ReportappNavigationBridge-v1.0.3
+          name: ReportappNavigationBridge-v1.0.4
           path: outputs/Customer_Meter_Photo_QA_Working/addins/ReportappNavigationBridge/bin/Release/net8.0-windows/ReportappNavigationBridge.esriAddInX
           if-no-files-found: error
 
@@ -68,18 +68,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ReportappNavigationBridge-v1.0.3
+          name: ReportappNavigationBridge-v1.0.4
           path: dist
       - name: Publish verified installer for user-approved installation
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view reportapp-bridge-v1.0.3 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view reportapp-bridge-v1.0.4 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Already published; refusing to replace a previous verified release.'
             exit 0
           fi
-          gh release create reportapp-bridge-v1.0.3 \
+          gh release create reportapp-bridge-v1.0.4 \
             dist/ReportappNavigationBridge.esriAddInX \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title 'REPORTAPP Navigation Bridge 1.0.3 — no delayed zooms' \
-            --notes 'ArcGIS Pro 3.4 verified .NET 8 add-in build. A zoom click expires after 15 seconds, never retries, and newer clicks supersede older requests. User-initiated pause support. Close ArcGIS Pro, back up and pause pending navigation files, install this package through the Esri installer, restart ArcGIS Pro, and test in a noncritical map. Never modifies REG data or watcher history.'
+            --title 'REPORTAPP Navigation Bridge 1.0.4 — verified surveyor edits' \
+            --notes 'ArcGIS Pro 3.4 verified .NET 8 add-in build. A QA toast includes GlobalID, exact source edit UTC timestamp, editor and sde.DEFAULT. Any mismatch blocks the zoom and leaves map selection unchanged. A click expires after 15 seconds and never retries. User-initiated pause support. Close ArcGIS Pro, back up and pause pending navigation files, install this package through the Esri installer, restart ArcGIS Pro, and test in a noncritical map. Never modifies REG data or watcher history.'

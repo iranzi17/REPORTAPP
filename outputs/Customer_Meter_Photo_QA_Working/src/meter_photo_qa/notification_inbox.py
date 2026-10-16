@@ -260,7 +260,7 @@ def queue_find_asset(asset_label, objectid, *, folder=None):
     asset=FIND_ASSET_OPTIONS.get(str(asset_label).strip())
     if asset is None:
         raise ValueError("Choose LV Pole, LV Line or Transformer.")
-    uri=zoom_uri(asset,str(objectid).strip())
+    uri=zoom_uri(asset,str(objectid).strip(),manual=True)
     return enqueue(uri,folder=folder)
 
 
@@ -820,7 +820,7 @@ def launch_gui(config_path):
                 return
             item=events[selected[0]]
             try:
-                enqueue(zoom_uri(item["asset"],item["objectid"]))
+                enqueue(zoom_uri(item["asset"],item["objectid"],manual=True))
                 messagebox.showinfo(
                     "Navigation queued","Open ArcGIS Pro to select the asset.",
                     parent=window,
@@ -1038,7 +1038,21 @@ def launch_gui(config_path):
         if rec is None:
             return
         try:
-            enqueue(zoom_uri(rec["asset"],rec["objectid"]))
+            if rec["event_time_utc_ms"] is None or rec["origin"]!="LIVE":
+                raise ValueError(
+                    "This is a historical alert without verified source edit "
+                    "details. Use the explicit Find Asset control to locate "
+                    "an OBJECTID without claiming that edit was verified."
+                )
+            cfg=json.loads(Path(config).read_text(encoding="utf-8"))
+            link=zoom_uri(
+                rec["asset"],rec["objectid"],
+                globalid=rec["globalid"],
+                event_time_utc_ms=rec["event_time_utc_ms"],
+                actor=rec["username"],
+                gdb_version=cfg.get("version","sde.DEFAULT"),
+            )
+            enqueue(link)
             messagebox.showinfo("REPORTAPP navigation",
                 "Navigation queued. Open ArcGIS Pro with the REPORTAPP add-in and a map. "
                 "If navigation fails, inspect Navigation/bridge-errors.log under LOCALAPPDATA.",

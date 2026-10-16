@@ -31,6 +31,10 @@ namespace ReportappNavigationBridge
         [JsonPropertyName("service_url")] public string ServiceUrl { get; set; } = "";
         [JsonPropertyName("created_utc_ms")] public long CreatedUtcMs { get; set; }
         [JsonPropertyName("origin")] public string Origin { get; set; } = "";
+        [JsonPropertyName("expected_globalid")] public string ExpectedGlobalId { get; set; } = "";
+        [JsonPropertyName("expected_event_utc_ms")] public long ExpectedEventUtcMs { get; set; }
+        [JsonPropertyName("expected_actor")] public string ExpectedActor { get; set; } = "";
+        [JsonPropertyName("source_gdb_version")] public string SourceGdbVersion { get; set; } = "";
     }
 
     internal class BridgeModule : Module
@@ -141,7 +145,8 @@ namespace ReportappNavigationBridge
         {
             if (req == null || !Guid.TryParseExact(req.RequestId, "N", out _) || req.Version != 1
                 || req.ObjectId <= 0
-                || req.Origin != "REPORTAPP_NOTIFICATION"
+                || (req.Origin != "REPORTAPP_VERIFIED_ALERT" &&
+                    req.Origin != "REPORTAPP_MANUAL_FIND")
                 || !string.Equals(req.ServiceUrl.TrimEnd('/'), Service,
                                   StringComparison.OrdinalIgnoreCase)
                 || ((req.Asset, req.LayerId) switch
@@ -154,6 +159,21 @@ namespace ReportappNavigationBridge
             {
                 throw new InvalidDataException("Invalid REPORTAPP zoom request.");
             }
+            var hasContext = req.ExpectedEventUtcMs != 0 || req.ExpectedGlobalId.Length != 0 ||
+                req.ExpectedActor.Length != 0 || req.SourceGdbVersion.Length != 0;
+            if (req.Origin == "REPORTAPP_VERIFIED_ALERT")
+            {
+                if (!hasContext ||
+                    !Guid.TryParse(req.ExpectedGlobalId,out _) ||
+                    req.ExpectedEventUtcMs < 946684800000 ||
+                    req.ExpectedEventUtcMs > 4102444800000 ||
+                    string.IsNullOrWhiteSpace(req.ExpectedActor) ||
+                    !string.Equals(req.SourceGdbVersion,"sde.DEFAULT",
+                                   StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Alert has no verifiable edit identity.");
+            }
+            else if (hasContext)
+                throw new InvalidDataException("Manual navigation cannot claim a surveyor edit.");
             var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - req.CreatedUtcMs;
             if (age < -1000 || age > MaxNavigationAgeMs)
                 throw new InvalidDataException(
@@ -182,27 +202,77 @@ namespace ReportappNavigationBridge
                              DateTimeOffset.FromUnixTimeMilliseconds(requestedAt).UtcDateTime.Ticks);
         }
 
-        private static bool MatchesSource(FeatureLayer layer, string exactUrl)
+
+        private static bool MatchesDataset(FeatureLayer layer, string exactUrl)
         {
             try
             {
-                // CIM connection verifies service, numeric dataset and version.
                 if (layer.GetDataConnection() is not CIMStandardDataConnection dc)
                     return false;
-                var connection = new DbConnectionStringBuilder { ConnectionString = dc.WorkspaceConnectionString };
-                if (connection.TryGetValue("VERSION", out var version) &&
-                    !string.Equals(Convert.ToString(version), "sde.DEFAULT", StringComparison.OrdinalIgnoreCase))
-                    return false;
-                if (!connection.TryGetValue("URL", out var source)) return false;
+                var connection = new DbConnectionStringBuilder
+                {
+                    ConnectionString = dc.WorkspaceConnectionString
+                };
+                if (!connection.TryGetValue("URL",out var source)) return false;
                 var root = Convert.ToString(source)?.TrimEnd('/') ?? "";
-                var candidate = root.EndsWith("/" + dc.Dataset, StringComparison.OrdinalIgnoreCase)
-                    ? root : root + "/" + dc.Dataset;
-                return string.Equals(candidate, exactUrl, StringComparison.OrdinalIgnoreCase);
+                var candidate = root.EndsWith("/"+dc.Dataset,StringComparison.OrdinalIgnoreCase)
+                    ? root : root+"/"+dc.Dataset;
+                return string.Equals(candidate,exactUrl,StringComparison.OrdinalIgnoreCase);
             }
-            catch
+            catch { return false; }
+        }
+
+        private static bool MatchesSource(FeatureLayer layer,string exactUrl)
+        {
+            if (!MatchesDataset(layer,exactUrl)) return false;
+            try
             {
-                return false;
+                if (layer.GetDataConnection() is not CIMStandardDataConnection dc)
+                    return false;
+                var connection = new DbConnectionStringBuilder
+                {
+                    ConnectionString = dc.WorkspaceConnectionString
+                };
+                return !connection.TryGetValue("VERSION",out var version) ||
+                    string.Equals(Convert.ToString(version),"sde.DEFAULT",
+                                  StringComparison.OrdinalIgnoreCase);
             }
+            catch { return false; }
+        }
+
+        private static long? EditorTimestamp(object? val)
+        {
+            // REG ArcGIS date columns represent UTC milliseconds.
+            if (val is DateTime dt)
+            {
+                if (dt.Kind==DateTimeKind.Unspecified)
+                    dt=DateTime.SpecifyKind(dt,DateTimeKind.Utc);
+                return new DateTimeOffset(dt.ToUniversalTime()).ToUnixTimeMilliseconds();
+            }
+            if (val is DateTimeOffset dto) return dto.ToUnixTimeMilliseconds();
+            if (val is long unix) return unix;
+            return null;
+        }
+
+        private static string? CheckSurveyorEdit(Row row,NavigationRequest req)
+        {
+            if (req.ExpectedEventUtcMs==0) return null; // Manual Find Asset.
+            var gid=Convert.ToString(row["GLOBALID"])?.Trim().Trim('{','}') ?? "";
+            if (!string.Equals(gid,req.ExpectedGlobalId.Trim().Trim('{','}'),
+                               StringComparison.OrdinalIgnoreCase))
+                return "GlobalID differs from the notified record. Map left unchanged.";
+            var created=EditorTimestamp(row["created_date"]);
+            var edited=EditorTimestamp(row["last_edited_date"]);
+            var sourceMs=Math.Max(created ?? 0,edited ?? 0);
+            var actualActor=edited.HasValue && (!created.HasValue || edited>created)
+                ? Convert.ToString(row["last_edited_user"])?.Trim() ?? ""
+                : Convert.ToString(row["created_user"])?.Trim() ?? "";
+            if (Math.Abs(sourceMs-req.ExpectedEventUtcMs)>2000 ||
+                !string.Equals(actualActor,req.ExpectedActor,StringComparison.OrdinalIgnoreCase))
+                return "Map feature has a DIFFERENT edit time/editor from the " +
+                       "notification; change to the matching REG version. " +
+                       "No selection or zoom performed.";
+            return null;
         }
 
         private static async Task<string?> ZoomToFeatureAsync(NavigationRequest req)
@@ -214,17 +284,27 @@ namespace ReportappNavigationBridge
             {
                 string url = Service + "/" +
                     req.LayerId.ToString(CultureInfo.InvariantCulture);
-                var matches = view.Map.GetLayersAsFlattenedList()
+                var siblings = view.Map.GetLayersAsFlattenedList()
                     .OfType<FeatureLayer>()
-                    .Where(layer => MatchesSource(layer,url))
+                    .Where(layer=>MatchesDataset(layer,url))
                     .ToList();
+                if (siblings.Any(layer=>!MatchesSource(layer,url)))
+                    return (string?)"This REG layer uses a different geodatabase version. " +
+                        "The alert comes from sde.DEFAULT. Map left unchanged.";
+                var matches = siblings.Where(layer=>MatchesSource(layer,url)).ToList();
                 if (matches.Count > 1)
                     return (string?)"Multiple source layers match; inspect the map.";
                 FeatureLayer? layer = matches.FirstOrDefault();
                 if (layer == null)
                 {
-                    // Add only the exact verified REG layer, not a similarly
-                    // named layer from another Utility Network or geodatabase.
+                    // Never silently add sde.DEFAULT into a supervisor's
+                    // branch-version map for a LIVE QA ALERT. That can make
+                    // the source timestamp disagree with the visible layers.
+                    if (req.Origin == "REPORTAPP_VERIFIED_ALERT")
+                        return (string?)"Active map does not contain the verified " +
+                            "REG sde.DEFAULT layer. Nothing was selected or added. " +
+                            "Switch to the matching source version to inspect this alert.";
+                    // An explicit manual Find Asset may add the exact service.
                     layer = LayerFactory.Instance.CreateLayer(
                         new Uri(url), view.Map) as FeatureLayer;
                     if (layer == null)
@@ -253,6 +333,11 @@ namespace ReportappNavigationBridge
                 {
                     if (!rows.MoveNext())
                         return (string?)"OBJECTID not found in the current layer/version or excluded by a filter; manual selection preserved.";
+                    using (var found = rows.Current)
+                    {
+                        var mismatch=CheckSurveyorEdit(found,req);
+                        if (mismatch!=null) return mismatch;
+                    }
                 }
                 if (!FreshAndCurrent(req,view))
                     return (string?)"A newer request or map activity superseded this click; manual selection preserved.";
