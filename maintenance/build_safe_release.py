@@ -13,7 +13,7 @@ import re
 import zipfile
 
 REPO = "iranzi17/REPORTAPP"
-TAG = re.compile(r"^reportapp-safe-v[0-9]{8}-[0-9]{3}$")
+TAG = re.compile(r"^reportapp-(?:safe|watcher)-v[0-9]{8}-[0-9]{3,9}$")
 ALLOWED = (
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py",
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py",

@@ -29,7 +29,7 @@ POLICY = LOCAL / "policy.json"
 REPORT = LOCAL / "health_latest.json"
 LAST_UPDATE = LOCAL / "last_deployment.json"
 REPO = "iranzi17/REPORTAPP"
-TAG_RE = re.compile(r"^reportapp-safe-v[0-9]{8}-[0-9]{3}$")
+TAG_RE = re.compile(r"^reportapp-(?:safe|watcher)-v[0-9]{8}-[0-9]{3,9}$")
 ASSET_NAME = "reportapp-safe-update.zip"
 ALLOWED = frozenset({
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py",
@@ -403,7 +403,7 @@ def cycle(fetch_json=_read_json, download=_download_asset):
         tag = release["tag_name"]
         if LAST_UPDATE.exists():
             previous = json.loads(LAST_UPDATE.read_text(encoding="utf-8"))
-            if previous.get("tag") >= tag and previous.get("status") == "DEPLOYED_TESTED":
+            if previous.get("tag") == tag and previous.get("status") == "DEPLOYED_TESTED":
                 outcome["deployment"] = "UP_TO_DATE"
                 return outcome
         # Failed releases require manual review; never retry unattended.

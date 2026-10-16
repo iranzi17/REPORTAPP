@@ -283,6 +283,7 @@ def bootstrap_maintainer_update(*,repository=None):
     allowed={
         ".github/workflows/reportapp-deferred-alerts.yml",
         ".github/workflows/reportapp-bootstrap-inbox.yml",
+        ".github/workflows/reportapp-managed-release.yml",
         "maintenance/build_bootstrap_inbox_release.py",
         "maintenance/self_monitor.py",
         "maintenance/build_safe_release.py",
