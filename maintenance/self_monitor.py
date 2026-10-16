@@ -177,7 +177,13 @@ def _load_approved_release(fetch_json):
     ]
     if not matches:
         return None, None
-    release = max(matches, key=lambda x: x.get("published_at") or "")
+    # Once v2 is installed, prefer tested watcher releases over the
+    # legacy Inbox-only bootstrap, even if a bootstrap was published later.
+    watchers=[
+        item for item in matches
+        if str(item.get("tag_name","")).startswith("reportapp-watcher-")
+    ]
+    release=max(watchers or matches,key=lambda x: x.get("published_at") or "")
     assets = [a for a in release.get("assets", [])
               if a.get("name") == ASSET_NAME]
     if len(assets) != 1:
