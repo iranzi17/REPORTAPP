@@ -614,8 +614,80 @@ def launch_gui(config_path):
         ttk.Button(shell,text="Close",command=dialog.destroy).pack(anchor="e")
         reload_lists()
 
+    def show_clean_activity():
+        """Separate history; never adds clean checks to the flag-only Inbox."""
+        from .surveyor_activity import list_recent_activity
+        from .alert_navigation import enqueue,zoom_uri
+        window=tk.Toplevel(root)
+        window.title("REPORTAPP | Verified Clean Surveyor Activity")
+        window.geometry("850x475")
+        frame=ttk.Frame(window,padding=12)
+        frame.pack(fill="both",expand=True)
+        ttk.Label(
+            frame,text="Recent no-gap notifications — read-only REG checks",
+            font=("Segoe UI",12,"bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            frame,text="Only events created or edited after activity monitoring was enabled. "
+                       "These are not quality issues and do not affect Inbox counts.",
+            wraplength=770,
+        ).pack(anchor="w",pady=(4,10))
+        cols=("Received","Source event","Surveyor","Asset","OBJECTID","Event")
+        table=ttk.Treeview(frame,columns=cols,show="headings",height=13)
+        widths=(166,166,140,110,95,90)
+        for col,width in zip(cols,widths):
+            table.heading(col,text=col)
+            table.column(col,width=width,stretch=col=="Surveyor")
+        table.pack(fill="both",expand=True)
+        events={}
+        def load():
+            events.clear()
+            for rid in table.get_children():
+                table.delete(rid)
+            db=connect_inbox(config)
+            try:
+                recent=list_recent_activity(db,limit=250)
+            finally:
+                db.close()
+            for number,item in enumerate(recent):
+                key=str(number)
+                events[key]=item
+                table.insert("","end",iid=key,values=(
+                    format_time(item["notified_at_ms"]),
+                    format_time(item["event_time_utc_ms"]),
+                    item["username"],item["asset"].upper(),
+                    item["objectid"],item["event_type"],
+                ))
+        def navigate():
+            selected=table.selection()
+            if not selected:
+                return
+            item=events[selected[0]]
+            try:
+                enqueue(zoom_uri(item["asset"],item["objectid"]))
+                messagebox.showinfo(
+                    "Navigation queued","Open ArcGIS Pro to select the asset.",
+                    parent=window,
+                )
+            except Exception as exc:
+                messagebox.showerror("Navigation error",str(exc),parent=window)
+        actions=ttk.Frame(frame)
+        actions.pack(fill="x",pady=(10,0))
+        ttk.Button(actions,text="Refresh",command=load).pack(side="left")
+        ttk.Button(
+            actions,text="Zoom selected asset in ArcGIS Pro",command=navigate
+        ).pack(side="left",padx=10)
+        ttk.Button(actions,text="Close",command=window.destroy).pack(side="right")
+        try:
+            load()
+        except Exception as exc:
+            messagebox.showerror("Activity history",str(exc),parent=window)
+
     ttk.Button(controls,text="Refresh",command=refresh).pack(side="left")
     ttk.Button(controls,text="Manage Surveyors",command=manage_surveyors).pack(
+        side="left",padx=(8,0)
+    )
+    ttk.Button(controls,text="Clean Activity History",command=show_clean_activity).pack(
         side="left",padx=(8,0)
     )
     def zoom_selected():
