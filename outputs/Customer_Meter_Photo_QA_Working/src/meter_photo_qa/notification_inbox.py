@@ -295,6 +295,7 @@ def bootstrap_maintainer_update(*,repository=None):
         prefix+"src/meter_photo_qa/deferred_notifications.py",
         prefix+"src/meter_photo_qa/notification_inbox.py",
         prefix+"tests/test_deferred_notifications.py",
+        prefix+"tests/test_surveyor_activity.py",
         prefix+"docs/DEFERRED_ALERTS.md",
     }
     def git(*args):
@@ -327,11 +328,6 @@ def bootstrap_maintainer_update(*,repository=None):
     dirty=[line[3:] for line in git(
         "status","--porcelain","--untracked-files=no"
     ).splitlines() if line]
-    if dirty and set(dirty)!={inbox_file}:
-        raise RuntimeError(
-            "Unrelated tracked local files are modified; preserving them. "
-            "An engineer must review the changes before upgrading."
-        )
     def git_blob(revision,path):
         result=subprocess.run(
             ["git","-C",str(repo),"show",revision+":"+path],
@@ -340,7 +336,7 @@ def bootstrap_maintainer_update(*,repository=None):
         if result.returncode:
             raise RuntimeError("Unable to verify approved Inbox file.")
         return result.stdout
-    if dirty and (repo/inbox_file).read_bytes()!=git_blob("origin/main",inbox_file):
+    if inbox_file in dirty and (repo/inbox_file).read_bytes()!=git_blob("origin/main",inbox_file):
         raise RuntimeError(
             "Local Inbox differs from the approved GitHub release; "
             "update blocked to protect local work."
@@ -349,6 +345,15 @@ def bootstrap_maintainer_update(*,repository=None):
     names=[x for x in git("diff","--name-only","HEAD","origin/main").splitlines() if x]
     if not names:
         return {"status":"UP_TO_DATE","files_changed":0}
+    # Keep unrelated local edits untouched. Block ONLY paths that the
+    # approved incoming release would overwrite; never discard user work.
+    overlap=sorted((set(dirty) & set(names))-{inbox_file})
+    if overlap:
+        raise RuntimeError(
+            "Upgrade blocked because these locally modified files would be "
+            "changed by the update: "+", ".join(overlap[:7])+
+            ". Local files were preserved."
+        )
     disallowed=sorted(set(names)-allowed)
     if disallowed:
         raise RuntimeError(
@@ -369,7 +374,7 @@ def bootstrap_maintainer_update(*,repository=None):
             archived.parent.mkdir(parents=True,exist_ok=True)
             archived.write_bytes(originals[name])
     try:
-        if dirty:
+        if inbox_file in dirty:
             # Safely normalize only the already-backed-up, verified Inbox
             # so Git can fast-forward. NEVER discard any other tracked file.
             (repo/inbox_file).write_bytes(git_blob("HEAD",inbox_file))
