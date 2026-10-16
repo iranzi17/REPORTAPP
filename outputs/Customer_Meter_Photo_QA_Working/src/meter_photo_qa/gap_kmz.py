@@ -25,8 +25,8 @@ KML_NS="http://www.opengis.net/kml/2.2"
 ET.register_namespace("",KML_NS)
 
 def _n(name): return "{"+KML_NS+"}"+name
-def _add(node,name,value=None,**attrs):
-    item=ET.SubElement(node,_n(name),attrs)
+def _add(node,tag,value=None,**attrs):
+    item=ET.SubElement(node,_n(tag),attrs)
     if value is not None:item.text=str(value)
     return item
 def _value(row,field):
