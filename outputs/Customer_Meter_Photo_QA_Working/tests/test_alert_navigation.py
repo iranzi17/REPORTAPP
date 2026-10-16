@@ -21,7 +21,7 @@ class NavigationTests(unittest.TestCase):
                     self.assertEqual(saved["layer_id"],lid)
                     self.assertEqual(saved["objectid"],4422434)
                     self.assertEqual(saved["asset"],asset)
-                    self.assertEqual(saved["origin"],"REPORTAPP_NOTIFICATION")
+                    self.assertEqual(saved["origin"],"REPORTAPP_LEGACY_UNVERIFIED")
     def test_untrusted_or_invalid_links_are_not_accepted(self):
         bad=[
             "https://evil.example/?asset=pole&objectid=22",
@@ -127,6 +127,7 @@ class NavigationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             r=enqueue(uri,folder=folder,now=1792162500000)
             req=r["request"]
+            self.assertEqual(req["origin"],"REPORTAPP_VERIFIED_ALERT")
             self.assertEqual(req["expected_globalid"],
                              "142a4dba-f393-4597-90a9-3878a86827b9")
             self.assertEqual(req["expected_event_utc_ms"],1792161960000)
@@ -145,6 +146,22 @@ class NavigationTests(unittest.TestCase):
                 parse_uri(bad)
         with self.assertRaises(ValueError):
             zoom_uri("pole",891705,globalid="{142A4DBA-F393-4597-90A9-3878A86827B9}")
+
+    def test_manual_find_distinguished_from_legacy_toast(self):
+        from meter_photo_qa.alert_navigation import zoom_uri,enqueue
+        manual=zoom_uri("pole",891705,manual=True)
+        self.assertEqual(manual,"reportapp://zoom/pole/891705?mode=manual")
+        with tempfile.TemporaryDirectory() as folder:
+            request=enqueue(manual,folder=folder)["request"]
+            self.assertEqual(request["origin"],"REPORTAPP_MANUAL_FIND")
+            legacy=enqueue("reportapp://zoom/pole/891705",folder=folder)["request"]
+            self.assertEqual(legacy["origin"],"REPORTAPP_LEGACY_UNVERIFIED")
+        source=(Path(__file__).resolve().parents[1]/"addins"/
+                "ReportappNavigationBridge"/"BridgeModule.cs").read_text(
+                    encoding="utf-8")
+        self.assertIn('req.Origin != "REPORTAPP_VERIFIED_ALERT"',source)
+        self.assertIn('req.Origin != "REPORTAPP_MANUAL_FIND"',source)
+        self.assertNotIn('req.Origin != "REPORTAPP_NOTIFICATION"',source)
 
     def test_bridge_rejects_different_version_and_event_before_selection(self):
         bridge=(Path(__file__).resolve().parents[1]/"addins"/

@@ -48,7 +48,7 @@ class InboxTests(unittest.TestCase):
                     self.assertEqual(request["asset"],asset)
                     self.assertEqual(request["objectid"],3510143)
                     self.assertEqual(request["layer_id"],layer)
-                    self.assertEqual(request["origin"],"REPORTAPP_NOTIFICATION")
+                    self.assertEqual(request["origin"],"REPORTAPP_MANUAL_FIND")
                     self.assertTrue(Path(queued["queue_file"]).exists())
             # Find Asset must not create a quality alert.
             conn=connect_inbox(self.config)
