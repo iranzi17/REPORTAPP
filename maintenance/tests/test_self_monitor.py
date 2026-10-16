@@ -63,7 +63,7 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_valid_release_package(self):
         payload = m._validate_zip(self.package(), TAG)
-        self.assertEqual(list(payload), [TARGET])
+        self.assertEqual(set(payload), set(m.ALLOWED))
         self.assertEqual(payload[TARGET], b"IMPROVED = 2\n")
 
     def test_new_allowlisted_module_is_installed_and_removed_on_failure(self):
@@ -90,11 +90,13 @@ class MaintenanceTests(unittest.TestCase):
             m._validate_zip(data, "reportapp-safe-v20261016-002")
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             original = json.loads(z.read("manifest.json"))
-            blob = z.read(TARGET)
+            contents={name:z.read(name) for name in z.namelist()
+                      if name!="manifest.json"}
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as z:
             z.writestr("manifest.json", json.dumps(original))
-            z.writestr(TARGET, blob + b"# modified")
+            for name,contents_bytes in contents.items():
+                z.writestr(name,contents_bytes+(b"# modified" if name==TARGET else b""))
         with self.assertRaisesRegex(ValueError, "hash"):
             m._validate_zip(archive.getvalue(), TAG)
 
