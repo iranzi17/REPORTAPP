@@ -83,7 +83,8 @@ class DeferredNotificationTests(unittest.TestCase):
             )
             self.assertEqual(second["clean_notifications_sent"],1)
             self.assertEqual(second["clean_historical_queued"],0)
-            self.assertTrue(notices[0]["deferred_historical"])
+            self.assertEqual(notices[0]["historical"],1)
+            self.assertEqual(notices[0]["total"],1)
             third=process_activity(
                 snapshot(),conf,after+60000,self.state.db,
                 {"records_scanned":{"pole":0},"qa_alerts_sent":0},

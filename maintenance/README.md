@@ -1,5 +1,21 @@
 # REPORTAPP v2 — Guarded unattended watcher updates
 
+**Current clean activity behavior:** REPORTAPP stores per-asset QA-clean surveyor
+events in SQLite and shows **one combined desktop toast every 30 minutes**,
+instead of one toast per pole, line or transformer. Individual features remain
+available for click-to-zoom through Clean Activity History; error alerts are
+still immediate. A failed digest does not erase pending records.
+
+If the office **Install Approved Update** button previously refused because
+unrelated tracked files were modified, the revised Inbox UI permits a guarded
+fast-forward when those local edits do not overlap incoming changed files.
+It refuses conflicting paths and never discards local work. The Inbox-only
+bootstrap release `reportapp-safe-v20261016-002` delivers this change to the
+existing v1 maintainer automatically; reopen the Inbox and click the upgrade
+button once, confirming the prompt. This is a supervised bootstrap, not a
+remote assertion that the office computer has already upgraded.
+
+
 The office currently runs Self Maintenance v1, which intentionally updates only the Inbox UI.
 An automatically published Inbox-only bootstrap release brings a new **Install Approved Update**
 button to the Inbox; restart the Inbox after the release has been installed.

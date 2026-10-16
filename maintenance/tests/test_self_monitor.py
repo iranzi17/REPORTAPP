@@ -180,6 +180,20 @@ class MaintenanceTests(unittest.TestCase):
                         again = m.cycle(download=lambda _: self.fail("unexpected download"))
         self.assertEqual(again["deployment"], "BLOCKED_AFTER_FAILURE")
 
+    def test_watcher_updates_take_priority_over_newer_inbox_bootstrap(self):
+        def package(tag,published):
+            return {"tag_name":tag,"published_at":published,"draft":False,
+                    "prerelease":False,"assets":[{
+                        "name":m.ASSET_NAME,"digest":"sha256:"+"a"*64
+                    }]}
+        releases=[
+            package("reportapp-safe-v20261016-002","2026-10-16T12:30:00Z"),
+            package("reportapp-watcher-v20261016-000002","2026-10-16T12:00:00Z"),
+        ]
+        release,_=m._load_approved_release(lambda url:releases)
+        self.assertEqual(release["tag_name"],
+                         "reportapp-watcher-v20261016-000002")
+
     def test_release_requires_asset_digest(self):
         bad = {"tag_name": TAG, "draft": False, "prerelease": False,
                "published_at": "2026-10-16T08:00:00Z",

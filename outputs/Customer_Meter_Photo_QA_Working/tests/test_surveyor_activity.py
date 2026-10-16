@@ -74,40 +74,47 @@ class CleanSurveyorActivityTests(unittest.TestCase):
         self.assertFalse(disabled["enabled"])
         self.assertEqual(json.loads(self.config.read_text())["usernames"],original["usernames"])
 
-    def test_clean_notification_after_five_min_and_exactly_once(self):
-        sent=[]
+    def test_clean_digest_once_every_30_minutes(self):
+        summaries=[]
+        records=[pole(1_300_000,oid=12),pole(1_300_000,oid=13)]
+        with patch("meter_photo_qa.surveyor_notifications.record_findings",return_value=([],[])):
+            def scan(t):
+                return run_once(self.config,now_ms=t,collector=lambda *_a,**_k:snapshots(*records),
+                    activity_sender=lambda item,_:summaries.append(item),
+                    heartbeat_sender=lambda *_:None)
+            early=scan(1_600_000)
+            self.assertEqual(early["clean_notifications_sent"],0)
+            self.assertEqual(early["clean_digest_pending"],2)
+            self.assertEqual(scan(3_399_000)["clean_notifications_sent"],0)
+            sent=scan(3_400_000)
+            self.assertEqual(sent["clean_notifications_sent"],1)
+            self.assertEqual(sent["clean_digest_pending"],0)
+            self.assertEqual(summaries[0]["total"],2)
+            self.assertEqual(summaries[0]["by_asset"],{"pole":2})
+            self.assertEqual(len(summaries),1)
+            self.assertEqual(scan(3_460_000)["clean_notifications_sent"],0)
+        db=State(self.config.with_suffix(".sqlite3"))
+        try:
+            self.assertEqual(len(list_recent_activity(db.db)),2)
+        finally:
+            db.close()
+
+    def test_new_edit_generates_next_30_min_digest(self):
+        digests=[]
         record=pole(1_300_000)
         with patch("meter_photo_qa.surveyor_notifications.record_findings",return_value=([],[])):
-            before=run_once(self.config,now_ms=1_599_000,
-                            collector=lambda *_args,**_kwargs:snapshots(record),
-                            activity_sender=lambda item,conf:sent.append(item),
-                            heartbeat_sender=lambda *_:self.fail("early heartbeat"))
-            self.assertEqual(before["clean_notifications_sent"],0)
-            passed=run_once(self.config,now_ms=1_600_000,
-                            collector=lambda *_args,**_kwargs:snapshots(record),
-                            activity_sender=lambda item,conf:sent.append(item),
-                            heartbeat_sender=lambda *_:self.fail("early heartbeat"))
-            self.assertEqual(passed["clean_notifications_sent"],1)
-            self.assertEqual(passed["alerts_sent"],0)
-            self.assertEqual(sent[0]["notification_kind"],"CLEAN_ACTIVITY")
-            self.assertEqual(sent[0]["event_type"],"CREATE")
-            duplicate=run_once(self.config,now_ms=1_660_000,
-                               collector=lambda *_args,**_kwargs:snapshots(record),
-                               activity_sender=lambda *_:self.fail("duplicate clean notification"))
-        self.assertEqual(duplicate["clean_notifications_sent"],0)
-
-    def test_new_edit_produces_new_event_without_repeating_create(self):
-        messages=[]
-        rec=pole(1_300_000)
-        def send(entry,config):
-            messages.append(entry["event_type"])
-        with patch("meter_photo_qa.surveyor_notifications.record_findings",return_value=([],[])):
-            run_once(self.config,now_ms=1_600_000,collector=lambda *_a,**_k:snapshots(rec),
-                     activity_sender=send)
-            rec.update({"created_date":1_300_000,"last_edited_date":1_620_000})
-            run_once(self.config,now_ms=1_920_000,collector=lambda *_a,**_k:snapshots(rec),
-                     activity_sender=send)
-        self.assertEqual(messages,["CREATE","EDIT"])
+            def scan(t):
+                return run_once(self.config,now_ms=t,collector=lambda *_a,**_k:snapshots(record),
+                    activity_sender=lambda item,_:digests.append(item),
+                    heartbeat_sender=lambda *_:None)
+            scan(1_600_000)
+            scan(3_400_000)
+            record["last_edited_date"]=3_450_000
+            scan(3_750_000)
+            scan(5_200_000)
+        self.assertEqual(len(digests),2)
+        self.assertEqual(digests[0]["created"],1)
+        self.assertEqual(digests[1]["edited"],1)
 
     def test_flagged_record_never_generates_clean_popup(self):
         alerts=[]
@@ -138,20 +145,20 @@ class CleanSurveyorActivityTests(unittest.TestCase):
             finally:
                 state.close()
 
-    def test_delivery_error_retried_without_fake_success(self):
-        with patch("meter_photo_qa.surveyor_notifications.record_findings",
-                   return_value=([],[])):
-            record=pole(1_300_000)
-            result=run_once(self.config,now_ms=1_600_000,
-                collector=lambda *_a,**_k:snapshots(record),
-                activity_sender=lambda *_:(_ for _ in ()).throw(RuntimeError("Toast unavailable")))
-            self.assertEqual(result["clean_notifications_sent"],0)
-            self.assertEqual(result["clean_notifications_failed"],1)
-            self.assertEqual(result["alerts_delivery_failed"],1)
-            success=run_once(self.config,now_ms=1_660_000,
-                collector=lambda *_a,**_k:snapshots(record),
-                activity_sender=lambda *_:None)
-        self.assertEqual(success["clean_notifications_sent"],1)
+    def test_failed_digest_preserves_pending_records_for_retry(self):
+        record=pole(1_300_000)
+        with patch("meter_photo_qa.surveyor_notifications.record_findings",return_value=([],[])):
+            def scan(t,sender):
+                return run_once(self.config,now_ms=t,
+                    collector=lambda *_a,**_k:snapshots(record),
+                    activity_sender=sender,heartbeat_sender=lambda *_:None)
+            self.assertEqual(scan(1_600_000,lambda *_:None)["clean_notifications_sent"],0)
+            failed=scan(3_400_000,lambda *_:(_ for _ in ()).throw(RuntimeError("Toast fail")))
+            self.assertEqual(failed["clean_notifications_failed"],1)
+            self.assertEqual(failed["clean_digest_pending"],1)
+            good=scan(3_460_000,lambda *_:None)
+            self.assertEqual(good["clean_notifications_sent"],1)
+            self.assertEqual(good["clean_digest_pending"],0)
 
     def test_status_heartbeat_even_when_no_new_data(self):
         # 60 minutes have elapsed since enable; the watcher is still active.
@@ -206,7 +213,12 @@ class CleanSurveyorActivityTests(unittest.TestCase):
                    return_value=([],[])):
             run_once(self.config,now_ms=1_600_000,
                 collector=lambda *_a,**_k:snapshots(pole(1_300_000)),
-                activity_sender=lambda *_:None)
+                activity_sender=lambda *_:self.fail("premature toast"),
+                heartbeat_sender=lambda *_:None)
+            run_once(self.config,now_ms=3_400_000,
+                collector=lambda *_a,**_k:snapshots(pole(1_300_000)),
+                activity_sender=lambda *_:None,
+                heartbeat_sender=lambda *_:None)
         state=State(self.config.with_suffix(".sqlite3"))
         try:
             logs=list_recent_activity(state.db)
