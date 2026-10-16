@@ -1,5 +1,44 @@
 # REPORTAPP ArcGIS Pro notification navigation
 
+## v1.0.4 — protect the *source event*, not only the OBJECTID
+
+On 16 October, a notification for POLE OBJECTID **891705** reported
+an edit at 16:46 by `ninamenye9683`, while ArcGIS Pro showed the
+same OBJECTID/GlobalID with last edit **15 September** by `REGUN_Prod`.
+A different REG geodatabase version in the map is a plausible cause;
+the screenshots alone do not establish which view is latest. It is
+unsafe to navigate to a record using OBJECTID alone when claiming
+that it is the specific recently edited feature.
+
+A **new verified alert** now includes the source GlobalID, source
+event UTC milliseconds, source actor and GDB version (initially
+`sde.DEFAULT`). The link handler validates these values; the
+ArcGIS Pro Bridge **v1.0.4** reads the actual map row and verifies all
+values **before selecting or zooming**. On disagreement the request
+terminates once, the current selection/extent are preserved, and
+the details go into `%LOCALAPPDATA%\REPORTAPP\Navigation\bridge-errors.log`.
+The bridge also refuses to silently add a default-version REG layer
+when the active map has the same source layer on a different version.
+The source event time describes the watcher FeatureServer version,
+not necessarily the displayed map's branch version.
+
+**Old notification links with no source-edit context are deliberately
+rejected by v1.0.4**, so the user is never navigated by an
+unverified older alert. To find a feature by OBJECTID for exploration,
+use the explicit **Find Asset** form, which queues a separately
+marked manual action (no claim about the edited date).
+New verified alerts, manual find, Inbox history and Clean Activity
+History require the updated Python `alert_navigation.py` and
+`notification_inbox.py` from the same source revision as bridge v1.0.4.
+
+Do **not** install the new add-in against stale office Python code:
+first sync REPORTAPP source safely, then close ArcGIS Pro, install
+`ReportappNavigationBridge.esriAddInX` from the tested
+`reportapp-bridge-v1.0.4` release, and reopen Pro.
+These operations do not edit source REG data or QA history.
+
+
+
 ## Critical safety change in v1.0.3
 
 A reported office issue showed ArcGIS Pro jumping back to an older pole or
