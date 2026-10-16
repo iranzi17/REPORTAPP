@@ -50,6 +50,78 @@ class DeferredNotificationTests(unittest.TestCase):
         self.state.close()
         self.tmp.cleanup()
 
+    def test_old_clean_activity_waits_for_offsite_and_survives_24h(self):
+        from meter_photo_qa.surveyor_activity import process_activity
+        item={
+            "OBJECTID":51,"GLOBALID":"{G51}","ASSETGROUP":7,
+            "ASSETTYPE":2,"created_user":"survey",
+            "last_edited_user":"survey","created_date":self.yesterday,
+            "last_edited_date":self.yesterday,
+        }
+        conf=dict(self.conf,activity_notifications_enabled=True,
+                  activity_notifications_enabled_at_utc_ms=local_ms(2026,10,15,10),
+                  activity_heartbeat_minutes=60)
+        notices=[]
+        with patch("meter_photo_qa.surveyor_notifications.record_findings",
+                   return_value=([],[])):
+            first=process_activity(
+                snapshot(item),conf,self.now,self.state.db,
+                {"records_scanned":{"pole":1},"qa_alerts_sent":0},
+                clean_sender=lambda entry,_:notices.append(entry),
+                heartbeat_sender=lambda *_:None,
+            )
+            self.assertEqual(first["clean_notifications_sent"],0)
+            self.assertEqual(first["clean_historical_queued"],1)
+            self.assertEqual(notices,[])
+            conf["surveyor_site_mode"]="off_site"
+            after=local_ms(2026,10,17,18)
+            second=process_activity(
+                snapshot(),conf,after,self.state.db,
+                {"records_scanned":{"pole":0},"qa_alerts_sent":0},
+                clean_sender=lambda entry,_:notices.append(entry),
+                heartbeat_sender=lambda *_:None,
+            )
+            self.assertEqual(second["clean_notifications_sent"],1)
+            self.assertEqual(second["clean_historical_queued"],0)
+            self.assertTrue(notices[0]["deferred_historical"])
+            third=process_activity(
+                snapshot(),conf,after+60000,self.state.db,
+                {"records_scanned":{"pole":0},"qa_alerts_sent":0},
+                clean_sender=lambda *_:self.fail("old clean event repeated"),
+                heartbeat_sender=lambda *_:None,
+            )
+            self.assertEqual(third["clean_notifications_sent"],0)
+
+    def test_queued_clean_record_not_delivered_after_later_faulty_edit(self):
+        from meter_photo_qa.surveyor_activity import process_activity
+        conf=dict(self.conf,activity_notifications_enabled=True,
+                  activity_notifications_enabled_at_utc_ms=local_ms(2026,10,15,10),
+                  activity_heartbeat_minutes=60)
+        item={
+            "OBJECTID":55,"GLOBALID":"{G55}","ASSETGROUP":7,
+            "ASSETTYPE":2,"created_user":"survey",
+            "last_edited_user":"survey","created_date":self.yesterday,
+            "last_edited_date":self.yesterday,
+        }
+        with patch("meter_photo_qa.surveyor_notifications.record_findings",
+                   return_value=([],[])):
+            process_activity(
+                snapshot(item),conf,self.now,self.state.db,
+                {"records_scanned":{"pole":1},"qa_alerts_sent":0},
+                clean_sender=lambda *_:self.fail("premature clean"),
+                heartbeat_sender=lambda *_:None,
+            )
+        item["last_edited_date"]=self.today
+        with patch("meter_photo_qa.surveyor_notifications.record_findings",
+                   return_value=(["Append Cable missing"],[])):
+            outcome=process_activity(
+                snapshot(item),conf,self.now+60000,self.state.db,
+                {"records_scanned":{"pole":1},"qa_alerts_sent":1},
+                clean_sender=lambda *_:self.fail("not QA-clean"),
+                heartbeat_sender=lambda *_:None,
+            )
+        self.assertEqual(outcome["clean_historical_queued"],0)
+
     def test_historical_is_rwanda_date_not_utc(self):
         local_just_after_midnight=local_ms(2026,10,16,0,20)
         local_previous=local_ms(2026,10,15,23,59)
