@@ -106,7 +106,11 @@ def clean_activity_candidates(snapshots, config, now_ms, db):
                 SELECT 1 FROM pending_clean_digest
                 WHERE asset=? AND objectid=? AND globalid=? AND event_time_utc_ms=?
             """,key).fetchone()
-            if already or pending_exists:
+            historical_pending=db.execute("""
+                SELECT 1 FROM delayed_clean_activity
+                WHERE asset=? AND objectid=? AND globalid=? AND event_time_utc_ms=?
+            """,key).fetchone()
+            if already or pending_exists or historical_pending:
                 continue
             issues,unverified=record_findings(
                 asset,attrs,fields,domains,rules,expectations
@@ -378,8 +382,20 @@ def process_activity(snapshots,config,now_ms,db,stats,
             _queue_old_clean(db,item,now_ms)
         else:
             _queue_digest(db,item,now_ms)
-    # Keep the outbox truthful: discard old clean results when a newer
-    # source edit or verified QA issue appears in the current scan.
+    # Revalidate only queued features that actually appear in the latest
+    # source scan. Do not rerun the entire QA engine on thousands of poles
+    # a second time during every one-minute scheduled scan.
+    pending_items={}
+    for table in ("delayed_clean_activity","pending_clean_digest"):
+        pending_items[table]=[
+            json.loads(row[0]) for row in db.execute(
+                f"SELECT payload_json FROM {table}"
+            ).fetchall()
+        ]
+    watched_queue={
+        (item["asset"],int(item["objectid"]),item["globalid"])
+        for items in pending_items.values() for item in items
+    }
     latest={}
     checked_clean=set()
     for asset,(records,fields,domains,rules,expectations) in snapshots.items():
@@ -387,6 +403,8 @@ def process_activity(snapshots,config,now_ms,db,stats,
             if attrs.get("OBJECTID") is None or not attrs.get("GLOBALID"):
                 continue
             key=(asset,int(attrs["OBJECTID"]),str(attrs["GLOBALID"]).strip())
+            if key not in watched_queue:
+                continue
             event_ms=int(event_timestamp(attrs) or 0)
             latest[key]=event_ms
             issues,unverified=record_findings(
@@ -394,12 +412,9 @@ def process_activity(snapshots,config,now_ms,db,stats,
             )
             if not issues and not unverified:
                 checked_clean.add((*key,event_ms))
-    for table in ("delayed_clean_activity","pending_clean_digest"):
-        for (payload,) in db.execute(
-            f"SELECT payload_json FROM {table}"
-        ).fetchall():
-            entry=json.loads(payload)
-            key=(_pending_key(entry)[0:3])
+    for table,items in pending_items.items():
+        for entry in items:
+            key=_pending_key(entry)[:3]
             if key in latest and (
                 latest[key]!=int(entry["event_time_utc_ms"])
                 or (*key,int(entry["event_time_utc_ms"])) not in checked_clean
