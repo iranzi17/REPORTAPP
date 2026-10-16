@@ -174,6 +174,27 @@ class NavigationTests(unittest.TestCase):
         self.assertLess(bridge.index("CheckSurveyorEdit(found,req)"),
                         bridge.index("view.Map.ClearSelection()"))
 
+    def test_old_office_uri_handler_disables_zoom_but_delivers_alert(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from meter_photo_qa.surveyor_notifications import deliver
+        popup=Mock()
+        mock_notify=Mock(return_value=popup)
+        alert=dict(asset="pole",objectid=891705,username="ninamenye9683",
+                   event_type="EDIT",
+                   globalid="{142A4DBA-F393-4597-90A9-3878A86827B9}",
+                   event_time_utc_ms=1792161960000,
+                   issues=["Append Cable missing"],created_user="ninamenye9683",
+                   last_edited_user="ninamenye9683")
+        with patch.dict("sys.modules",{"winotify":SimpleNamespace(Notification=mock_notify)}), \
+             patch("meter_photo_qa.alert_navigation.is_registered",return_value=True), \
+             patch("meter_photo_qa.alert_navigation.zoom_uri",
+                   side_effect=TypeError("unexpected keyword argument")):
+            deliver(alert,{"channel":"desktop","version":"sde.DEFAULT"})
+        self.assertEqual(mock_notify.call_args.kwargs["launch"],"")
+        popup.add_actions.assert_not_called()
+        popup.show.assert_called_once()
+
     def test_toast_body_and_action_use_identical_validated_uri(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
