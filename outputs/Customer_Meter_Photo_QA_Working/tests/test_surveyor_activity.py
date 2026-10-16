@@ -74,27 +74,30 @@ class CleanSurveyorActivityTests(unittest.TestCase):
         self.assertFalse(disabled["enabled"])
         self.assertEqual(json.loads(self.config.read_text())["usernames"],original["usernames"])
 
-    def test_clean_notification_after_five_min_and_exactly_once(self):
-        sent=[]
-        record=pole(1_300_000)
+    def test_clean_digest_once_every_30_minutes(self):
+        summaries=[]
+        records=[pole(1_300_000,oid=12),pole(1_300_000,oid=13)]
         with patch("meter_photo_qa.surveyor_notifications.record_findings",return_value=([],[])):
-            before=run_once(self.config,now_ms=1_599_000,
-                            collector=lambda *_args,**_kwargs:snapshots(record),
-                            activity_sender=lambda item,conf:sent.append(item),
-                            heartbeat_sender=lambda *_:self.fail("early heartbeat"))
-            self.assertEqual(before["clean_notifications_sent"],0)
-            passed=run_once(self.config,now_ms=1_600_000,
-                            collector=lambda *_args,**_kwargs:snapshots(record),
-                            activity_sender=lambda item,conf:sent.append(item),
-                            heartbeat_sender=lambda *_:self.fail("early heartbeat"))
-            self.assertEqual(passed["clean_notifications_sent"],1)
-            self.assertEqual(passed["alerts_sent"],0)
-            self.assertEqual(sent[0]["notification_kind"],"CLEAN_ACTIVITY")
-            self.assertEqual(sent[0]["event_type"],"CREATE")
-            duplicate=run_once(self.config,now_ms=1_660_000,
-                               collector=lambda *_args,**_kwargs:snapshots(record),
-                               activity_sender=lambda *_:self.fail("duplicate clean notification"))
-        self.assertEqual(duplicate["clean_notifications_sent"],0)
+            def scan(t):
+                return run_once(self.config,now_ms=t,collector=lambda *_a,**_k:snapshots(*records),
+                    activity_sender=lambda item,_:summaries.append(item),
+                    heartbeat_sender=lambda *_:None)
+            early=scan(1_600_000)
+            self.assertEqual(early["clean_notifications_sent"],0)
+            self.assertEqual(early["clean_digest_pending"],2)
+            self.assertEqual(scan(3_399_000)["clean_notifications_sent"],0)
+            sent=scan(3_400_000)
+            self.assertEqual(sent["clean_notifications_sent"],1)
+            self.assertEqual(sent["clean_digest_pending"],0)
+            self.assertEqual(summaries[0]["total"],2)
+            self.assertEqual(summaries[0]["by_asset"],{"pole":2})
+            self.assertEqual(len(summaries),1)
+            self.assertEqual(scan(3_460_000)["clean_notifications_sent"],0)
+        db=State(self.config.with_suffix(".sqlite3"))
+        try:
+            self.assertEqual(len(list_recent_activity(db.db)),2)
+        finally:
+            db.close()
 
     def test_new_edit_produces_new_event_without_repeating_create(self):
         messages=[]
