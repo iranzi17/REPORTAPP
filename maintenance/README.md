@@ -1,3 +1,23 @@
+# REPORTAPP v2 — Guarded unattended watcher updates
+
+The office currently runs Self Maintenance v1, which intentionally updates only the Inbox UI.
+An automatically published Inbox-only bootstrap release brings a new **Install Approved Update**
+button to the Inbox; restart the Inbox after the release has been installed.
+Click that button once to approve the verified fast-forward from main, file backups,
+and local regression tests. No terminal commands or changes to REG data are required.
+
+After that one-time approved upgrade, the same local scheduled maintenance task
+can install narrow CI-tested reportapp-watcher releases, with SHA256 verification,
+backups, smoke tests and rollback. Only designated Python watcher/Inbox files
+and tests are allowlisted; GIS service settings, watched accounts, credentials,
+SQLite monitoring history, source feature attributes, and ArcGIS add-in DLLs
+remain protected. V1 ignores watcher releases, even when those releases exist.
+
+The **Site Status** Inbox control determines when yesterday's and older QA
+notifications may be delivered. On-site status is assumed until working hours
+or an explicit off-site status is set. New same-day quality alerts continue normally.
+
+## Original v1 installation instructions (historical reference)
 # REPORTAPP Self-Maintenance — v1 (restricted rollout)
 
 **Status: source and GitHub CI. Office workstation activation requires explicit

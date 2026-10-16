@@ -1,10 +1,10 @@
-name: Publish approved REPORTAPP safe UI release
+name: Publish manually approved REPORTAPP watcher release
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Unique approved version e.g. reportapp-safe-v20261016-001'
+        description: 'Unique approved version e.g. reportapp-watcher-v20261016-100001'
         required: true
         type: string
 
@@ -30,7 +30,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          python -c "import os,re; assert re.fullmatch(r'reportapp-safe-v[0-9]{8}-[0-9]{3}',os.environ['RELEASE_TAG']), 'Invalid tag'"
+          python -c "import os,re; assert re.fullmatch(r'reportapp-watcher-v[0-9]{8}-[0-9]{3,9}',os.environ['RELEASE_TAG']), 'Invalid tag'"
       - name: Install focused test dependencies
         run: python -m pip install openpyxl pillow
       - name: Maintenance regression tests
@@ -53,4 +53,4 @@ jobs:
           gh release create "$RELEASE_TAG" build/reportapp-safe-update.zip \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "$RELEASE_TAG" \
-            --notes 'Human-promoted, CI-tested, narrowly allowlisted REPORTAPP Inbox UI update. No REG connection or monitoring data included.'
+            --notes 'Human-promoted, CI-tested, restricted watcher release with SHA256 verification, backups, local regression tests and rollback. No REG data writes.'

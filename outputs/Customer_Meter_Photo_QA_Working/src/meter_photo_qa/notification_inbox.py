@@ -285,6 +285,8 @@ def bootstrap_maintainer_update(*,repository=None):
         ".github/workflows/reportapp-bootstrap-inbox.yml",
         ".github/workflows/reportapp-managed-release.yml",
         "maintenance/build_bootstrap_inbox_release.py",
+        "maintenance/README.md",
+        ".github/workflows/reportapp-safe-release.yml",
         "maintenance/self_monitor.py",
         "maintenance/build_safe_release.py",
         "maintenance/tests/test_self_monitor.py",
