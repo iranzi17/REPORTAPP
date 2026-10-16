@@ -1,0 +1,53 @@
+name: One-time REPORTAPP Inbox bootstrap release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/reportapp-bootstrap-inbox.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reportapp-bootstrap-once
+  cancel-in-progress: false
+
+jobs:
+  publish-bootstrap:
+    if: github.repository == 'iranzi17/REPORTAPP'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependencies
+        run: python -m pip install openpyxl pillow
+      - name: Verify live watcher and Inbox regressions
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s maintenance/tests -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_deferred_notifications.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_activity.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
+      - name: Package Inbox-only UI for installed maintenance v1
+        run: |
+          python maintenance/build_bootstrap_inbox_release.py \
+            --tag reportapp-safe-v20261016-001 \
+            --output build/reportapp-safe-update.zip
+      - name: Publish one-time reviewed and tested GUI bootstrap
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view reportapp-safe-v20261016-001 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Bootstrap release already exists; not overwriting."
+            exit 0
+          fi
+          gh release create reportapp-safe-v20261016-001 \
+            build/reportapp-safe-update.zip \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "REPORTAPP Maintenance Upgrade Button (Inbox-only)" \
+            --notes "CI-tested GUI-only bootstrap; original v1 maintainer allowlist verified. No automatic watcher replacement. User must confirm one-time guarded upgrade in Inbox."
