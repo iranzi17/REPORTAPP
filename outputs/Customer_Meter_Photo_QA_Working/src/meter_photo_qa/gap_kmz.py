@@ -144,21 +144,52 @@ def _lines(geometry):
         out.append(" ".join(_xy(point) for point in path))
     return out
 
-def _write_geometry(mark,asset,geometry):
+def _metric_buffer_rings(geometry,meters=1.5):
+    """Project WGS84 line to the local southern UTM zone, buffer in metres.
+
+    Runs in ArcGIS Pro; never approximates metre buffers using degree values.
+    """
+    import arcpy
+    path=geometry["paths"][0]
+    longitude=float(path[0][0])
+    zone=max(1,min(60,int((longitude+180)//6)+1))
+    geo=dict(geometry)
+    geo["spatialReference"]={"wkid":4326}
+    line=arcpy.AsShape(geo,True)
+    projected=line.projectAs(arcpy.SpatialReference(32700+zone))
+    buffered=projected.buffer(float(meters)).projectAs(
+        arcpy.SpatialReference(4326)
+    )
+    rings=json.loads(buffered.JSON).get("rings") or []
+    if not rings:
+        raise ValueError("The projected 1.5 m line buffer has no polygon rings.")
+    return rings
+
+
+def _write_geometry(mark,asset,geometry,buffer_rings=None):
     if asset=="line":
         paths=_lines(geometry)
-        container=_add(mark,"MultiGeometry") if len(paths)>1 else mark
+        container=_add(mark,"MultiGeometry") if len(paths)>1 or buffer_rings else mark
         for coords in paths:
             line=_add(container,"LineString")
             _add(line,"tessellate","1")
             _add(line,"coordinates",coords)
+        for ring in buffer_rings or []:
+            if len(ring)<4:raise ValueError("Invalid buffered polygon ring")
+            points=[_xy(pt) for pt in ring]
+            if points[0]!=points[-1]:points.append(points[0])
+            poly=_add(container,"Polygon")
+            _add(poly,"tessellate","1")
+            boundary=_add(poly,"outerBoundaryIs")
+            linear=_add(boundary,"LinearRing")
+            _add(linear,"coordinates"," ".join(points))
     else:
         if "x" not in geometry or "y" not in geometry:
             raise ValueError("Missing point geometry")
         point=_add(mark,"Point")
         _add(point,"coordinates",_xy([geometry["x"],geometry["y"]]))
 
-def _render_kml(index,geometry_by_key):
+def _render_kml(index,geometry_by_key,buffer_rings_by_key=None):
     # Build KML root separately so ElementTree emits correct KML element nesting.
     kml=ET.Element(_n("kml"))
     document=_add(kml,"Document")
@@ -196,7 +227,10 @@ def _render_kml(index,geometry_by_key):
             ):
                 d=_add(data,"Data",None,name=attr)
                 _add(d,"value",str(value))
-            _write_geometry(place,kind,geometry_by_key[key])
+            _write_geometry(
+                place,kind,geometry_by_key[key],
+                (buffer_rings_by_key or {}).get(key),
+            )
     return ET.tostring(kml,encoding="utf-8",xml_declaration=True)
 
 def _lookup(index, service_url, version, gis=None, layer_factory=None):
@@ -257,7 +291,8 @@ def _lookup(index, service_url, version, gis=None, layer_factory=None):
     return result,failures
 
 def export_gap_kmz(reports, output_path, *, service_url=None,version="sde.DEFAULT",
-                   gis=None,layer_factory=None,fail_on_missing=True):
+                   gis=None,layer_factory=None,fail_on_missing=True,
+                   line_buffer_metres=1.5,buffer_fn=None):
     """Return export manifest; Excel and REG services are never mutated.
 
     By default, refuse partial KMZ exports rather than silently hiding
@@ -269,11 +304,19 @@ def export_gap_kmz(reports, output_path, *, service_url=None,version="sde.DEFAUL
         sample="; ".join(f"{asset}/{oid}: {reason}" for (asset,oid),reason
                          in list(sorted(failures.items()))[:8])
         raise RuntimeError("KMZ not published: flagged source geometries incomplete. "+sample)
+    buffers={}
+    if any(key[0]=="line" for key in geometries):
+        if not math.isfinite(float(line_buffer_metres)) or not 0<float(line_buffer_metres)<=50:
+            raise ValueError("Line buffer must be a distance in metres (0-50).")
+        make_buffer=buffer_fn or _metric_buffer_rings
+        for key,geom in geometries.items():
+            if key[0]=="line":
+                buffers[key]=make_buffer(geom,float(line_buffer_metres))
     target=Path(output_path).expanduser().resolve()
     if target.suffix.lower()!=".kmz":raise ValueError("KMZ output must end in .kmz")
     if target.exists():raise FileExistsError("Refusing to overwrite KMZ: "+str(target))
     target.parent.mkdir(parents=True,exist_ok=True)
-    xml=_render_kml(index,geometries)
+    xml=_render_kml(index,geometries,buffers)
     # Validate document XML before making user-facing archive.
     ET.fromstring(xml)
     temp=target.with_name(target.name+".pending")
@@ -293,6 +336,6 @@ def export_gap_kmz(reports, output_path, *, service_url=None,version="sde.DEFAUL
         "by_asset":counts,"source_version":version,
         "source_read_only":True,
         "geometries_wgs84":True,
-        "buffer_width_m":None,
-        "buffer_note":"Actual source line geometry, not a metric buffer. 1.5 m buffers require a separately verified projected-geometry step.",
+        "buffer_width_m":float(line_buffer_metres),
+        "buffer_note":"Original LV line and projected local UTM buffer geometries, buffered in metres before WGS84 KML export.",
     }
