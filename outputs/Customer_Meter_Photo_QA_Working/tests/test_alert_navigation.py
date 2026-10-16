@@ -118,22 +118,67 @@ class NavigationTests(unittest.TestCase):
         self.assertIn("if (!rows.MoveNext())",source)
         self.assertIn("if (!staged.GetObjectIDs().Contains(req.ObjectId))",source)
 
+    def test_source_edit_uri_retains_identity_and_version(self):
+        args=dict(globalid="{142A4DBA-F393-4597-90A9-3878A86827B9}",
+                  event_time_utc_ms=1792161960000,
+                  actor="ninamenye9683",gdb_version="sde.DEFAULT")
+        uri=zoom_uri("pole",891705,**args)
+        self.assertEqual(parse_uri(uri),("pole",891705,uri))
+        with tempfile.TemporaryDirectory() as folder:
+            r=enqueue(uri,folder=folder,now=1792162500000)
+            req=r["request"]
+            self.assertEqual(req["expected_globalid"],
+                             "142a4dba-f393-4597-90a9-3878a86827b9")
+            self.assertEqual(req["expected_event_utc_ms"],1792161960000)
+            self.assertEqual(req["expected_actor"],"ninamenye9683")
+            self.assertEqual(req["source_gdb_version"],"sde.DEFAULT")
+
+    def test_event_uri_rejects_incomplete_or_untrusted_source_identity(self):
+        uri=zoom_uri("pole",891705)
+        for bad in (
+            uri+"?gid=broken&event_ms=1792161960000&actor=nina&ver=sde.DEFAULT",
+            uri+"?gid=142a4dba-f393-4597-90a9-3878a86827b9&event_ms=1792161960000&actor=nina&ver=other",
+            uri+"?gid=142a4dba-f393-4597-90a9-3878a86827b9&event_ms=1792161960000&actor=nina&ver=sde.DEFAULT&other=1",
+            uri+"?gid=142a4dba-f393-4597-90a9-3878a86827b9&event_ms=1792161960000&actor=nina&actor=another&ver=sde.DEFAULT",
+        ):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):
+                parse_uri(bad)
+        with self.assertRaises(ValueError):
+            zoom_uri("pole",891705,globalid="{142A4DBA-F393-4597-90A9-3878A86827B9}")
+
+    def test_bridge_rejects_different_version_and_event_before_selection(self):
+        bridge=(Path(__file__).resolve().parents[1]/"addins"/
+                "ReportappNavigationBridge"/"BridgeModule.cs").read_text(
+                    encoding="utf-8")
+        self.assertIn("CheckSurveyorEdit(found,req)",bridge)
+        self.assertIn("MatchesDataset(layer,url)",bridge)
+        self.assertIn("siblings.Any(layer=>!MatchesSource(layer,url))",bridge)
+        self.assertIn("source_gdb_version",bridge)
+        self.assertLess(bridge.index("CheckSurveyorEdit(found,req)"),
+                        bridge.index("view.Map.ClearSelection()"))
+
     def test_toast_body_and_action_use_identical_validated_uri(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
         from meter_photo_qa.surveyor_notifications import deliver
         popup=Mock()
         notification=Mock(return_value=popup)
-        alert=dict(asset="pole",objectid=4422434,username="tester",event_type="created",
-                   globalid="duplicate-globalid",issues=["missing"],created_user="tester",
-                   last_edited_user="tester")
+        alert=dict(asset="pole",objectid=891705,username="ninamenye9683",
+                   event_type="EDIT",
+                   globalid="{142A4DBA-F393-4597-90A9-3878A86827B9}",
+                   event_time_utc_ms=1792161960000,
+                   issues=["Append Cable missing"],created_user="ninamenye9683",
+                   last_edited_user="ninamenye9683")
         with patch.dict("sys.modules",{"winotify":SimpleNamespace(Notification=notification)}), \
              patch("meter_photo_qa.alert_navigation.is_registered",return_value=True):
-            deliver(alert,{"channel":"desktop"})
-        self.assertEqual(notification.call_args.kwargs["launch"],"reportapp://zoom/pole/4422434")
-        popup.add_actions.assert_called_once_with(label="Zoom in ArcGIS Pro",
-                                                 launch="reportapp://zoom/pole/4422434")
+            deliver(alert,{"channel":"desktop","version":"sde.DEFAULT"})
+        launch=notification.call_args.kwargs["launch"]
+        self.assertIn("event_ms=1792161960000",launch)
+        self.assertIn("gid=142a4dba-f393-4597-90a9-3878a86827b9",launch)
+        popup.add_actions.assert_called_once_with(label="Zoom in ArcGIS Pro",launch=launch)
         popup.show.assert_called_once()
+        self.assertIn("GIS version: sde.DEFAULT",notification.call_args.kwargs["msg"])
+
 
 if __name__=="__main__":
     unittest.main()
