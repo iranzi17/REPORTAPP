@@ -85,6 +85,18 @@ quality gap alerts working:
 "%PY%" -m meter_photo_qa.surveyor_notifications --config "%QA%\outputs\REPORTAPP_Surveyor_Notifications\monitor_config.json" --disable-activity
 \`\`\`
 
+## Immediate Windows toast acceptance test (no REG queries)
+
+From the same CMD session and folder as above, run:
+
+```cmd
+"%PY%" -m meter_photo_qa.surveyor_notifications --config "%QA%\outputs\REPORTAPP_Surveyor_Notifications\monitor_config.json" --send-activity-test --test-asset line --test-objectid 3510143
+```
+
+This sends a **TEST** toast only. It does not record clean QA activity, create
+fake surveyor events, or claim line 3510143 passes quality checking.
+Click **Zoom in ArcGIS Pro (TEST)** to verify navigation to an accessible record.
+
 ## Important boundaries
 
 - Read-only REG source; no attribute, geometry, version or network edit.

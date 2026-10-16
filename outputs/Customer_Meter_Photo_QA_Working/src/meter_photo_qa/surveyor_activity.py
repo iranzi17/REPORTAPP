@@ -151,6 +151,26 @@ def deliver_clean_activity(entry,config):
     popup.show()
 
 
+def deliver_activity_test(asset,objectid):
+    """Explicitly marked GUI/zoom test: no QA evaluation and no state writes."""
+    from winotify import Notification
+    from .alert_navigation import is_registered,zoom_uri
+    uri=zoom_uri(asset,objectid)  # validates asset and positive OBJECTID
+    launch=uri if is_registered() else ""
+    popup=Notification(
+        app_id="REPORTAPP Surveyor Activity",
+        title="REPORTAPP TEST — activity notification",
+        msg=(
+            "Test popup only: no REG feature was evaluated or marked clean. "
+            f"Zoom target: {asset} OBJECTID {objectid}."
+        ),
+        duration="long",launch=launch,
+    )
+    if launch:
+        popup.add_actions(label="Zoom in ArcGIS Pro (TEST)",launch=launch)
+    popup.show()
+
+
 def _recent_count(snapshots,config,now_ms,minutes):
     from .surveyor_notifications import event_timestamp,submission_actor
     threshold=now_ms-minutes*60*1000

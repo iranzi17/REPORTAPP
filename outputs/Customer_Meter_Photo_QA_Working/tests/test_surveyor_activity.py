@@ -169,6 +169,27 @@ class CleanSurveyorActivityTests(unittest.TestCase):
                 heartbeat_sender=lambda *_:self.fail("repeated heartbeat"))
         self.assertEqual(second["heartbeat_sent"],0)
 
+    def test_test_toast_is_clearly_test_only_and_never_writes_history(self):
+        import sys
+        from types import SimpleNamespace
+        from meter_photo_qa.surveyor_activity import deliver_activity_test
+        payload={}
+        class FakeToast:
+            def __init__(self,**kw):
+                payload.update(kw)
+            def add_actions(self,**kwargs):
+                payload["action"]=kwargs
+            def show(self):
+                payload["shown"]=True
+        with patch.dict(sys.modules,{"winotify":SimpleNamespace(Notification=FakeToast)}), \
+             patch("meter_photo_qa.alert_navigation.is_registered",return_value=True):
+            deliver_activity_test("line",3510143)
+        self.assertIn("TEST",payload["title"])
+        self.assertIn("no REG feature was evaluated",payload["msg"])
+        self.assertTrue(payload["shown"])
+        self.assertEqual(payload["launch"],"reportapp://zoom/line/3510143")
+        self.assertFalse(self.config.with_suffix(".sqlite3").exists())
+
     def test_no_activity_when_not_opted_in(self):
         config=dict(CONFIG)
         config.pop("activity_notifications_enabled")
