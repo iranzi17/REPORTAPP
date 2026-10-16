@@ -15,20 +15,25 @@ configuration, and flagged-alert history.
 
 - Existing **QA gap** records: keep the original error popup, persistent flag
   inbox and click-to-zoom functionality; no duplicate "clean" popup.
-- **No verified QA gaps** in a newly created/edited LV Pole, LV Line or
-  Distribution Transformer by one of the selected users: one
-  "REG QA CHECKED — no gaps found" toast containing the surveyor, asset,
-  OBJECTID, CREATE/EDIT type, and **Zoom in ArcGIS Pro** action where
-  the URL handler is installed.
-- A clean feature is notified once per source edit timestamp. A later edit
-  to the same OBJECTID can produce a new clean notification.
+- **No verified QA gaps** in selected surveyors' newly created/edited LV
+  Poles, LV Lines or Distribution Transformers: REPORTAPP queues the
+  qualifying events and sends **one combined Windows notification at most
+  every 30 minutes**, not one for each feature. The digest summarizes counts
+  by asset type, creates/edits, and number of surveyors. The individual
+  surveyor usernames, OBJECTIDs, edit timestamps and **Zoom in ArcGIS Pro**
+  actions are available through **Clean Activity History** in the Inbox.
+  A grouped notification has no single OBJECTID to zoom to.
+- A clean feature is added to the digest once per source edit timestamp.
+  A later edit can enter a subsequent digest. Pending records and the
+  30-minute digest clock persist in the existing local SQLite database;
+  a failed popup is retried without clearing those records.
 - The original watcher polls REG every minute, but sends notifications only
   after the configured 5-minute maturity threshold (typically 5–6 minutes
   after the edit, depending on scheduler timing).
-- At most 5 clean notifications per scan; excess qualifying events are
-  processed on later scans, oldest first, within the normal 24-hour source
-  lookback window.
-- Every 60 minutes after activation, a "watcher healthy" heartbeat summarizes
+- The activity scanner checks up to 1,000 newly qualifying clean events
+  per one-minute cycle; excess events enter the queue on later scans.
+  Every successful digest is **one popup**, however many records it summarizes.
+- Independently, every 60 minutes after activation, a "watcher healthy" heartbeat summarizes
   the last REG service scan counts, number of selected-user records whose
   latest edit is in the last hour, and QA/clean popup counts for that scan.
   Importantly, 24-hour scan counts **are not today's new submissions**.

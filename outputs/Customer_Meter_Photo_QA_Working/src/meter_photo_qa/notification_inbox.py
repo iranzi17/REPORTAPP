@@ -297,6 +297,7 @@ def bootstrap_maintainer_update(*,repository=None):
         prefix+"tests/test_deferred_notifications.py",
         prefix+"tests/test_surveyor_activity.py",
         prefix+"docs/DEFERRED_ALERTS.md",
+        prefix+"docs/SURVEYOR_ACTIVITY_NOTIFICATIONS.md",
     }
     def git(*args):
         result=subprocess.run(
