@@ -22,6 +22,11 @@ ALLOWED = (
     "outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py",
     "outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py",
     "maintenance/self_monitor.py",
+    # KMZ is a read-only companion to original quality workbooks.
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/gap_kmz.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/combined_qa_report.py",
+    "outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt",
+    "outputs/Customer_Meter_Photo_QA_Working/tests/test_gap_kmz.py",
 )
 
 
