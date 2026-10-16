@@ -144,7 +144,8 @@ def _make_live_resolver(entries,group,*,gis=None,service_url=None,boundary_url=N
 
 
 def enrich_report(report_path,*,output_path=None,apply=False,resolver=None,
-                  gis=None,service_url=None,boundary_url=None,version="sde.DEFAULT"):
+                  gis=None,service_url=None,boundary_url=None,version="sde.DEFAULT",
+                  limit=None):
     from openpyxl import load_workbook
     source=Path(report_path).expanduser().resolve()
     if source.suffix.casefold()!=".xlsx" or not source.is_file():
@@ -152,6 +153,11 @@ def enrich_report(report_path,*,output_path=None,apply=False,resolver=None,
     wb=load_workbook(source)
     try:
         details,group,heads,entries=_prepare(wb)
+        total_incomplete=len(entries)
+        if limit is not None:
+            if isinstance(limit,bool) or not 1<=int(limit)<=MAX_RECORDS:
+                raise ValueError("Limit must be an integer from 1 through 5,000.")
+            entries=entries[:int(limit)]
         if resolver is None and entries:
             resolver=_make_live_resolver(
                 entries,group,gis=gis,service_url=service_url,
@@ -178,7 +184,9 @@ def enrich_report(report_path,*,output_path=None,apply=False,resolver=None,
         stats=Counter(row["status"] for row in outcomes)
         result={"status":"DRY_RUN" if not apply else "OUTPUT_CREATED",
                 "source_report":str(source),"version":version,"asset_group":group,
-                "rows_missing_location":len(entries),
+                "rows_missing_location":total_incomplete,
+                "rows_evaluated":len(entries),
+                "rows_not_evaluated":total_incomplete-len(entries),
                 "records_filled":sum(x["status"]=="POLYGON_MATCH" for x in outcomes),
                 "cells_filled":sum(sum(not old and bool(new) for old,new in zip(x["original"],x["filled"]))
                                    for x in outcomes),
@@ -237,9 +245,10 @@ def main(argv=None):
     parser.add_argument("--output",help="New output workbook path; never overwrites existing")
     parser.add_argument("--apply",action="store_true",help="Explicitly create a new report copy; default is dry run")
     parser.add_argument("--version",default="sde.DEFAULT",help="REG source geodatabase version")
+    parser.add_argument("--limit",type=int,help="Pilot only the first N incomplete records; remaining rows stay unchanged")
     args=parser.parse_args(argv)
     print(json.dumps(enrich_report(args.report,output_path=args.output,apply=args.apply,
-                                   version=args.version),indent=2,ensure_ascii=False))
+                                   version=args.version,limit=args.limit),indent=2,ensure_ascii=False))
     return 0
 
 

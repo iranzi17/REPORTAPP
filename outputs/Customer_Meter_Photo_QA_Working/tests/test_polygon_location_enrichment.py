@@ -66,6 +66,19 @@ class PolygonLocationTests(unittest.TestCase):
         self.assertFalse(list(self.folder.glob("*enriched*")))
         self.assertEqual(self.input.read_bytes(),self.before)
 
+    def test_pilot_limit_does_not_claim_other_rows_as_filled(self):
+        result=enrich_report(self.input,resolver=self.locator,limit=2,apply=True)
+        self.assertEqual(result["rows_missing_location"],4)
+        self.assertEqual(result["rows_evaluated"],2)
+        self.assertEqual(result["rows_not_evaluated"],2)
+        self.assertEqual(result["records_filled"],2)
+        book=load_workbook(result["output_xlsx"])
+        try:
+            self.assertIsNone(book["Asset Details"].cell(4,7).value)
+            self.assertIsNone(book["Asset Details"].cell(5,6).value)
+        finally:
+            book.close()
+
     def test_fill_blank_only_and_audit_conflicts(self):
         result=enrich_report(self.input,resolver=self.locator,apply=True)
         self.assertEqual(result["status"],"OUTPUT_CREATED")
