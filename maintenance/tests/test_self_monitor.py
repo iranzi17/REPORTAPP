@@ -59,6 +59,23 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(list(payload), [TARGET])
         self.assertEqual(payload[TARGET], b"IMPROVED = 2\n")
 
+    def test_new_allowlisted_module_is_installed_and_removed_on_failure(self):
+        source="outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py"
+        file=self.root/source
+        self.assertFalse(file.exists())
+        archive=io.BytesIO()
+        payload=b"SAFE_NEW_MODULE = True\n"
+        meta={"format":1,"repository":m.REPO,"tag":TAG,"files":{
+            source:hashlib.sha256(payload).hexdigest()
+        }}
+        with zipfile.ZipFile(archive,"w") as z:
+            z.writestr("manifest.json",json.dumps(meta))
+            z.writestr(source,payload)
+        with patch.object(m,"_smoke_test",side_effect=RuntimeError("validation failed")):
+            with self.assertRaises(RuntimeError):
+                m.apply_update({"tag_name":TAG},archive.getvalue())
+        self.assertFalse(file.exists())
+
     def test_different_tag_and_tampered_content_rejected(self):
         data = self.package()
         with self.assertRaisesRegex(ValueError, "metadata mismatch"):
@@ -76,7 +93,7 @@ class MaintenanceTests(unittest.TestCase):
     def test_forbidden_files_not_accepted(self):
         forbidden = [
             "outputs/Customer_Meter_Photo_QA_Working/outputs/REPORTAPP_Surveyor_Notifications/monitor_config.json",
-            "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py",
+            "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_setup.py",
             "outputs/Customer_Meter_Photo_QA_Working/addins/ReportappNavigationBridge/BridgeModule.cs",
             "../other.py",
         ]

@@ -1,7 +1,8 @@
 """Build an explicitly allowlisted REPORTAPP safe update archive.
 
 Run only in the reviewed GitHub Actions release workflow. The archive
-contains a single Python Inbox UI file, hashes, and no local user data.
+contains approved QA watcher/Inbox Python files and regression tests only,
+with hashes and no user data.
 """
 from __future__ import annotations
 import argparse
@@ -15,6 +16,11 @@ REPO = "iranzi17/REPORTAPP"
 TAG = re.compile(r"^reportapp-safe-v[0-9]{8}-[0-9]{3}$")
 ALLOWED = (
     "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py",
+    "outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py",
+    "outputs/Customer_Meter_Photo_QA_Working/tests/test_deferred_notifications.py",
+    "maintenance/self_monitor.py",
 )
 
 
