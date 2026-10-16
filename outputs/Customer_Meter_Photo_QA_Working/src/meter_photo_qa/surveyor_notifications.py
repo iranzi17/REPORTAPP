@@ -398,7 +398,15 @@ def deliver(alert,config):
                 "gdb_version":config.get("version","sde.DEFAULT"),
             }
             if all(context.values()):
-                launch=zoom_uri(alert["asset"],alert["objectid"],**context)
+                try:
+                    launch=zoom_uri(alert["asset"],alert["objectid"],**context)
+                except (TypeError,ValueError):
+                    # Deployment is two-stage: older office installations
+                    # can have surveyor_notifications.py updated while the
+                    # pre-1.0.4 alert_navigation.py remains active. Never
+                    # fail delivery or fall back to an unsafe OBJECTID-only
+                    # zoom. Show the QA alert WITHOUT a clickable action.
+                    launch=""
             # Do not show an unverified clickable link for a legacy alert
             # missing source-event identity.
         popup=Notification(
