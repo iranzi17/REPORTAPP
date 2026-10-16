@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 import sys
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs, urlencode
 
 SCHEME="reportapp"
 REGISTRATION_KEY=r"Software\Classes\reportapp"
@@ -33,34 +33,82 @@ def queue_folder(env=None):
     return Path(base).expanduser().resolve()/"REPORTAPP"/"Navigation"/"Requests"
 
 
-def zoom_uri(asset,objectid):
+def _validate_event_context(globalid,event_time_utc_ms,actor,gdb_version):
+    """Strict identity of the actual source record at the notified edit."""
+    if not all(x is not None for x in
+               (globalid,event_time_utc_ms,actor,gdb_version)):
+        raise ValueError("Source event context must be complete.")
+    canonical_gid=str(uuid.UUID(str(globalid).strip().strip("{}"))).lower()
+    if isinstance(event_time_utc_ms,bool) or not re.fullmatch(
+        r"[0-9]{13}",str(event_time_utc_ms)
+    ):
+        raise ValueError("Invalid source event timestamp.")
+    when=int(event_time_utc_ms)
+    if not 946684800000<=when<=4102444800000:
+        raise ValueError("Source event timestamp outside supported range.")
+    actor=str(actor).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}",actor):
+        raise ValueError("Invalid source editor identity.")
+    if str(gdb_version).strip().casefold()!="sde.default":
+        raise ValueError("Navigation requires verified sde.DEFAULT source.")
+    return canonical_gid,when,actor,"sde.DEFAULT"
+
+
+def zoom_uri(asset,objectid,*,globalid=None,event_time_utc_ms=None,
+             actor=None,gdb_version=None):
     asset=str(asset).strip().casefold()
     if asset not in ASSET_LAYER_IDS:
         raise ValueError("Unsupported REG asset type.")
     if isinstance(objectid,bool) or not re.fullmatch(r"[0-9]{1,19}",str(objectid)):
         raise ValueError("Invalid positive source OBJECTID.")
-    try:
-        oid=int(objectid)
-    except (ValueError,TypeError,OverflowError) as exc:
-        raise ValueError("Invalid positive source OBJECTID.") from exc
+    oid=int(objectid)
     if not 0<oid<=MAX_OBJECTID:
         raise ValueError("Invalid positive source OBJECTID.")
-    return f"{SCHEME}://zoom/{asset}/{oid}"
+    base=f"{SCHEME}://zoom/{asset}/{oid}"
+    if all(x is None for x in (globalid,event_time_utc_ms,actor,gdb_version)):
+        return base  # Legacy user-entered "Find Asset" has no edit identity.
+    gid,event,by,ver=_validate_event_context(
+        globalid,event_time_utc_ms,actor,gdb_version
+    )
+    return base+"?"+urlencode({
+        "gid":gid,"event_ms":event,"actor":by,"ver":ver
+    })
 
 
-def parse_uri(uri):
+def _parse_components(uri):
     supplied=str(uri or "").strip().strip('"')
     parts=urlsplit(supplied)
     if parts.scheme.casefold()!=SCHEME or parts.netloc.casefold()!="zoom":
         raise ValueError("Unsupported REPORTAPP navigation link.")
-    if parts.query or parts.fragment or parts.username or parts.password:
+    if parts.fragment or parts.username or parts.password:
         raise ValueError("Unexpected navigation link component.")
     match=re.fullmatch(r"/(pole|line|transformer)/([0-9]{1,19})",parts.path)
     if not match:
         raise ValueError("Navigation path must contain an asset and OBJECTID.")
-    asset=match.group(1)
-    oid=int(match.group(2))
-    return asset,oid,zoom_uri(asset,oid)
+    asset,oid=match.group(1),int(match.group(2))
+    if not 0<oid<=MAX_OBJECTID:
+        raise ValueError("Invalid positive source OBJECTID.")
+    options={}
+    if parts.query:
+        params=parse_qs(parts.query,strict_parsing=True,keep_blank_values=True)
+        if set(params)!={"gid","event_ms","actor","ver"} or any(
+            len(v)!=1 for v in params.values()
+        ):
+            raise ValueError("Unrecognized or incomplete source event context.")
+        gid,event,by,ver=_validate_event_context(
+            params["gid"][0],params["event_ms"][0],
+            params["actor"][0],params["ver"][0],
+        )
+        options={"globalid":gid,"event_time_utc_ms":event,
+                 "actor":by,"gdb_version":ver}
+    canonical=zoom_uri(asset,oid,**options)
+    return asset,oid,canonical,options
+
+
+def parse_uri(uri):
+    asset,oid,canonical,_=_parse_components(uri)
+    return asset,oid,canonical
+
 
 def paused_flag(folder=None):
     requests=Path(folder).resolve() if folder is not None else queue_folder()
@@ -96,7 +144,7 @@ def resume_navigation(folder=None):
 
 
 def enqueue(uri,folder=None,now=None):
-    asset,oid,canonical=parse_uri(uri)
+    asset,oid,canonical,metadata=_parse_components(uri)
     destination=Path(folder) if folder is not None else queue_folder()
     destination.mkdir(parents=True,exist_ok=True)
     if is_navigation_paused(destination):
@@ -109,6 +157,13 @@ def enqueue(uri,folder=None,now=None):
         "layer_id":ASSET_LAYER_IDS[asset],"service_url":SERVICE_URL,
         "created_utc_ms":timestamp,"origin":"REPORTAPP_NOTIFICATION",
     }
+    if metadata:
+        request.update({
+            "expected_globalid":metadata["globalid"],
+            "expected_event_utc_ms":metadata["event_time_utc_ms"],
+            "expected_actor":metadata["actor"],
+            "source_gdb_version":metadata["gdb_version"],
+        })
     temporary=destination/("."+identity+".tmp")
     final=destination/(identity+".json")
     try:
