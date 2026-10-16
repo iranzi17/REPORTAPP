@@ -297,8 +297,14 @@ namespace ReportappNavigationBridge
                 FeatureLayer? layer = matches.FirstOrDefault();
                 if (layer == null)
                 {
-                    // Add only the exact verified REG layer, not a similarly
-                    // named layer from another Utility Network or geodatabase.
+                    // Never silently add sde.DEFAULT into a supervisor's
+                    // branch-version map for a LIVE QA ALERT. That can make
+                    // the source timestamp disagree with the visible layers.
+                    if (req.Origin == "REPORTAPP_VERIFIED_ALERT")
+                        return (string?)"Active map does not contain the verified " +
+                            "REG sde.DEFAULT layer. Nothing was selected or added. " +
+                            "Switch to the matching source version to inspect this alert.";
+                    // An explicit manual Find Asset may add the exact service.
                     layer = LayerFactory.Instance.CreateLayer(
                         new Uri(url), view.Map) as FeatureLayer;
                     if (layer == null)
