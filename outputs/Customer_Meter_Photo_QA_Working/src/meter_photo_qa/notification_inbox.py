@@ -282,6 +282,8 @@ def bootstrap_maintainer_update(*,repository=None):
     prefix="outputs/Customer_Meter_Photo_QA_Working/"
     allowed={
         ".github/workflows/reportapp-deferred-alerts.yml",
+        ".github/workflows/reportapp-bootstrap-inbox.yml",
+        "maintenance/build_bootstrap_inbox_release.py",
         "maintenance/self_monitor.py",
         "maintenance/build_safe_release.py",
         "maintenance/tests/test_self_monitor.py",
