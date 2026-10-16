@@ -219,17 +219,31 @@ namespace ReportappNavigationBridge
                 {
                     ObjectIDs = new List<long> { req.ObjectId }
                 };
-                // Select only the requested record and zoom to selection.
-                // MapView.ZoomTo(layer, objectid) is NOT an ArcGIS Pro 3.4
-                // API overload; ZoomToSelected() is supported by SDK 3.4.
-                using var selected = layer.Select(
-                    filter, SelectionCombinationMethod.New);
-                if (selected.GetCount() != 1)
-                    return (string?)"OBJECTID not selectable (possibly filtered or deleted).";
-                // ZoomToSelected considers every map selection. Clear unrelated
-                // selections only after the requested record is confirmed.
+                // Read-only preflight: retries for missing records must NEVER
+                // clear the surveyor's or supervisor's manual map selection.
+                // FeatureLayer.Search respects the layer's definition query.
+                using (var rows = layer.Search(filter))
+                {
+                    if (!rows.MoveNext())
+                        return (string?)"OBJECTID not found in the current layer/version or excluded by a filter; manual selection preserved.";
+                }
+                // Add first instead of New: if the feature stops being
+                // selectable between Search and Select, existing selections
+                // remain unchanged. GetObjectIDs may include earlier selections.
+                using (var staged = layer.Select(filter, SelectionCombinationMethod.Add))
+                {
+                    if (!staged.GetObjectIDs().Contains(req.ObjectId))
+                        return (string?)"OBJECTID not selectable in the current layer; manual selection preserved.";
+                }
+                // Once the target is verified selectable, select *only* this
+                // record so ZoomToSelected does not zoom to unrelated features.
+                // MapView.ZoomTo(layer, objectid) is not a Pro 3.4 overload.
                 view.Map.ClearSelection();
-                using var exactSelection = layer.Select(filter, SelectionCombinationMethod.New);
+                using (var exactSelection = layer.Select(filter, SelectionCombinationMethod.New))
+                {
+                    if (!exactSelection.GetObjectIDs().Contains(req.ObjectId))
+                        return (string?)"OBJECTID became unavailable during final selection.";
+                }
                 layer.SetVisibility(true);
                 return (string?)null;
             });

@@ -89,6 +89,19 @@ Diagnostics: `%LOCALAPPDATA%/REPORTAPP/Navigation/bridge-errors.log` and
 `navigation-errors.log`. Missing authentication, missing features, wrong versions,
 no active map and definition-query exclusions require user correction in Pro.
 
+## Selection-safety correction (requires rebuild)
+
+A live office test on 2026-10-16 found that failed navigation requests
+cleared manual map selections every minute. The source now performs a
+read-only `FeatureLayer.Search` preflight and a non-destructive
+`SelectionCombinationMethod.Add` check before clearing unrelated
+selections for a **confirmed** successful navigation target. This source
+change is not active in an already installed .esriAddInX until rebuilt,
+installed, and Pro restarted. Keep failed requests renamed
+`*.json.paused` until the replacement build is deployed; do not purge
+inbox/monitoring history. The C# change needs on-machine SDK compilation
+and a live missing-record/manual-selection regression test.
+
 ## Safe acceptance test in authenticated Pro 3.4
 
 1. Sign in normally to REG. Open a disposable 2D project/map in sde.DEFAULT.

@@ -69,6 +69,21 @@ class NavigationTests(unittest.TestCase):
                 main(["--uri","reportapp://zoom/pole/1?command=calc"])
             self.assertEqual(len(list(Path(folder).glob("*.json"))),1)
 
+    def test_bridge_guards_manual_selection_before_failed_retries(self):
+        """Source-level regression guard; live behavior still needs SDK testing."""
+        source=(Path(__file__).resolve().parents[1]/
+                "addins"/"ReportappNavigationBridge"/"BridgeModule.cs").read_text(
+                    encoding="utf-8")
+        before=source.index("layer.Search(filter)")
+        staged=source.index("layer.Select(filter, SelectionCombinationMethod.Add)")
+        clear=source.index("view.Map.ClearSelection()")
+        final=source.index("layer.Select(filter, SelectionCombinationMethod.New)")
+        self.assertLess(before,staged)
+        self.assertLess(staged,clear)
+        self.assertLess(clear,final)
+        self.assertIn("if (!rows.MoveNext())",source)
+        self.assertIn("if (!staged.GetObjectIDs().Contains(req.ObjectId))",source)
+
     def test_toast_body_and_action_use_identical_validated_uri(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
