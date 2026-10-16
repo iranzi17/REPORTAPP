@@ -68,7 +68,10 @@ class MaintenanceTests(unittest.TestCase):
         # without exposing toolbox paths before review.
         self.assertEqual(set(payload), set(RELEASE_FILES))
         self.assertTrue(set(payload).issubset(m.ALLOWED))
-        self.assertEqual(payload[TARGET], b"IMPROVED = 2\n")
+        # Windows text-mode writes normalize LF to CRLF; the archive is
+        # byte-exact, so normalize only for this semantic regression assertion.
+        self.assertEqual(payload[TARGET].replace(b"\r\n", b"\n"),
+                         b"IMPROVED = 2\n")
 
     def test_new_allowlisted_module_is_installed_and_removed_on_failure(self):
         source="outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py"
