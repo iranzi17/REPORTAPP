@@ -1,4 +1,4 @@
-name: One-time REPORTAPP Inbox bootstrap release
+name: REPORTAPP Inbox bootstrap maintenance UI release
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: reportapp-bootstrap-once
+  group: reportapp-bootstrap-ui
   cancel-in-progress: false
 
 jobs:
@@ -36,17 +36,17 @@ jobs:
       - name: Package Inbox-only UI for installed maintenance v1
         run: |
           python maintenance/build_bootstrap_inbox_release.py \
-            --tag reportapp-safe-v20261016-001 \
+            --tag reportapp-safe-v20261016-002 \
             --output build/reportapp-safe-update.zip
       - name: Publish one-time reviewed and tested GUI bootstrap
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view reportapp-safe-v20261016-001 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view reportapp-safe-v20261016-002 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Bootstrap release already exists; not overwriting."
             exit 0
           fi
-          gh release create reportapp-safe-v20261016-001 \
+          gh release create reportapp-safe-v20261016-002 \
             build/reportapp-safe-update.zip \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "REPORTAPP Maintenance Upgrade Button (Inbox-only)" \
