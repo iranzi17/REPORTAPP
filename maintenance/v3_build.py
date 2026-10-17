@@ -8,7 +8,7 @@ from pathlib import Path
 import zipfile
 
 from maintenance.v3_core import (
-    AGENT_VERSION, REPO, REQUIRED_FILES, REQUIRED_TESTS, WORK_REL,
+    AGENT_VERSION, REPO, REQUIRED_FILES, WORK_REL, expected_test_names,
     MAX_ARCHIVE, MAX_ENTRY, MAX_UNPACKED, safe_name, safe_path,
 )
 
@@ -49,7 +49,8 @@ def build(tag, root, destination):
         files[relative] = data
     if not REQUIRED_FILES.issubset(files):
         raise ValueError("Mandatory application file or test missing")
-    for name in REQUIRED_TESTS:
+    all_required_tests = expected_test_names(files)
+    for name in all_required_tests:
         if f"{WORK_REL}/tests/{name}" not in files:
             raise ValueError("Mandatory regression test absent: " + name)
     manifest = {
@@ -63,7 +64,7 @@ def build(tag, root, destination):
             "navigation_bridge_required": "1.0.4",
             "deployment_layout": "versioned-pointer",
         },
-        "required_tests": list(REQUIRED_TESTS),
+        "required_tests": list(all_required_tests),
         "files": {name: hashlib.sha256(value).hexdigest()
                   for name, value in sorted(files.items())},
     }
