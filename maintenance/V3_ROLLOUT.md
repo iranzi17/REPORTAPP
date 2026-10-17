@@ -78,6 +78,35 @@ tracebacks). The office must supply the original marker under
 `%LOCALAPPDATA%\\REPORTAPP\\Maintenance\\blocked_releases` to identify its
 actual reason. A generic `RuntimeError` is **not a root-cause diagnosis**.
 
+## ArcGIS Pro Add-In Manager verified state (17 October 2026)
+
+The office screenshot shows **REPORTAPP Alert Zoom Bridge 1.0.3**
+in **Project → Add-In Manager**, targeting ArcGIS Pro 3.4.
+This is direct evidence that the running office's navigation bridge has **NOT**
+yet been upgraded to 1.0.4. Source-event verification is not assured by 1.0.3.
+The screenshot does not confirm the Python `alert_navigation.py` handler
+revision, nor that the map uses the same REG geodatabase version as the
+watcher.
+
+The V3 activation precheck now calls `v3_bridge_audit.scan_installed_bridge()`
+and validates the exact installed Esri package path, `Config.daml`
+AddInInfo ID/version, and SHA256 pinned to GitHub's published
+`reportapp-bridge-v1.0.4` release
+(`66e3688ba7bde34caf210108d3a73225dee7abb8cd39b4e14bd64b6892963a39`).
+A policy flag claiming Bridge 1.0.4 without matching installed bytes **cannot
+authorize activation**. Even matching bytes cannot prove the loaded ArcGIS
+Pro process has restarted; a separate user-confirmed restart and Add-In
+Manager version check remain mandatory.
+
+Safe office order: pause map zoom in the Inbox; ensure the verified
+Python navigation URI handler and Inbox code are updated as a compatible
+set; save/close ArcGIS Pro; install the explicitly published 1.0.4
+`.esriAddInX` using Esri's installer; reopen Pro and check the displayed
+version; inspect the same trusted REG `sde.DEFAULT` map version;
+test a newly verified alert in a noncritical project. Do **not** silently
+replace the installed add-in through V3 or change a Windows Scheduled Task
+during this manual bridge upgrade.
+
 ## Office isolated compatibility diagnostic — 17 October 2026
 
 The office diagnostic ran with Windows and Python **3.11.10**. It reports
