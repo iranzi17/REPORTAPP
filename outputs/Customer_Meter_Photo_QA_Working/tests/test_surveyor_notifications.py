@@ -43,6 +43,23 @@ CONFIG={"enabled":True,"usernames":["ninamenye9683"],"assets":["pole"],
 
 
 class NotificationTests(unittest.TestCase):
+    def test_naive_arcgis_editor_time_is_utc_not_office_local_time(self):
+        from meter_photo_qa.surveyor_notifications import timestamp_ms, submission_actor
+        source=std_datetime.datetime(2026,10,16,16,46,0)
+        utc=source.replace(tzinfo=std_datetime.timezone.utc)
+        self.assertEqual(timestamp_ms(source),int(utc.timestamp()*1000))
+        self.assertEqual(event_timestamp({
+            "created_date": source-std_datetime.timedelta(days=30),
+            "last_edited_date": source,
+        }),int(utc.timestamp()*1000))
+        self.assertEqual(submission_actor({
+            "created_date": source-std_datetime.timedelta(days=30),
+            "last_edited_date": source,
+            "created_user":"other_person",
+            "last_edited_user":"ninamenye9683",
+        }),("ninamenye9683","EDIT"))
+
+
     def test_preflight_datetime_module_shadow_does_not_break_runtime(self):
         # The actual ArcGIS Pro traceback exposed 'datetime' as a module,
         # which caused the preflight and its exception logger to fail.
