@@ -106,6 +106,52 @@ class ExactLiveEventTests(unittest.TestCase):
         self.assertIn("gid=", uri)
         self.assertIn("event_ms=", uri)
 
+    def test_clean_toast_action_has_exact_identity_and_source_time(self):
+        from unittest.mock import Mock
+        from meter_photo_qa.surveyor_activity import deliver_clean_activity
+        toast=Mock()
+        supplier=Mock(return_value=toast)
+        import sys
+        from meter_photo_qa.alert_navigation import zoom_uri
+        expected=zoom_uri(
+            "pole", 891705, globalid=GID, event_time_utc_ms=TIME_MS,
+            actor="ninamenye9683", gdb_version="sde.DEFAULT",
+        )
+        with patch.dict(sys.modules, {
+            "winotify": SimpleNamespace(Notification=supplier),
+        }), patch(
+            "meter_photo_qa.alert_navigation.is_registered",return_value=True
+        ), patch(
+            "meter_photo_qa.source_event_navigation.verified_source_uri",
+            return_value=expected
+        ):
+            deliver_clean_activity(
+                dict(ALERT,issues=[],notification_kind="CLEAN_ACTIVITY"), CONFIG)
+        self.assertEqual(supplier.call_args.kwargs["launch"],expected)
+        toast.add_actions.assert_called_once_with(
+            label="Zoom in ArcGIS Pro",launch=expected)
+        toast.show.assert_called_once()
+
+    def test_clean_toast_does_not_offer_unsafe_zoom_if_source_changed(self):
+        from unittest.mock import Mock
+        from meter_photo_qa.surveyor_activity import deliver_clean_activity
+        import sys
+        toast=Mock()
+        supplier=Mock(return_value=toast)
+        with patch.dict(sys.modules, {
+            "winotify": SimpleNamespace(Notification=supplier),
+        }), patch(
+            "meter_photo_qa.alert_navigation.is_registered",return_value=True
+        ), patch(
+            "meter_photo_qa.source_event_navigation.verified_source_uri",
+            side_effect=ExactFeatureMismatch("stale source")
+        ):
+            deliver_clean_activity(
+                dict(ALERT,issues=[],notification_kind="CLEAN_ACTIVITY"), CONFIG)
+        self.assertEqual(supplier.call_args.kwargs["launch"],"")
+        toast.add_actions.assert_not_called()
+        toast.show.assert_called_once()
+
     def test_old_created_pole_with_later_edit_by_same_actor_matches_edit_event(self):
         layer = Layer([feature(created=TIME_MS - 36000000, edited=TIME_MS)])
         self.assertEqual(navigation.verified_source_uri(
