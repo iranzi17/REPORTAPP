@@ -1,0 +1,104 @@
+name: REPORTAPP QA Gap KMZ Companion Tests
+
+on:
+  push:
+    branches: [main, feature/qa-report-kmz-companion]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/gap_kmz.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/combined_qa_report.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_gap_kmz.py'
+      - '.github/workflows/reportapp-gap-kmz.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kmz-matching-and-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install openpyxl pillow
+      - name: Compile KMZ generator and toolbox
+        run: |
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/gap_kmz.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/combined_qa_report.py
+      - name: Test KMZ against exact QA Excel records
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_gap_kmz.py -v
+      - name: Test combined reports, single-asset QA and toolbox regressions
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_combined_qa_report.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_asset_quality_workflow.py -v
+          # ArcGIS Pro toolbox UI tests require arcpy on a licensed Windows
+          # installation. The .pyt is syntax-checked above in Linux CI.
+
+  package-kmz-review:
+    name: Package KMZ companion independent review artifact (no deployment)
+    needs: kmz-matching-and-safety
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Produce isolated KMZ source/tests plus integrity manifest
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, zipfile
+          base = Path("outputs/Customer_Meter_Photo_QA_Working")
+          paths = [
+            "src/meter_photo_qa/gap_kmz.py",
+            "src/meter_photo_qa/combined_qa_report.py",
+            "CustomerMeterPhotoQA.pyt",
+            "tests/test_gap_kmz.py",
+            "tests/test_combined_qa_report.py",
+            "tests/test_asset_quality_workflow.py",
+          ]
+          hashes = {p: hashlib.sha256((base / p).read_bytes()).hexdigest()
+                    for p in paths}
+          manifest = {
+              "status": "TESTED_KMZ_COMPANION_FOR_REVIEW_NOT_INSTALLED",
+              "repository": "iranzi17/REPORTAPP",
+              "pull_request": 12,
+              "commit": os.environ["GITHUB_SHA"],
+              "source_version": "sde.DEFAULT",
+              "read_only_geometry": True,
+              "requires_arcgis_pro_office_acceptance": True,
+              "source_event_PR17_excluded": True,
+              "sha256": hashes,
+          }
+          folder = Path("kmz-review")
+          folder.mkdir(exist_ok=True)
+          zipped = folder / "REPORTAPP_KMZ_PR12_Review.zip"
+          with zipfile.ZipFile(zipped, "w", zipfile.ZIP_DEFLATED) as z:
+              for rel in paths:
+                  z.write(base / rel, rel)
+              z.writestr("manifest.json", json.dumps(manifest, indent=2))
+          (folder / "SHA256.txt").write_text(
+              hashlib.sha256(zipped.read_bytes()).hexdigest() +
+              "  " + zipped.name + "\n", encoding="utf-8")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: REPORTAPP_KMZ_PR12_Reviewed_Code
+          path: kmz-review/
+          if-no-files-found: error
+          retention-days: 14

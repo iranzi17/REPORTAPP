@@ -60,6 +60,7 @@ try:
     from meter_photo_qa import smart_query_runner as _smart_query_runner
     from meter_photo_qa import lv_feeder_report as _lv_feeder_report
     from meter_photo_qa import combined_qa_report as _combined_qa_report
+    from meter_photo_qa import gap_kmz as _gap_kmz
     from meter_photo_qa import template_attribute_audit as _template_attribute_audit
     from meter_photo_qa import template_audit_runner as _template_audit_runner
     from meter_photo_qa import notification_setup as _notification_setup
@@ -80,6 +81,7 @@ try:
     _smart_query_runner = importlib.reload(_smart_query_runner)
     _lv_feeder_report = importlib.reload(_lv_feeder_report)
     _combined_qa_report = importlib.reload(_combined_qa_report)
+    _gap_kmz = importlib.reload(_gap_kmz)
     _template_attribute_audit = importlib.reload(_template_attribute_audit)
     _template_audit_runner = importlib.reload(_template_audit_runner)
     _notification_setup = importlib.reload(_notification_setup)
@@ -978,8 +980,34 @@ class WatchLVLineDataQuality:
         )
         if summary["total_lines"] == 0:
             arcpy.AddWarning("No matching LV lines were found. Check the dates and area before treating this as a clean result.")
+        _export_companion_kmz(
+            {"line":summary["output_xlsx"]},
+            service_url=parameters[10].valueAsText or None,
+            version=parameters[12].valueAsText or "sde.DEFAULT",
+        )
         arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
 
+
+
+def _export_companion_kmz(reports, service_url=None, version="sde.DEFAULT"):
+    """Create one Google Earth KMZ beside a completed original QA workbook."""
+    first=Path(next(iter(reports.values())))
+    target=first.with_name(first.stem+"_Gaps.kmz")
+    try:
+        result=_gap_kmz.export_gap_kmz(
+            reports,target,service_url=service_url,version=version
+        )
+        arcpy.AddMessage(
+            "Matching gap KMZ: "+result["output_kmz"]+
+            f" ({result['features_exported']} source features)."
+        )
+        return result
+    except Exception as exc:
+        arcpy.AddWarning(
+            "Matching gap KMZ unavailable: "+str(exc)+
+            ". The original Excel report is intact; check the source version."
+        )
+        return {"status":"UNAVAILABLE","reason":str(exc)}
 
 
 class _AssetQualityTool:
@@ -1104,6 +1132,11 @@ class _AssetQualityTool:
             version=parameters[10].valueAsText or "sde.DEFAULT",
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
+        _export_companion_kmz(
+            {self.asset:summary["output_xlsx"]},
+            service_url=parameters[8].valueAsText or None,
+            version=parameters[10].valueAsText or "sde.DEFAULT",
+        )
         arcpy.AddMessage(
             f"Checked {summary['total']} {self.asset}(s): "
             f"{summary['with_gaps']} with confirmed gaps, "
@@ -1347,6 +1380,15 @@ class AskReportApp:
             arcpy.AddMessage(
                 "Combined QA report saved: " + report["output_xlsx"]
             )
+            if report.get("kmz",{}).get("status")=="COMPLETE":
+                arcpy.AddMessage(
+                    "Matching Google Earth KMZ: "+report["kmz"]["output_kmz"]
+                )
+            else:
+                arcpy.AddWarning(
+                    "Matching KMZ unavailable: "+
+                    str(report.get("kmz",{}).get("reason","Unknown GIS error"))
+                )
             arcpy.AddMessage(
                 "Unmodified original component workbooks: " +
                 report["components_folder"]
