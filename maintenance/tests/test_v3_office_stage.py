@@ -81,6 +81,24 @@ class PinnedStageTests(unittest.TestCase):
         self.assertEqual(saved["phase"], "V2_POLICY_CHECK")
         self.assertFalse(saved["v3_activated"])
 
+    def test_cli_wrapper_attribute_error_still_writes_a_report(self):
+        from unittest.mock import patch
+        import sys
+        with patch.object(stage, "stage",
+                          side_effect=AttributeError("simulated wrapper failure")):
+            with patch.dict("os.environ", {"LOCALAPPDATA": str(self.appdata)}):
+                with patch.object(sys, "argv",
+                                  ["staging", "--candidate", str(self.package)]):
+                    exit_code = stage.main()
+        self.assertEqual(exit_code, 2)
+        reports = list((self.appdata / "REPORTAPP" / "Diagnostics").glob(
+            "office_v3_stage_*.json"))
+        self.assertEqual(len(reports), 1)
+        output = json.loads(reports[0].read_text(encoding="utf-8"))
+        self.assertEqual(output["status"], "WRAPPER_FAILED_SAFE")
+        self.assertEqual(output["error_type"], "AttributeError")
+        self.assertFalse(output["v3_activated"])
+
     def test_read_only_receipt_does_not_include_private_paths(self):
         report = {"status": "FAILED_SAFE", "error_code": "V2_AUTO_DEPLOY_STILL_ENABLED"}
         path = stage._safe_report(report, local=self.appdata)
