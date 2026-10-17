@@ -49,17 +49,16 @@ def xml_element(root, tag):
 
 
 def _task_xml_text(xml):
-    """Decode task XML without trusting the export's encoding declaration.
+    """Decode Windows task XML without trusting an inconsistent XML prolog.
 
-    PowerShell Export-ScheduledTask can emit an XML declaration claiming
-    UTF-16, but the office backup captures stdout as Unicode and saves it as
-    UTF-8. ElementTree rejects that declaration if passed UTF-8 *bytes*.
-    Preserve and checksum the original backup bytes; normalize only the
-    temporary parsed string. Also accept actual BOM-marked UTF-16.
+    PowerShell Export-ScheduledTask may declare UTF-16 even when its Unicode
+    stdout was saved by the backup utility as UTF-8. Read the original XML
+    bytes unchanged for independent SHA256 checks, normalize only a temporary
+    string for ElementTree. Accept true BOM-marked UTF-16 as well.
     """
     if isinstance(xml, bytes):
         try:
-            if xml.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
+            if xml.startswith((b"\xff\xfe", b"\xfe\xff")):
                 text = xml.decode("utf-16")
             else:
                 text = xml.decode("utf-8-sig")
@@ -71,11 +70,8 @@ def _task_xml_text(xml):
         raise CutoverError("TASK_XML_TYPE_INVALID")
     if len(text) > 512_000:
         raise CutoverError("TASK_XML_OVERSIZED")
-    text = text.lstrip("\\ufeff")
-    # ElementTree parsing a Unicode string with an XML encoding declaration
-    # would itself raise. Strip only the declaration; not any task elements.
-    return re.sub(r"^\\s*<\\?xml\\s+[^?]*\\?>", "", text, count=1, flags=re.I)
-
+    text = text.lstrip("\ufeff")
+    return re.sub(r"^\s*<\?xml\s+[^?]*\?>", "", text, count=1, flags=re.I)
 
 def read_task_action(xml):
     try:
