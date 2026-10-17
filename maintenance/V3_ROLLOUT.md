@@ -26,6 +26,19 @@ policy, confirm no maintenance cycle is concurrently running, change only
 cycles still report watcher health but `deployment=DISABLED`. Do not
 delete the maintenance task or the five old blocked release markers.
 
+A draft, operator-controlled `maintenance/v3_v2_hold.py` implements this
+narrow hold, with `--status` as its default **read-only** behavior.
+Actual `--hold` requires an interactive, exact confirmation phrase.
+It preserves the original V2 policy and the V2 maintenance task definition
+privately, checks the V2 task is Ready, briefly disables **only REPORTAPP
+Self Maintenance**, atomically sets just `auto_deploy=false`, re-enables the
+V2 health task, and retains the original one-minute watcher untouched.
+Tests inject fake task controllers and verify that an interrupted hold
+leaves automatic deployment disabled rather than accidentally re-enabling
+it. The script has **not been run on the office computer** and is not
+approved for office operation until the user explicitly authorizes this
+configuration change and the first-run handling is reviewed.
+
 Additional unresolved gates: a rollback *rehearsal* rather than a backup
 only; an isolated V3 Inbox/protocol routing test (the HKCU handler currently
 points at legacy repo source); validated ArcGIS Pro 1.0.4 installation and
