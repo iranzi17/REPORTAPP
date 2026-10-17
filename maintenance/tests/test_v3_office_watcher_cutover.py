@@ -179,6 +179,9 @@ class CutoverTests(unittest.TestCase):
         self.assertEqual(self.task.action, self.original)
         self.assertEqual(self.manager.policy.read_bytes(), self.previous_policy)
         self.assertFalse(self.manager.active.exists())
+        self.assertEqual(
+            json.loads((self.v3 / "last_deployment.json").read_text())["status"],
+            "ROLLED_BACK_TO_LEGACY")
 
 
 if __name__ == "__main__":
