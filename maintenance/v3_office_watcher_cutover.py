@@ -377,6 +377,7 @@ def restore_legacy(*, localappdata, python, confirmation=None, task=None):
         tx = read_json(txfile, {})
         policybytes = policy_file.read_bytes()
         if (tx.get("release") == TAG and
+                tx.get("status") == "VERIFIED_SWITCHED" and
                 tx.get("policy_before_sha256") == sha(policybytes)):
             valid.append((folder.name, policybytes))
     if len(valid) != 1:
@@ -396,6 +397,12 @@ def restore_legacy(*, localappdata, python, confirmation=None, task=None):
     tmp = manager.policy.with_name(manager.policy.name + "." + uuid.uuid4().hex + ".tmp")
     tmp.write_bytes(old_policy)
     os.replace(tmp, manager.policy)
+    atomic_json(v3 / "last_deployment.json", {
+        "status": "ROLLED_BACK_TO_LEGACY",
+        "tag": TAG,
+        "at_epoch_seconds": time.time(),
+        "original_watcher_task": "RESTORED",
+    })
     atomic_json(v3 / "rollback_latest.json", {
         "status": "ORIGINAL_TASK_RESTORED",
         "tag": TAG,
