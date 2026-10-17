@@ -48,11 +48,42 @@ def xml_element(root, tag):
     return next((x for x in root.iter() if x.tag.rsplit("}", 1)[-1] == tag), None)
 
 
+def _task_xml_text(xml):
+    """Decode task XML without trusting the export's encoding declaration.
+
+    PowerShell Export-ScheduledTask can emit an XML declaration claiming
+    UTF-16, but the office backup captures stdout as Unicode and saves it as
+    UTF-8. ElementTree rejects that declaration if passed UTF-8 *bytes*.
+    Preserve and checksum the original backup bytes; normalize only the
+    temporary parsed string. Also accept actual BOM-marked UTF-16.
+    """
+    if isinstance(xml, bytes):
+        try:
+            if xml.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
+                text = xml.decode("utf-16")
+            else:
+                text = xml.decode("utf-8-sig")
+        except UnicodeError as exc:
+            raise CutoverError("TASK_XML_ENCODING_INVALID") from exc
+    elif isinstance(xml, str):
+        text = xml
+    else:
+        raise CutoverError("TASK_XML_TYPE_INVALID")
+    if len(text) > 512_000:
+        raise CutoverError("TASK_XML_OVERSIZED")
+    text = text.lstrip("\\ufeff")
+    # ElementTree parsing a Unicode string with an XML encoding declaration
+    # would itself raise. Strip only the declaration; not any task elements.
+    return re.sub(r"^\\s*<\\?xml\\s+[^?]*\\?>", "", text, count=1, flags=re.I)
+
+
 def read_task_action(xml):
     try:
-        root = ET.fromstring(xml)
+        root = ET.fromstring(_task_xml_text(xml))
     except ET.ParseError as exc:
         raise CutoverError("TASK_XML_INVALID") from exc
+    if root.tag.rsplit("}", 1)[-1] != "Task":
+        raise CutoverError("TASK_XML_UNEXPECTED_ROOT")
     actions = xml_element(root, "Actions")
     execs = [x for x in actions if x.tag.rsplit("}", 1)[-1] == "Exec"] if actions is not None else []
     if len(execs) != 1:
