@@ -351,6 +351,17 @@ class Manager:
         if policy.get("bridge_version_confirmed") != "1.0.4":
             raise ReleaseError("ACTIVATION", "BRIDGE_UNVERIFIED",
                                "Verify installed ArcGIS Pro navigation bridge 1.0.4")
+        # Never trust a policy flag as proof that ArcGIS Pro actually has
+        # the requested add-in installed. Check the Esri installation path,
+        # Config.daml identity/version and exact approved release SHA256.
+        from .v3_bridge_audit import BridgeAuditError, scan_installed_bridge
+        try:
+            scan_installed_bridge()
+        except BridgeAuditError as exc:
+            raise ReleaseError("ACTIVATION", "BRIDGE_" + exc.code, str(exc)) from exc
+        if policy.get("bridge_restart_confirmed") is not True:
+            raise ReleaseError("ACTIVATION", "BRIDGE_RESTART_UNVERIFIED",
+                               "Restart ArcGIS Pro and verify Bridge 1.0.4 in Add-In Manager")
         if policy.get("runtime_python_confirmed") != self.python:
             raise ReleaseError("ACTIVATION", "PYTHON_UNVERIFIED",
                                "Verify this exact ArcGIS Pro Python executable")
