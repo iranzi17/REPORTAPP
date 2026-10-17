@@ -1,3 +1,38 @@
+## Office immutable snapshot verified (17 October 2026, 15:23 UTC)
+
+The office `office_v3_stage_verified_20261017T152335Z_4d8ee14f.json`
+reports `VERIFIED_STAGED_NOT_ACTIVATED`: 83 source/test/config file
+SHA256 digests match the signed manifest, all six required regression
+suites report 71 passing tests, V2 automatic deployment remains disabled,
+no activation journal or `active.json` exists, and no REG data, Windows
+task or registry edits were made. **Do not repeat staging or the 71 tests.**
+
+Controlled transition remains necessary because the office's HKCU
+`reportapp://` handler points to the legacy repository source and the
+installed ArcGIS Bridge is version 1.0.3. V3's activation gate requires an
+**installed and restarted Bridge 1.0.4** and a user-authorized cutover.
+The `v3_launcher` also requires separate testing of a persistent
+non-repository entry point and exact original config path before modifying
+the existing one-minute watcher task. A V3 active pointer by itself
+**does not** switch the Windows Scheduled Task.
+
+A draft `maintenance/v3_prepare_navigation.py` supports an explicit
+user-initiated HKCU URL-handler transition to the hash-verified V3 staged
+`alert_navigation.py` and a separate original-handler restore command.
+It verifies the original saved registry backup, immutable candidate,
+V2 auto-deploy hold and active navigation pause flag, refusing to run
+when these conditions are not met. It does not change the watcher, bridge
+or GIS data. The draft has simulated registry rollback tests in CI.
+**No handler switch has been run on the office machine; explicit user
+approval and a reviewed operator package are still required.**
+
+Safe order: keep Map Zoom paused; independently approve and verify the
+handler transition; install published Bridge 1.0.4 through Esri after
+closing ArcGIS Pro; restart, verify it in Add-In Manager and confirm
+the same REG sde.DEFAULT map version; only then approve the exact
+Scheduled Task cutover after inspecting the restoration plan.
+Retain original XML/HKCU backups and rollback capability throughout.
+
 ## Office V2 hold confirmed; immutable V3 staging next
 
 The office-confirmed receipt
