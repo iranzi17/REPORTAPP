@@ -88,6 +88,17 @@ The screenshot does not confirm the Python `alert_navigation.py` handler
 revision, nor that the map uses the same REG geodatabase version as the
 watcher.
 
+The office isolated compatibility report contains SHA256 hashes for the
+currently installed Python modules. Comparing those hashes with current
+GitHub `main` showed **nonmatching files** for `alert_navigation.py`,
+`notification_inbox.py`, and `surveyor_notifications.py`, including
+checks with LF/CRLF line ending normalization. Combined with the office
+10-versus-main 15 navigation-test difference, this establishes Python
+component drift. The exact content differences still require a reviewed
+file diff; mismatched hashes alone do not identify which code path differs.
+**Do not upgrade the bridge alone** while this drift remains.
+
+
 The V3 activation precheck now calls `v3_bridge_audit.scan_installed_bridge()`
 and validates the exact installed Esri package path, `Config.daml`
 AddInInfo ID/version, and SHA256 pinned to GitHub's published
