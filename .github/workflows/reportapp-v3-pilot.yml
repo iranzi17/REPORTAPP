@@ -216,6 +216,7 @@ jobs:
           the current watcher, alter monitored users, or install Bridge 1.0.4.
           If any check fails, the current REPORTAPP watcher remains in use.
           TXT
+          sed -i 's/$/\r/' build/office-v3-stage/Run_V3_Staging_No_Cutover.cmd
           python -m py_compile build/office-v3-stage/maintenance/*.py
       - name: Upload reviewed staging kit only (NEVER a production deployment)
         uses: actions/upload-artifact@v4
