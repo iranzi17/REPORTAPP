@@ -7,6 +7,8 @@ features returned by the moving 24-hour service query.
 """
 from __future__ import annotations
 
+from .desktop_toast_channel import DESKTOP_APP_ID
+
 from datetime import datetime, timezone
 import json
 import os
@@ -190,7 +192,7 @@ def deliver_clean_activity(entry,config):
     # to a different source after edits or a version switch.
     launch=(safe_verified_source_uri(entry,config) if is_registered() else "")
     popup=Notification(
-        app_id="REPORTAPP Surveyor Activity",title=title,
+        app_id=DESKTOP_APP_ID,title=title,
         msg=message,duration="long",launch=launch,
     )
     if launch:
@@ -208,7 +210,7 @@ def deliver_activity_test(asset,objectid):
     uri=zoom_uri(asset,objectid,manual=True)
     launch=uri if is_registered() else ""
     popup=Notification(
-        app_id="REPORTAPP Surveyor Activity",
+        app_id=DESKTOP_APP_ID,
         title="REPORTAPP TEST — activity notification",
         msg=(
             "Test popup only: no REG feature was evaluated or marked clean. "
@@ -263,7 +265,7 @@ def deliver_heartbeat(stats,config):
         f"Clean checks notified this scan: {stats['clean_notifications_sent']}."
     )
     Notification(
-        app_id="REPORTAPP Surveyor Activity",
+        app_id=DESKTOP_APP_ID,
         title="REPORTAPP watcher healthy — periodic scan summary",
         msg=message,duration="long",
     ).show()
@@ -359,7 +361,7 @@ def deliver_clean_digest(summary,config):
         +"For individual OBJECTIDs and zoom, open Clean Activity History in REPORTAPP."
     )
     Notification(
-        app_id="REPORTAPP Surveyor Activity",title=title,
+        app_id=DESKTOP_APP_ID,title=title,
         msg=msg,duration="long",
     ).show()
 
