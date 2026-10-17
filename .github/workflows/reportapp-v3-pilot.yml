@@ -116,3 +116,111 @@ jobs:
           path: build/office-backup/
           retention-days: 7
           if-no-files-found: error
+
+  prepare-office-stage-kit:
+    name: Package pinned office V3 staging kit (no live activation)
+    needs: test-real-candidate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download EXACT previously office-tested candidate from run 39038152277
+        uses: actions/download-artifact@v4
+        with:
+          name: reportapp-v3-reviewed-candidate
+          run-id: 39038152277
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/pinned-artifact
+      - name: Verify independently reviewed package bytes, regression tests and actual staged source
+        shell: bash
+        run: |
+          python -m pip install openpyxl pillow
+          python -m unittest discover -s maintenance/tests -p test_v3_office_stage.py -v
+          python - <<'PY'
+          import hashlib, pathlib, json, zipfile
+          path = pathlib.Path('build/pinned-artifact/reportapp-v3-candidate.zip')
+          actual = hashlib.sha256(path.read_bytes()).hexdigest()
+          expected = '1dac15a37682c79f11508aaea80c344a50dfdb08d7dfede7a19b2ed7575cd948'
+          assert actual == expected, 'Office-reviewed package hash differs; abort'
+          with zipfile.ZipFile(path) as z:
+              manifest = json.loads(z.read('manifest.json'))
+          assert manifest['tag'] == 'reportapp-v3-v20261017-000032'
+          assert len(manifest['files']) == 83
+          print('Pinned office candidate authentic:', actual)
+          PY
+          python - <<'PY'
+          import json, pathlib, tempfile
+          from maintenance import v3_office_stage as stage
+          with tempfile.TemporaryDirectory(prefix='reportapp-v3-stage-test-') as folder:
+              appdata = pathlib.Path(folder)
+              p = appdata / 'REPORTAPP' / 'Maintenance' / 'policy.json'
+              p.parent.mkdir(parents=True)
+              p.write_text(json.dumps({'auto_deploy': False}), encoding='utf-8')
+              result = stage.stage('build/pinned-artifact/reportapp-v3-candidate.zip',
+                                   appdata=appdata, runtime_check=False)
+              print(json.dumps(result, indent=2))
+              assert result['status'] == 'STAGED_TESTED_NOT_ACTIVATED'
+              assert sum(result['checks']['suite_counts'].values()) >= 71
+              assert not (p.parent / 'v3' / 'active.json').exists()
+          PY
+      - name: Assemble standalone one-click Windows staging kit
+        shell: bash
+        run: |
+          mkdir -p build/office-v3-stage/maintenance
+          cp build/pinned-artifact/reportapp-v3-candidate.zip build/office-v3-stage/reportapp-v3-candidate.zip
+          cp maintenance/v3_core.py maintenance/v3_bridge_audit.py maintenance/v3_component_compatibility.py maintenance/v3_office_stage.py build/office-v3-stage/maintenance/
+          touch build/office-v3-stage/maintenance/__init__.py
+          cat > build/office-v3-stage/Run_V3_Staging_No_Cutover.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro 3.4 Python not found. Nothing was changed.
+            pause
+            exit /b 1
+          )
+          cd /d "%~dp0"
+          echo Preparing REPORTAPP V3 immutable candidate. The live watcher stays unchanged.
+          "%PYTHON%" -m maintenance.v3_office_stage --candidate "%~dp0reportapp-v3-candidate.zip"
+          if errorlevel 1 (
+            echo STAGING NOT COMPLETE. Keep the existing watcher running.
+          ) else (
+            echo STAGING COMPLETE. No application, bridge, or Windows task was switched.
+          )
+          pause
+          CMD
+          cat > build/office-v3-stage/README_FIRST.txt <<'TXT'
+          REPORTAPP V3 OFFICE STAGING - DEVELOPMENT ONLY
+          ================================================
+          Exact office-accepted candidate: reportapp-v3-v20261017-000032
+          Pinned SHA256: 1dac15a37682c79f11508aaea80c344a50dfdb08d7dfede7a19b2ed7575cd948
+          
+          Prerequisites: Windows office PC, ArcGIS Pro 3.4 Python 3.11,
+          V2 auto-deploy already disabled (health-only mode).
+          Double-click Run_V3_Staging_No_Cutover.cmd.
+          Upload only latest office_v3_stage_*.json from:
+          %LOCALAPPDATA%\REPORTAPP\Diagnostics
+          
+          The kit verifies the exact reviewed ZIP, runs six mandatory suites
+          against a new immutable snapshot and confirms all three navigation
+          components agree on source-event identity.
+          It does NOT activate V3, edit registry, stop scheduled tasks, touch
+          the current watcher, alter monitored users, or install Bridge 1.0.4.
+          If any check fails, the current REPORTAPP watcher remains in use.
+          TXT
+          python -m py_compile build/office-v3-stage/maintenance/*.py
+      - name: Upload reviewed staging kit only (NEVER a production deployment)
+        uses: actions/upload-artifact@v4
+        with:
+          name: REPORTAPP_V3_Office_Stage_No_Cutover
+          path: build/office-v3-stage/
+          if-no-files-found: error
+          retention-days: 7
