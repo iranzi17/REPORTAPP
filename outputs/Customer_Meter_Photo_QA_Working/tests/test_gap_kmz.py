@@ -179,6 +179,49 @@ class GapKMZTests(TestCase):
             export_gap_kmz(self.reports,self.dir/"wrong.kmz",
                            layer_factory=wrong,buffer_fn=buffer_test)
 
+    def test_duplicated_source_objectid_never_uses_last_geometry(self):
+        # Fail closed even when a service unexpectedly repeats an OBJECTID:
+        # silently accepting the last returned geometry would misplace a gap.
+        def duplicated(layer):
+            service=self.factory(layer)
+            if layer!=12:return service
+            def query(**kw):
+                original=service.query(**kw)
+                a=original.features[0]
+                return SimpleNamespace(
+                    features=[a,a],spatial_reference={"wkid":4326})
+            return SimpleNamespace(query=query)
+        destination=self.dir/"duplicated-source.kmz"
+        with self.assertRaisesRegex(RuntimeError,"AMBIGUOUS_OBJECTID_RESPONSE"):
+            export_gap_kmz(self.reports,destination,
+                           layer_factory=duplicated,buffer_fn=buffer_test)
+        self.assertFalse(destination.exists())
+
+    def test_blank_source_globalid_blocks_misleading_map(self):
+        def blank(layer):
+            service=self.factory(layer)
+            if layer!=12:return service
+            def query(**kw):
+                result=service.query(**kw)
+                result.features[0].attributes["GLOBALID"]=""
+                return result
+            return SimpleNamespace(query=query)
+        destination=self.dir/"unknown-identity.kmz"
+        with self.assertRaisesRegex(RuntimeError,"SOURCE_GLOBALID_MISSING"):
+            export_gap_kmz(self.reports,destination,
+                           layer_factory=blank,buffer_fn=buffer_test)
+        self.assertFalse(destination.exists())
+
+    def test_wrong_source_gdb_version_never_queries_or_publishes(self):
+        seen=[]
+        destination=self.dir/"other-version.kmz"
+        with self.assertRaisesRegex(ValueError,"sde.DEFAULT"):
+            export_gap_kmz(self.reports,destination,
+                           version="sde.user_branch",
+                           layer_factory=lambda x: seen.append(x))
+        self.assertEqual(seen,[])
+        self.assertFalse(destination.exists())
+
     def test_no_gaps_writes_valid_empty_kmz_without_gis_queries(self):
         clean=workbook(self.dir,"all_clean",{
             "Asset Details":[
