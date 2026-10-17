@@ -185,7 +185,10 @@ def deliver_clean_activity(entry,config):
         +"No outstanding issues in REPORTAPP's verified QA rules. "
         "No REG source data changed."
     )
-    launch=(zoom_uri(entry["asset"],entry["objectid"]) if is_registered() else "")
+    # Clean activity must carry the SAME verified event identity as gap
+    # notifications. An OBJECTID-only URI is unverified and may point
+    # to a different source after edits or a version switch.
+    launch=(safe_verified_source_uri(entry,config) if is_registered() else "")
     popup=Notification(
         app_id="REPORTAPP Surveyor Activity",title=title,
         msg=message,duration="long",launch=launch,
