@@ -1,0 +1,58 @@
+name: REPORTAPP Exact Source Event Identity
+
+on:
+  push:
+    branches: [port/substations-exact-feature-lookup-20261017]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/**'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_exact_feature_lookup.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_source_event_navigation.py'
+      - '.github/workflows/reportapp-exact-source-event.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/**'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/**'
+      - '.github/workflows/reportapp-exact-source-event.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-source-event-tests:
+    name: Exact Source Event and Existing Watcher Regressions
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install existing offline QA dependencies
+        run: python -m pip install openpyxl pillow
+      - name: Compile read-only source identity and watcher handlers
+        run: >
+          python -m py_compile
+          outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/exact_feature_lookup.py
+          outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/source_event_navigation.py
+          outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py
+          outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py
+      - name: Exact GlobalID lookup and Source Event Time navigation regressions
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_exact_feature_lookup.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_source_event_navigation.py -v
+      - name: Existing watcher and Inbox regression tests
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_activity.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_alert_navigation.py -v
