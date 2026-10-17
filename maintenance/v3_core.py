@@ -366,6 +366,19 @@ class Manager:
         if policy.get("bridge_restart_confirmed") is not True:
             raise ReleaseError("ACTIVATION", "BRIDGE_RESTART_UNVERIFIED",
                                "Restart ArcGIS Pro and verify Bridge 1.0.4 in Add-In Manager")
+        # The independently scheduled V2 maintenance service can overwrite
+        # the legacy checkout even while V3 stages immutable versions. Its
+        # auto-deploy switch MUST be off before activation of V3.
+        legacy_policy_file = self.local.parent / "policy.json"
+        try:
+            legacy_policy = read_json(legacy_policy_file)
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise ReleaseError("ACTIVATION", "V2_POLICY_UNREADABLE",
+                               "Could not verify V2 deployment is disabled") from exc
+        if (not isinstance(legacy_policy, dict)
+                or legacy_policy.get("auto_deploy") is not False):
+            raise ReleaseError("ACTIVATION", "V2_AUTODEPLOY_NOT_DISABLED",
+                               "V2 auto-deploy must be explicitly set to false before V3 cutover")
         if policy.get("runtime_python_confirmed") != self.python:
             raise ReleaseError("ACTIVATION", "PYTHON_UNVERIFIED",
                                "Verify this exact ArcGIS Pro Python executable")
