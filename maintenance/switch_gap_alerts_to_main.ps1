@@ -2,7 +2,7 @@
 # No new scheduled task. No REG edits. The pinned V3 snapshot remains untouched.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File .\maintenance\switch_gap_alerts_to_main.ps1
 #        powershell -NoProfile -ExecutionPolicy Bypass -File .\maintenance\switch_gap_alerts_to_main.ps1 -Restore
-param([switch]$Restore)
+param([switch]$Restore, [switch]$AuditGit)
 $ErrorActionPreference = 'Stop'
 $taskName = 'REPORTAPP Surveyor Quality Alerts'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -42,6 +42,48 @@ function ReadyTask([int]$seconds=145) {
     }
     throw 'Watcher stayed busy. No task modification. Retry later.'
 }
+function Assert-MainSourceIntegrity {
+    # The user's engineering project may contain legitimate tracked edits.
+    # Only refuse changes affecting the ACTUAL watcher Python source that
+    # would be imported into the one-minute task. Include untracked modules
+    # to avoid accidental Python import shadowing.
+    $branch = (& git -C $repo branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') {
+        throw 'Git checkout must be main.'
+    }
+    $sourceChanges = @(& git -C $repo status --porcelain --untracked-files=all -- 'outputs/Customer_Meter_Photo_QA_Working/src')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to verify clean watcher Python source; no task change.'
+    }
+    if ($sourceChanges.Count -gt 0) {
+        Write-Host 'Locally modified/untracked watcher SOURCE paths (not overwritten):'
+        $sourceChanges | ForEach-Object { Write-Host $_ }
+        throw 'Watcher source has local changes. Preserve them and resolve this conflict before activating.'
+    }
+    $head = (& git -C $repo rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot identify local main HEAD.' }
+    $origin = (& git -C $repo rev-parse refs/remotes/origin/main).Trim()
+    if ($LASTEXITCODE -ne 0 -or $head -ne $origin) {
+        throw 'Local main differs from origin/main; pull first.'
+    }
+    Write-Host 'PASS: production watcher source matches current main.'
+    Write-Host 'Other locally modified tracked engineering files are preserved.'
+    return $head
+}
+
+if ($AuditGit) {
+    # Read-only diagnostic mode; never asks for task permissions, writes
+    # backups, touches SQLite or modifies Windows Scheduled Tasks.
+    try {
+        Assert-MainSourceIntegrity | Out-Null
+        Write-Host 'GIT_AUDIT_OK: no changes needed to the current watcher.'
+        exit 0
+    } catch {
+        Write-Host ('GIT_AUDIT_BLOCKED: '+$_.Exception.Message)
+        exit 2
+    }
+}
+
 if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA unavailable.' }
 if (-not (Test-Path $src)) { throw 'Current REPORTAPP source missing.' }
 New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
@@ -73,15 +115,7 @@ try {
     if (Test-Path $backup) {
         throw 'Prior switch backup exists. Do not overwrite; run with -Restore if necessary.'
     }
-    $branch = (& git -C $repo branch --show-current).Trim()
-    if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') { throw 'Git checkout must be main.' }
-    $dirty = @(& git -C $repo status --porcelain --untracked-files=no)
-    if ($LASTEXITCODE -ne 0 -or ($dirty | Where-Object { $_ })) {
-        throw 'Tracked Git files are modified; resolve them before switching.'
-    }
-    $head = (& git -C $repo rev-parse HEAD).Trim()
-    $origin = (& git -C $repo rev-parse refs/remotes/origin/main).Trim()
-    if ($head -ne $origin) { throw 'Local main differs from origin/main. Pull first.' }
+    $head = Assert-MainSourceIntegrity
     # Presence proof of the actual corrected Windows app identity and recovery.
     $gapCode = Get-Content -Raw -LiteralPath (Join-Path $src 'meter_photo_qa\surveyor_notifications.py')
     $channelCode = Get-Content -Raw -LiteralPath (Join-Path $src 'meter_photo_qa\desktop_toast_channel.py')
