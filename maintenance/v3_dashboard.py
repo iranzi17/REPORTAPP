@@ -19,6 +19,7 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from maintenance import self_monitor
 from maintenance.v3_core import Manager, REPO, TAG_PATTERN, atomic_json, read_json
+from maintenance.v3_office_diagnostics import inspect_office
 
 LOCAL = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "REPORTAPP" / "Maintenance" / "v3"
 
@@ -47,6 +48,8 @@ class Dashboard:
             ("Rollback V3 Pointer", self.rollback),
         ):
             ttk.Button(row, text=name, command=fn).pack(side="left", padx=(0, 6))
+        ttk.Button(wrapper, text="Save Sanitized Office Diagnostic (JSON)",
+                   command=self.export_diagnostic).pack(anchor="w", pady=(0, 8))
         self.overview = tk.Text(wrapper, wrap="word", height=22, font=("Consolas", 10))
         self.overview.pack(fill="both", expand=True)
         self.overview.configure(state="disabled")
@@ -101,10 +104,11 @@ class Dashboard:
             report = read_json(self.manager.local / "diagnostics" / (tag + ".json"), {})
             failures.append({key: report.get(key) for key in
                              ("tag", "stage", "code", "details", "rollback")})
-        return legacy, v3, failures
+        office = inspect_office(self.manager.local.parent)
+        return legacy, v3, failures, office
 
     def _show_health(self, data):
-        legacy, v3, failures = data
+        legacy, v3, failures, office = data
         content = [
             "CURRENT WATCHER (V2 — UNCHANGED)",
             "  State: " + str(legacy.get("status")),
@@ -112,6 +116,14 @@ class Dashboard:
             "  Last scan age: " + str(legacy.get("scan_age_minutes")) + " minutes",
             "  Failed deliveries: " + str(legacy.get("delivery_failures_last_scan")),
             "  Issues: " + ", ".join(legacy.get("issues") or ["none"]),
+            "",
+            "V2 DEPLOYMENT — OFFICE RECEIPTS",
+            "  Latest deployment: " + str(office["legacy_maintenance"]["deployment"]),
+            "  Last installed tag: " + str(office["legacy_maintenance"]["installed_tag"]),
+            "  Updated files: " + ", ".join(office["legacy_maintenance"]["installed_component_files"]),
+            "  Backup found: " + str(office["legacy_maintenance"]["backup_folder_present"]),
+            "  Blocked releases: " + str(len(office["blocked_releases"])),
+            "  Diagnosis: " + ", ".join(office["diagnostic_codes"]),
             "",
             "V3 PILOT (SEPARATE STORE)",
             "  Agent: " + v3["agent_version"],
@@ -135,6 +147,33 @@ class Dashboard:
             "  Excel/KMZ rollout remains separate and is NOT installed here.",
         ])
         self._display("\n".join(content))
+
+    def export_diagnostic(self):
+        """Save only whitelisted local status codes, never a raw log or secret."""
+        if self.busy:
+            return
+        destination = filedialog.asksaveasfilename(
+            title="Save safe local REPORTAPP diagnostics",
+            initialfile="reportapp-office-diagnostic.json",
+            defaultextension=".json",
+            filetypes=[("JSON diagnostic", "*.json")],
+            parent=self.root,
+        )
+        if not destination:
+            return
+        try:
+            report = inspect_office(self.manager.local.parent)
+            with Path(destination).open("x", encoding="utf-8") as file:
+                json.dump(report, file, indent=2)
+                file.write("\\n")
+        except FileExistsError:
+            messagebox.showerror("Existing file protected",
+                                 "Choose a new filename. Existing files are never overwritten.")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Export failed", type(exc).__name__)
+        else:
+            messagebox.showinfo("Safe diagnostic saved",
+                                "Review the JSON before sharing. No upload was performed.")
 
     def stage_package(self):
         if self.busy:
