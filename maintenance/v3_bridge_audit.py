@@ -21,7 +21,7 @@ MAX_ADDIN_SIZE = 5_000_000
 # Esri may preserve a previous install and write an approved update as "(1)".
 # The filename is NOT proof of identity: the SHA256 and AddInInfo must match.
 _ALLOWED_ADDIN_NAME = re.compile(
-    r"ReportappNavigationBridge(?: \\([1-9][0-9]*\\))?\\.esriAddInX", re.IGNORECASE
+    r"ReportappNavigationBridge(?: \([1-9][0-9]*\))?\.esriAddInX", re.IGNORECASE
 )
 
 
