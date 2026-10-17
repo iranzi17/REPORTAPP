@@ -34,6 +34,7 @@ REQUIRED_FILES = {
     f"{WORK_REL}/tests/test_surveyor_notifications.py",
     f"{WORK_REL}/tests/test_notification_inbox.py",
     f"{WORK_REL}/tests/test_alert_navigation.py",
+    f"{WORK_REL}/config/report_user_names.json",
 }
 REQUIRED_TESTS = (
     "test_surveyor_notifications.py",
@@ -74,6 +75,7 @@ def safe_path(name):
         return True
     return rel in {
         "config/lv_line_quality_rules.json",
+        "config/report_user_names.json",
         "config/rwanda_district_sectors.json",
     }
 
