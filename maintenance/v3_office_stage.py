@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import uuid
 
 from maintenance.v3_core import (
@@ -37,7 +38,7 @@ def _safe_report(report, *, local=None):
     reports = base / "Diagnostics"
     reports.mkdir(parents=True, exist_ok=True)
     name = ("office_v3_stage_" +
-            datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") +
+            time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) +
             "-" + uuid.uuid4().hex[:8] + ".json")
     path = reports / name
     # Create once, never overwrite historical acceptance receipts.
