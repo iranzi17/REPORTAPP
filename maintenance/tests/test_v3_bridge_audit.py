@@ -54,6 +54,56 @@ class BridgeAuditTests(unittest.TestCase):
             audit.scan_installed_bridge(documents_folders=[self.doc], expected_sha256="0" * 64)
         self.assertEqual(caught.exception.code, "WRONG_RELEASE_BUILD")
 
+    def test_bridge_104_with_numeric_suffix_is_found_and_verified(self):
+        # Matches the office Add-In Manager screenshot:
+        # ReportappNavigationBridge (1).esriAddInX
+        new_sha = self.create_addin(version="1.0.4")
+        renamed = self.esri.with_name("ReportappNavigationBridge (1).esriAddInX")
+        self.esri.rename(renamed)
+        result = audit.scan_installed_bridge(
+            documents_folders=[self.doc], expected_sha256=new_sha)
+        self.assertEqual(result["status"], "VERIFIED_ON_DISK")
+        self.assertEqual(result["bridge_version"], "1.0.4")
+        self.assertEqual(result["other_bridge_files_present"], 0)
+
+    def test_stale_103_unsuffixed_cannot_mask_approved_104_with_suffix(self):
+        old_sha = self.create_addin(version="1.0.3")
+        old_bytes = self.esri.read_bytes()
+        new_sha = self.create_addin(version="1.0.4")
+        self.esri.rename(self.esri.with_name("ReportappNavigationBridge (1).esriAddInX"))
+        self.esri.write_bytes(old_bytes)
+        result = audit.scan_installed_bridge(
+            documents_folders=[self.doc], expected_sha256=new_sha)
+        self.assertEqual(result["bridge_version"], "1.0.4")
+        self.assertEqual(result["other_bridge_files_present"], 1)
+        self.assertNotEqual(old_sha, new_sha)
+
+    def test_duplicate_identical_104_build_fails_closed(self):
+        new_sha = self.create_addin()
+        self.esri.with_name("ReportappNavigationBridge (1).esriAddInX").write_bytes(
+            self.esri.read_bytes())
+        with self.assertRaises(audit.BridgeAuditError) as caught:
+            audit.scan_installed_bridge(documents_folders=[self.doc],
+                                        expected_sha256=new_sha)
+        self.assertEqual(caught.exception.code, "AMBIGUOUS_ADDIN")
+
+    def test_filename_suffix_not_a_substitute_for_verified_package(self):
+        self.create_addin(version="1.0.3")
+        self.esri.rename(self.esri.with_name(
+            "ReportappNavigationBridge (1).esriAddInX"))
+        with self.assertRaises(audit.BridgeAuditError) as caught:
+            audit.scan_installed_bridge(documents_folders=[self.doc])
+        self.assertIn(caught.exception.code, ("WRONG_VERSION", "WRONG_RELEASE_BUILD"))
+
+    def test_install_folder_only_rejects_download_file_even_with_suffix(self):
+        sha = self.create_addin()
+        external = Path(self.tmp.name) / "Downloads" / "ReportappNavigationBridge (1).esriAddInX"
+        external.parent.mkdir()
+        external.write_bytes(self.esri.read_bytes())
+        with self.assertRaises(audit.BridgeAuditError) as caught:
+            audit.validate_installed_file(external, expected_sha256=sha)
+        self.assertEqual(caught.exception.code, "NOT_INSTALLED")
+
     def test_downloads_copy_is_not_installed_esri_addin(self):
         sha = self.create_addin()
         copy = Path(self.tmp.name) / "Downloads" / audit.BRIDGE_NAME
