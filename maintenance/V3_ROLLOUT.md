@@ -1,3 +1,26 @@
+## ArcGIS Pro screenshot: installed Bridge 1.0.4 (17 October 2026)
+
+The office's Add-In Manager now displays **REPORTAPP Alert Zoom Bridge
+v1.0.4**, targeting ArcGIS Pro 3.4. Its recorded install path is under
+the expected current-user Esri add-in directory, but the filename is
+`ReportappNavigationBridge (1).esriAddInX` rather than the unsuffixed
+package name. This is evidence of a visible upgrade, **not yet a checked
+file SHA256**, nor proof that the `reportapp://` Windows handler points
+at the staged V3 Python code.
+
+The V3 bridge audit now searches only that Esri add-in installation folder
+for the exact filename or its numbered ` (N)` variants and accepts exactly
+one instance matching the OFFICIAL 1.0.4 SHA256, Config.daml identity and
+target ArcGIS Pro 3.4. It never trusts the filename or a downloaded copy
+as a substitute for the approved package hash. An old v1.0.3 file can
+coexist and is not mistakenly chosen; multiple valid 1.0.4 copies are
+rejected as ambiguous. Five new tests cover this scenario.
+
+**Do not delete the old package blindly.** Keep Map Zoom paused and the
+one-minute legacy watcher running; next step is the explicitly approved
+Windows URI-handler alignment, followed by on-office bridge checksum,
+map-version and live-navigation verification. V3 remains staged only.
+
 ## Office immutable snapshot verified (17 October 2026, 15:23 UTC)
 
 The office `office_v3_stage_verified_20261017T152335Z_4d8ee14f.json`
