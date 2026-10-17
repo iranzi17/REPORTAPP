@@ -165,7 +165,6 @@ class Dashboard:
             report = inspect_office(self.manager.local.parent)
             with Path(destination).open("x", encoding="utf-8") as file:
                 json.dump(report, file, indent=2)
-                file.write("\\n")
         except FileExistsError:
             messagebox.showerror("Existing file protected",
                                  "Choose a new filename. Existing files are never overwritten.")
