@@ -33,6 +33,11 @@ MIN_AGE_SECONDS=300
 
 def timestamp_ms(value):
     if isinstance(value, _dt.datetime):
+        # ArcGIS may return UTC editor-tracking values as naive datetime.
+        # datetime.timestamp() otherwise interprets them in the office PC's
+        # local timezone (Rwanda UTC+2), causing a wrong source event time.
+        if value.tzinfo is None:
+            value=value.replace(tzinfo=_dt.timezone.utc)
         return int(value.timestamp()*1000)
     if isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value):
         return int(value)
