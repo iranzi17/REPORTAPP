@@ -388,27 +388,12 @@ def deliver(alert,config):
         # Only advertise click-to-zoom after the current Windows user has
         # registered the reportapp:// handler. The ArcGIS Pro add-in is a
         # separate required component; without it the request stays queued.
-        from .alert_navigation import is_registered,zoom_uri
-        launch=""
-        if is_registered():
-            context={
-                "globalid":alert.get("globalid"),
-                "event_time_utc_ms":alert.get("event_time_utc_ms"),
-                "actor":alert.get("username"),
-                "gdb_version":config.get("version","sde.DEFAULT"),
-            }
-            if all(context.values()):
-                try:
-                    launch=zoom_uri(alert["asset"],alert["objectid"],**context)
-                except (TypeError,ValueError):
-                    # Deployment is two-stage: older office installations
-                    # can have surveyor_notifications.py updated while the
-                    # pre-1.0.4 alert_navigation.py remains active. Never
-                    # fail delivery or fall back to an unsafe OBJECTID-only
-                    # zoom. Show the QA alert WITHOUT a clickable action.
-                    launch=""
-            # Do not show an unverified clickable link for a legacy alert
-            # missing source-event identity.
+        from .alert_navigation import is_registered
+        from .source_event_navigation import safe_verified_source_uri
+        # Do not let a stale FeatureServer response or an OBJECTID-only
+        # link open a different asset. Re-fetch exact GlobalID on the
+        # sde.DEFAULT layer before offering a clickable action.
+        launch=(safe_verified_source_uri(alert,config) if is_registered() else "")
         popup=Notification(
             app_id="REPORTAPP Quality Alerts",title=subject,
             msg=message[:400],duration="long",launch=launch,
