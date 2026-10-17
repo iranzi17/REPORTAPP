@@ -188,8 +188,8 @@ class NavigationTests(unittest.TestCase):
                    last_edited_user="ninamenye9683")
         with patch.dict("sys.modules",{"winotify":SimpleNamespace(Notification=mock_notify)}), \
              patch("meter_photo_qa.alert_navigation.is_registered",return_value=True), \
-             patch("meter_photo_qa.alert_navigation.zoom_uri",
-                   side_effect=TypeError("unexpected keyword argument")):
+             patch("meter_photo_qa.source_event_navigation.verified_source_uri",
+                   side_effect=TypeError("source validation failed")):
             deliver(alert,{"channel":"desktop","version":"sde.DEFAULT"})
         self.assertEqual(mock_notify.call_args.kwargs["launch"],"")
         popup.add_actions.assert_not_called()
@@ -207,9 +207,16 @@ class NavigationTests(unittest.TestCase):
                    event_time_utc_ms=1792161960000,
                    issues=["Append Cable missing"],created_user="ninamenye9683",
                    last_edited_user="ninamenye9683")
+        from meter_photo_qa.alert_navigation import zoom_uri
+        expected=zoom_uri("pole",891705,globalid=alert["globalid"],
+                          event_time_utc_ms=alert["event_time_utc_ms"],
+                          actor=alert["username"],gdb_version="sde.DEFAULT")
         with patch.dict("sys.modules",{"winotify":SimpleNamespace(Notification=notification)}), \
-             patch("meter_photo_qa.alert_navigation.is_registered",return_value=True):
+             patch("meter_photo_qa.alert_navigation.is_registered",return_value=True), \
+             patch("meter_photo_qa.source_event_navigation.verified_source_uri",
+                   return_value=expected) as verified:
             deliver(alert,{"channel":"desktop","version":"sde.DEFAULT"})
+        verified.assert_called_once()
         launch=notification.call_args.kwargs["launch"]
         self.assertIn("event_ms=1792161960000",launch)
         self.assertIn("gid=142a4dba-f393-4597-90a9-3878a86827b9",launch)

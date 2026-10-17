@@ -165,7 +165,8 @@ def deliver_clean_activity(entry,config):
         # Explicitly disallow misleading mixed channels for this pilot.
         raise RuntimeError("Clean activity notifications currently require the desktop channel.")
     from winotify import Notification
-    from .alert_navigation import is_registered,zoom_uri
+    from .alert_navigation import is_registered
+    from .source_event_navigation import safe_verified_source_uri
     kind="created" if entry["event_type"]=="CREATE" else "edited"
     historical=bool(entry.get("deferred_historical"))
     title=(
@@ -184,7 +185,10 @@ def deliver_clean_activity(entry,config):
         +"No outstanding issues in REPORTAPP's verified QA rules. "
         "No REG source data changed."
     )
-    launch=(zoom_uri(entry["asset"],entry["objectid"]) if is_registered() else "")
+    # Clean activity must carry the SAME verified event identity as gap
+    # notifications. An OBJECTID-only URI is unverified and may point
+    # to a different source after edits or a version switch.
+    launch=(safe_verified_source_uri(entry,config) if is_registered() else "")
     popup=Notification(
         app_id="REPORTAPP Surveyor Activity",title=title,
         msg=message,duration="long",launch=launch,
@@ -198,7 +202,10 @@ def deliver_activity_test(asset,objectid):
     """Explicitly marked GUI/zoom test: no QA evaluation and no state writes."""
     from winotify import Notification
     from .alert_navigation import is_registered,zoom_uri
-    uri=zoom_uri(asset,objectid)  # validates asset and positive OBJECTID
+    # A user-triggered TEST is an explicit manual Find Asset, never a
+    # purported verified surveyor source event. Legacy bare OBJECTID links
+    # are intentionally refused by Bridge 1.0.4.
+    uri=zoom_uri(asset,objectid,manual=True)
     launch=uri if is_registered() else ""
     popup=Notification(
         app_id="REPORTAPP Surveyor Activity",
