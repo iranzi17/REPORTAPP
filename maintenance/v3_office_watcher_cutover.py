@@ -203,8 +203,11 @@ def check_prerequisites(localappdata, python, *, task=None):
     if navigation.get("status") != "STAGED_HANDLER_REGISTERED":
         raise CutoverError("URI_HANDLER_NOT_V3")
     task = task or WindowsTask()
-    if task.state() != "Ready":
-        raise CutoverError("WATCHER_TASK_MUST_BE_READY")
+    task_state = task.state()
+    if task_state not in ("Ready", "Running"):
+        raise CutoverError("WATCHER_TASK_DISABLED_OR_UNAVAILABLE")
+    # A one-minute watcher legitimately enters Running during inspection.
+    # Validate its existing XML without requiring a momentary idle window.
     current_action = read_task_action(task.definition())
     for name in ("exe", "args", "cwd", "interval_1min", "ignore_new"):
         if current_action[name] != prior_action[name]:
@@ -252,8 +255,32 @@ def _receipt(report, localappdata):
     return p
 
 
+def wait_for_safe_task_window(task, *, max_wait_seconds=145,
+                              sleeping=time.sleep, clock=time.monotonic):
+    """Wait for one-minute watcher to finish naturally; never stop it.
+
+    Returns after observing Task Scheduler Ready. Refuse disabled or
+    unknown states, and abort after a bounded wait. A recheck immediately
+    before Set-ScheduledTask still protects the active run.
+    """
+    deadline = clock() + max(0, max_wait_seconds)
+    polls = 0
+    while True:
+        state = task.state()
+        polls += 1
+        if state == "Ready":
+            return {"status": "READY", "polls": polls}
+        if state != "Running":
+            raise CutoverError("WATCHER_TASK_DISABLED_OR_UNAVAILABLE")
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise CutoverError("WATCHER_BUSY_TIMEOUT_NO_TASK_CHANGE")
+        sleeping(min(4, remaining))
+
+
 def activate(*, localappdata, python, kit_root, approval=None, task=None,
-             wait_seconds=190, sleeping=time.sleep):
+             wait_seconds=190, sleeping=time.sleep,
+             ready_wait_seconds=145, ready_clock=time.monotonic):
     if approval != CONSENT:
         raise CutoverError("EXPLICIT_USER_APPROVAL_REQUIRED")
     stage = check_prerequisites(localappdata, python, task=task)
@@ -298,9 +325,15 @@ def activate(*, localappdata, python, kit_root, approval=None, task=None,
         changed_policy = True
         manager.activate(TAG)
         pointer_enabled = True
-        # Re-read task state just before any modification.
-        if task.state() != "Ready":
-            raise CutoverError("TASK_BECAME_BUSY")
+        # The original 1-minute task may be Running. This is normal; do not
+        # interrupt it, disable it or start a second scan. Wait for the
+        # next short natural Ready window with a strict deadline.
+        ready = wait_for_safe_task_window(
+            task, max_wait_seconds=ready_wait_seconds,
+            sleeping=sleeping, clock=ready_clock)
+        report["busy_window_polls"] = ready["polls"]
+        # Set-ScheduledTask might still race the next scheduled launch.
+        # Such a failure must trigger the original-action restore below.
         task_attempted = True
         task.set_action(requested)
         check = read_task_action(task.definition())
@@ -333,34 +366,56 @@ def activate(*, localappdata, python, kit_root, approval=None, task=None,
         raise CutoverError("FIRST_SCHEDULED_V3_CYCLE_NOT_CONFIRMED")
     except Exception as exc:
         code = getattr(exc, "code", type(exc).__name__)
-        rollback = "RESTORE_PENDING"
-        if task_attempted:
-            try:
+        task_confirmed = False
+        pointer_restored = False
+        policy_restored = False
+        # Even if the change was never attempted, verify the legacy
+        # action rather than reporting an ambiguous RESTORE_PENDING.
+        try:
+            if task_attempted:
                 task.set_action(original)
-                action = read_task_action(task.definition())
-                if (action["exe"], action["args"], action["cwd"]) != (
-                        original["exe"], original["args"], original["cwd"]):
-                    raise CutoverError("TASK_RESTORE_VERIFY_FAILED")
-                rollback = "TASK_ACTION_RESTORED"
-            except Exception:
-                rollback = "TASK_RESTORE_FAILED"
-        if pointer_enabled:
-            try:
+            action = read_task_action(task.definition())
+            task_confirmed = (
+                (action["exe"], action["args"], action["cwd"]) ==
+                (original["exe"], original["args"], original["cwd"])
+                and action["interval_1min"] and action["ignore_new"]
+            )
+        except Exception:
+            task_confirmed = False
+        # Never leave the V3 pointer active on a failed cutover.
+        try:
+            if pointer_enabled:
                 manager.active.unlink(missing_ok=True)
-                if manager.active.exists():
-                    raise CutoverError("V3_POINTER_REVERT_FAILED")
-            except Exception:
-                rollback += "_POINTER_RESTORE_FAILED"
-        if changed_policy:
-            try:
-                if policy_file.read_bytes() != old_policy:
-                    tmp = policy_file.with_name(policy_file.name + "." + uuid.uuid4().hex + ".tmp")
-                    tmp.write_bytes(old_policy)
-                    os.replace(tmp, policy_file)
-            except Exception:
-                rollback += "_POLICY_RESTORE_FAILED"
-        report.update({"watcher_status": "CUTOVER_FAILED_SAFE",
-                       "error_code": code, "rollback": rollback})
+            pointer_restored = not manager.active.exists()
+        except Exception:
+            pointer_restored = False
+        try:
+            if changed_policy and policy_file.read_bytes() != old_policy:
+                tmp = policy_file.with_name(
+                    policy_file.name + "." + uuid.uuid4().hex + ".tmp")
+                tmp.write_bytes(old_policy)
+                os.replace(tmp, policy_file)
+            policy_restored = policy_file.read_bytes() == old_policy
+        except Exception:
+            policy_restored = False
+        fully_restored = task_confirmed and pointer_restored and policy_restored
+        rollback = (
+            "ORIGINAL_TASK_CONFIRMED_NO_TASK_CHANGE"
+            if fully_restored and not task_attempted
+            else "ORIGINAL_TASK_RESTORED"
+            if fully_restored else "RESTORATION_REQUIRES_REVIEW"
+        )
+        report.update({
+            "watcher_status": (
+                "CUTOVER_FAILED_SAFE" if fully_restored
+                else "CUTOVER_FAILED_REQUIRES_REVIEW"),
+            "error_code": code,
+            "rollback": rollback,
+            "task_change_attempted": task_attempted,
+            "original_task_action_confirmed": task_confirmed,
+            "v3_pointer_inactive": pointer_restored,
+            "v3_policy_restored": policy_restored,
+        })
         return report
 
 
