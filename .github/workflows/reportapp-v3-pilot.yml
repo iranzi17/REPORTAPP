@@ -68,3 +68,51 @@ jobs:
             build/candidate-provenance.txt
           if-no-files-found: error
           retention-days: 7
+
+  prepare-backup-kit:
+    name: Prepare office rollback evidence tool (read-only)
+    needs: test-real-candidate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify private task backup and no-cutover assertions
+        run: python -m unittest discover -s maintenance/tests -p test_v3_cutover_backup.py -v
+      - name: Assemble single-click office preservation utility
+        shell: bash
+        run: |
+          mkdir -p build/office-backup
+          cp maintenance/v3_cutover_backup.py build/office-backup/v3_cutover_backup.py
+          cat > build/office-backup/Run_V3_Original_Config_Backup.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro Python not found. No changes were made.
+            pause
+            exit /b 1
+          )
+          "%PYTHON%" "%~dp0v3_cutover_backup.py" --backup-only
+          if errorlevel 1 (
+            echo Backup incomplete or requires review. Do not proceed to cutover.
+          ) else (
+            echo Original task and protocol saved locally. No task or registry changed.
+          )
+          pause
+          CMD
+          sed -i 's/$/\r/' build/office-backup/Run_V3_Original_Config_Backup.cmd
+          python -m py_compile build/office-backup/v3_cutover_backup.py
+      - name: Archive pilot kit (no task change, no release promotion)
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportapp-v3-office-original-config-backup
+          path: build/office-backup/
+          retention-days: 7
+          if-no-files-found: error
