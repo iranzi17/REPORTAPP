@@ -57,8 +57,7 @@ jobs:
           python -m maintenance.v3_build --tag "$TAG" --root . --output build/reportapp-v3-candidate.zip
           python -m maintenance.v3_ci_pilot --archive build/reportapp-v3-candidate.zip --tag "$TAG"
           sha256sum build/reportapp-v3-candidate.zip > build/reportapp-v3-candidate.sha256
-          printf 'Source revision: %s\\nReview PR: %s\\nCandidate tag: %s\\nNOT A PRODUCTION RELEASE\\n' \\
-            "$GITHUB_SHA" "$GITHUB_REF" "$TAG" > build/candidate-provenance.txt
+          printf 'Source revision: %s\nReview PR: %s\nCandidate tag: %s\nNOT A PRODUCTION RELEASE\n' "$GITHUB_SHA" "$GITHUB_REF" "$TAG" > build/candidate-provenance.txt
       - name: Keep draft artifact for review only, not a GitHub Release
         uses: actions/upload-artifact@v4
         with:
