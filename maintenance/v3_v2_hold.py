@@ -154,8 +154,10 @@ def hold(maintenance_root, *, task=None, operator_confirmation=None):
     policy_replaced = False
     try:
         # V2 maintenance task only. Existing one-minute watcher untouched.
-        task.disable()
+        # Mark for restoration BEFORE invoking the controller: a partial
+        # PowerShell failure can disable the task and then return nonzero.
         disabled = True
+        task.disable()
         if task.state() != "Disabled":
             raise HoldError("V2_MAINTENANCE_TASK_DID_NOT_DISABLE")
         if policy_path.read_bytes() != original:
