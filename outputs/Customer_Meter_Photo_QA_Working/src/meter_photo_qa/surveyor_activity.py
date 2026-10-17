@@ -165,7 +165,8 @@ def deliver_clean_activity(entry,config):
         # Explicitly disallow misleading mixed channels for this pilot.
         raise RuntimeError("Clean activity notifications currently require the desktop channel.")
     from winotify import Notification
-    from .alert_navigation import is_registered,zoom_uri
+    from .alert_navigation import is_registered
+    from .source_event_navigation import safe_verified_source_uri
     kind="created" if entry["event_type"]=="CREATE" else "edited"
     historical=bool(entry.get("deferred_historical"))
     title=(
