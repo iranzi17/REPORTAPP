@@ -331,10 +331,14 @@ class Manager:
                 atomic_json(candidate / "manifest.json", manifest)
                 stage = "STAGING_TESTS"
                 tests = self._run_tests(candidate, tests=tuple(manifest["required_tests"]))
+                stage = "COMPONENT_COMPATIBILITY"
+                from .v3_component_compatibility import check_components
+                compatibility = check_components(candidate, python=self.python)
                 stage = "SEAL"
                 os.replace(candidate, self.versions / tag)
                 receipt = {"tag": tag, "status": "STAGED_TESTED", "at_utc": utc_now(),
-                           "archive_sha256": pinned_sha256, "tests": tests}
+                           "archive_sha256": pinned_sha256, "tests": tests,
+                           "component_checks": compatibility}
                 atomic_json(self.local / "receipts" / (tag + ".json"), receipt)
                 return receipt
             except Exception as exc:
@@ -397,8 +401,10 @@ class Manager:
         tag = safe_name(tag)
         with self.locked():
             receipt = read_json(self.local / "receipts" / (tag + ".json"), {})
-            if receipt.get("status") != "STAGED_TESTED":
-                raise ReleaseError("ACTIVATION", "NOT_TESTED")
+            if receipt.get("status") != "STAGED_TESTED" or (
+                (receipt.get("component_checks") or {}).get("status") != "COMPATIBLE"
+            ):
+                raise ReleaseError("ACTIVATION", "NOT_TESTED_OR_NOT_COMPATIBLE")
             self._verify_version(tag)
             policy = self._policy_for(tag, receipt.get("archive_sha256"))
             self._precheck(tag, policy)
