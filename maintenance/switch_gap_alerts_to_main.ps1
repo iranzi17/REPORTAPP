@@ -121,8 +121,10 @@ try {
     try {
         $task = ReadyTask
         if (-not (SameAction $task.Actions[0] $previous)) { throw 'Original task changed during preflight.' }
-        Set-ScheduledTask -TaskName $taskName -Action $target | Out-Null
+        # Record that replacement was ATTEMPTED before the call: Windows may
+        # apply an action even if the management API later raises an error.
         $switched = $true
+        Set-ScheduledTask -TaskName $taskName -Action $target | Out-Null
         if (-not (SameAction (Get-ScheduledTask -TaskName $taskName).Actions[0] $target)) {
             throw 'New task action was not verified.'
         }
