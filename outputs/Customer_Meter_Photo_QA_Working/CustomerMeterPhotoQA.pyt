@@ -905,10 +905,17 @@ class WatchLVLineDataQuality:
         previous_report.filter.list = ["xlsx"]
         previous_report.category = "Advanced"
 
+        gap_kmz = arcpy.Parameter(
+            displayName="Output Google Earth KMZ (confirmed gaps)",
+            name="output_gap_kmz", datatype="DEFile",
+            parameterType="Derived", direction="Output",
+        )
+        gap_kmz.filter.list = ["kmz"]
+
         return [
             output, flagged_fc, start, end, district, sectors, cells,
             custom_boundary, users, threshold, service, boundaries, version,
-            name_map, rules, previous_report,
+            name_map, rules, previous_report, gap_kmz,
         ]
 
     def updateParameters(self, parameters):
@@ -980,11 +987,17 @@ class WatchLVLineDataQuality:
         )
         if summary["total_lines"] == 0:
             arcpy.AddWarning("No matching LV lines were found. Check the dates and area before treating this as a clean result.")
-        _export_companion_kmz(
+        kmz = _export_companion_kmz(
             {"line":summary["output_xlsx"]},
             service_url=parameters[10].valueAsText or None,
             version=parameters[12].valueAsText or "sde.DEFAULT",
         )
+        if kmz.get("output_kmz"):
+            arcpy.SetParameterAsText(16, kmz["output_kmz"])
+            arcpy.AddMessage(
+                "KMZ file saved beside Excel (open separately in Google Earth): "
+                + kmz["output_kmz"]
+            )
         arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
 
 
