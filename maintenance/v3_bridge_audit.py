@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 import zipfile
 import xml.etree.ElementTree as ET
@@ -17,6 +18,11 @@ EXPECTED_VERSION = "1.0.4"
 EXPECTED_SHA256 = "66e3688ba7bde34caf210108d3a73225dee7abb8cd39b4e14bd64b6892963a39"
 OFFICIAL_RELEASE = "reportapp-bridge-v1.0.4"
 MAX_ADDIN_SIZE = 5_000_000
+# Esri may preserve a previous install and write an approved update as "(1)".
+# The filename is NOT proof of identity: the SHA256 and AddInInfo must match.
+_ALLOWED_ADDIN_NAME = re.compile(
+    r"ReportappNavigationBridge(?: \\([1-9][0-9]*\\))?\\.esriAddInX", re.IGNORECASE
+)
 
 
 class BridgeAuditError(ValueError):
@@ -48,9 +54,12 @@ def installed_candidates(folders=None):
     unique = {}
     for documents in bases:
         folder = (Path(documents) / "ArcGIS" / "AddIns" / "ArcGISPro" / BRIDGE_ID)
-        path = folder / BRIDGE_NAME
-        if path.is_file():
-            unique[str(path.resolve()).casefold()] = path
+        if not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            if (_ALLOWED_ADDIN_NAME.fullmatch(path.name) and path.is_file()
+                    and not path.is_symlink()):
+                unique[str(path.resolve()).casefold()] = path
     return list(unique.values())
 
 
@@ -59,7 +68,7 @@ def validate_installed_file(path, *, expected_sha256=EXPECTED_SHA256):
     path = Path(path)
     # Only a nested Esri install is acceptable. Validate the parent structure,
     # not an arbitrary file copied into Downloads and renamed.
-    if (path.name != BRIDGE_NAME
+    if (not _ALLOWED_ADDIN_NAME.fullmatch(path.name)
             or path.parent.name.casefold() != BRIDGE_ID.casefold()
             or path.parent.parent.name.casefold() != "arcgispro"
             or path.parent.parent.parent.name.casefold() != "addins"
@@ -106,6 +115,24 @@ def scan_installed_bridge(*, documents_folders=None, expected_sha256=EXPECTED_SH
     matches = installed_candidates(documents_folders)
     if not matches:
         raise BridgeAuditError("NOT_INSTALLED", "REPORTAPP add-in not found in Esri installed folder")
-    if len(matches) != 1:
-        raise BridgeAuditError("AMBIGUOUS_ADDIN", "Multiple installed REPORTAPP bridge paths detected")
-    return validate_installed_file(matches[0], expected_sha256=expected_sha256)
+    # Select based on APPROVED BYTES, never numeric suffix or name alone.
+    # Do not accept the legacy 1.0.3 add-in just because it has the unsuffixed
+    # name. Refuse if two identical approved packages are installed.
+    valid = []
+    diagnostics = []
+    for candidate in matches:
+        try:
+            result = validate_installed_file(candidate, expected_sha256=expected_sha256)
+        except (BridgeAuditError, OSError, zipfile.BadZipFile) as exc:
+            diagnostics.append(getattr(exc, "code", "INVALID_PACKAGE"))
+        else:
+            valid.append(result)
+    if len(valid) > 1:
+        raise BridgeAuditError("AMBIGUOUS_ADDIN", "Multiple approved 1.0.4 bridge packages found")
+    if not valid:
+        if len(matches) == 1:
+            return validate_installed_file(matches[0], expected_sha256=expected_sha256)
+        raise BridgeAuditError("NO_VERIFIED_RELEASE", "No installed bridge matches approved 1.0.4 bytes")
+    selected = dict(valid[0])
+    selected["other_bridge_files_present"] = len(matches) - 1
+    return selected
