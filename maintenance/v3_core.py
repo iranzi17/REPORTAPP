@@ -34,6 +34,7 @@ REQUIRED_FILES = {
     f"{WORK_REL}/tests/test_surveyor_notifications.py",
     f"{WORK_REL}/tests/test_notification_inbox.py",
     f"{WORK_REL}/tests/test_alert_navigation.py",
+    f"{WORK_REL}/tests/test_combined_qa_report.py",
     f"{WORK_REL}/config/report_user_names.json",
     f"{WORK_REL}/addins/ReportappNavigationBridge/BridgeModule.cs",
 }
@@ -43,7 +44,26 @@ REQUIRED_TESTS = (
     "test_alert_navigation.py",
     "test_surveyor_activity.py",
     "test_deferred_notifications.py",
+    "test_combined_qa_report.py",
 )
+KMZ_SOURCE = f"{WORK_REL}/src/meter_photo_qa/gap_kmz.py"
+KMZ_TEST = f"{WORK_REL}/tests/test_gap_kmz.py"
+
+
+def expected_test_names(files):
+    """All mandatory suites, plus KMZ suite when that feature is packaged.
+
+    A missing KMZ test must never be silently skipped, and a test without
+    its corresponding source must not make a release look feature-complete.
+    """
+    names = set(files)
+    kmz_source = KMZ_SOURCE in names
+    kmz_test = KMZ_TEST in names
+    if kmz_source != kmz_test:
+        raise ValueError("KMZ module/test mismatch: companion QA tests are mandatory")
+    return REQUIRED_TESTS + (("test_gap_kmz.py",) if kmz_source else ())
+
+
 MAX_ARCHIVE = 15_000_000
 MAX_UNPACKED = 30_000_000
 MAX_ENTRY = 3_000_000
@@ -131,9 +151,10 @@ def validate_archive(data, expected_hash, tag):
             raise ValueError("Release compatibility or identity mismatch")
         files = manifest.get("files")
         tests = manifest.get("required_tests")
+        expected_tests = expected_test_names(files) if isinstance(files, dict) else ()
         if (not isinstance(files, dict) or not REQUIRED_FILES.issubset(files)
                 or set(names) != set(files) | {"manifest.json"}
-                or tests != list(REQUIRED_TESTS)
+                or tests != list(expected_tests)
                 or not all(safe_path(name) for name in files)):
             raise ValueError("Missing mandatory code/tests or unexpected release file")
         for part in entries:
@@ -240,6 +261,8 @@ class Manager:
         hashes = manifest.get("files", {})
         if not REQUIRED_FILES.issubset(hashes):
             raise ReleaseError("CHECK", "INCOMPLETE_VERSION")
+        if manifest.get("required_tests") != list(expected_test_names(hashes)):
+            raise ReleaseError("CHECK", "INCOMPLETE_TEST_MANIFEST")
         for rel, expected in hashes.items():
             if not safe_path(rel):
                 raise ReleaseError("CHECK", "UNSAFE_FILE")
@@ -307,7 +330,7 @@ class Manager:
                     target.write_bytes(content)
                 atomic_json(candidate / "manifest.json", manifest)
                 stage = "STAGING_TESTS"
-                tests = self._run_tests(candidate)
+                tests = self._run_tests(candidate, tests=tuple(manifest["required_tests"]))
                 stage = "SEAL"
                 os.replace(candidate, self.versions / tag)
                 receipt = {"tag": tag, "status": "STAGED_TESTED", "at_utc": utc_now(),
