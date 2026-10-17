@@ -262,8 +262,20 @@ def main():
     if not arguments.backup_only:
         parser.error("--backup-only required")
     outcome = capture()
-    # Do not print actual registry command or XML to a console/log.
-    print(json.dumps(outcome, indent=2))
+    # Keep raw XML and registry command ONLY in the private backup folder.
+    # Shareable office diagnostic contains booleans, codes and hashes only.
+    public = {key: value for key, value in outcome.items()
+              if key != "backup_folder"}
+    public["backup_id"] = Path(outcome["backup_folder"]).name
+    public["tool"] = "REPORTAPP_V3_PRESERVE_ORIGINAL_TASK_AND_HANDLER"
+    local = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    reports = local / "REPORTAPP" / "Diagnostics"
+    reports.mkdir(parents=True, exist_ok=True)
+    target = reports / ("office_cutover_backup_" + public["backup_id"] + ".json")
+    _write_new_file(target, json.dumps(public, indent=2, sort_keys=True).encode("utf-8"))
+    print("Local rollback evidence saved. No task or registry change performed.")
+    print("Shareable diagnostic: " + str(target))
+    print("Private backup (keep on this PC; DO NOT upload): " + outcome["backup_folder"])
     return 0 if outcome["status"] == "BACKUP_VERIFIED_ONLY" else 2
 
 
