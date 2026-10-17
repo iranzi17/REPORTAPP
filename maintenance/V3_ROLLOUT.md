@@ -1,3 +1,35 @@
+## Office V2 hold confirmed; immutable V3 staging next
+
+The office-confirmed receipt
+`v2_autodeploy_hold_20261017_145520_bd948012.json` reports
+`V2_AUTO_DEPLOY_DISABLED`, `auto_deploy=false`, a verified private
+original policy backup `20261017T145516Z-25778d12`, a **Ready** V2
+maintenance health task, and an unaffected, **Running** surveyor watcher.
+The original watcher task, ArcGIS Pro Bridge, GIS source data and V3
+activation pointer were not modified. This **clears only the V2 competing
+updater gate**, not live cutover.
+
+A standalone `maintenance/v3_office_stage.py` pilot is now provided
+against the exact previously office-tested candidate
+`reportapp-v3-v20261017-000032`, 83 source/test/config files and archive
+SHA256
+`1dac15a37682c79f11508aaea80c344a50dfdb08d7dfede7a19b2ed7575cd948`.
+It first requires the V2 hold, Windows ArcGIS Pro 3.4/Python 3.11,
+validates the archive identity and SHA256, runs the mandatory six-suite
+regressions and source-event component-compatibility probe, and stores
+only the V3 immutable candidate snapshot plus the strict per-tag
+approval receipt under LOCALAPPDATA. It never writes `active.json`,
+changes the task or registry or installs the bridge. It is idempotent for
+an existing verified snapshot. A transient failure blocks the version
+pending further review rather than risking a live install.
+
+CI independently staged the exact pinned candidate with 71+ tests,
+verified it did **not** create an active pointer, and packaged a
+one-click Windows staging artifact. The operator must run it on the
+office PC and return only the sanitized
+`office_v3_stage_*.json` before the final live cutover script is
+reviewed and authorized.
+
 ## Exact task and URL protocol backup confirmed — 17 October 2026
 
 The office reports backup `20261017T143905Z-716105f6` at
