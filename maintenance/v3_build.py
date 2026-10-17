@@ -28,6 +28,10 @@ def build(tag, root, destination):
                      "config/rwanda_district_sectors.json"):
         if (work / relative).is_file():
             paths.append(work / relative)
+    reference = work / "addins" / "ReportappNavigationBridge" / "BridgeModule.cs"
+    if not reference.is_file():
+        raise ValueError("Missing immutable navigation source for regression tests")
+    paths.append(reference)
     files = {}
     total = 0
     for path in sorted(set(paths)):
