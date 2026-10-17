@@ -8,6 +8,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
+from maintenance import v3_launcher as launcher
 import zipfile
 
 from maintenance import v3_core as v3
@@ -202,6 +204,64 @@ class V3Tests(unittest.TestCase):
         self.approve(TAG2, sha2)
         self.assertEqual(self.manager.stage(TAG2, data2, sha2)["status"], "STAGED_TESTED")
         self.assertEqual(self.manager.status()["blocked"], [TAG1])
+
+    def test_stable_launcher_falls_back_to_unchanged_legacy_watcher(self):
+        calls = []
+        def fake_run(argv, **kw):
+            calls.append((argv, kw))
+            return SimpleNamespace(returncode=0)
+        with patch.object(launcher, "ORIGINAL_CONFIG", self.config):
+            with patch.object(launcher, "LEGACY_WORK", self.work):
+                code = launcher.run_watcher(
+                    self.manager, config=self.config,
+                    legacy_work=self.work, runner=fake_run,
+                )
+        self.assertEqual(code, 0)
+        self.assertIn(str(self.work / "src"), calls[0][1]["env"]["PYTHONPATH"])
+        self.assertEqual(calls[0][0][-1], str(self.config.resolve()))
+        self.assertEqual(self.manager.status()["active"], None)
+        self.assertEqual(v3.read_json(self.local / "launcher_latest.json")["mode"],
+                         "LEGACY_NO_ACTIVE_V3")
+
+    def test_stable_launcher_uses_only_verified_immutable_release(self):
+        data, sha = self.archive()
+        self.approve(TAG1, sha)
+        self.manager.stage(TAG1, data, sha)
+        with patch.object(self.manager, "_precheck"), patch.object(self.manager, "_probe"):
+            self.manager.activate(TAG1)
+        seen = []
+        def fake_run(argv, **kw):
+            seen.append(kw["env"]["PYTHONPATH"])
+            return SimpleNamespace(returncode=0)
+        with patch.object(launcher, "ORIGINAL_CONFIG", self.config):
+            with patch.object(launcher, "LEGACY_WORK", self.work):
+                self.assertEqual(launcher.run_watcher(
+                    self.manager, config=self.config,
+                    legacy_work=self.work, runner=fake_run), 0)
+        self.assertIn(TAG1, seen[0])
+        self.assertEqual(v3.read_json(self.local / "launcher_latest.json")["mode"],
+                         "V3_" + TAG1)
+
+    def test_corrupt_active_snapshot_falls_back_without_running_corrupt_code(self):
+        data, sha = self.archive()
+        self.approve(TAG1, sha)
+        self.manager.stage(TAG1, data, sha)
+        with patch.object(self.manager, "_precheck"), patch.object(self.manager, "_probe"):
+            self.manager.activate(TAG1)
+        bad = self.manager.versions / TAG1 / v3.WORK_REL / "src" / "meter_photo_qa" / "__init__.py"
+        bad.write_text("CORRUPTED = True\n")
+        seen = []
+        def fake_run(argv, **kw):
+            seen.append(kw["env"]["PYTHONPATH"])
+            return SimpleNamespace(returncode=0)
+        with patch.object(launcher, "ORIGINAL_CONFIG", self.config):
+            with patch.object(launcher, "LEGACY_WORK", self.work):
+                launcher.run_watcher(
+                    self.manager, config=self.config, legacy_work=self.work,
+                    runner=fake_run)
+        self.assertEqual(seen, [str(self.work / "src")])
+        self.assertEqual(v3.read_json(self.local / "launcher_latest.json")["mode"],
+                         "LEGACY_SNAPSHOT_INVALID")
 
     def test_package_has_no_watch_config_or_generated_reports(self):
         data, _ = self.archive()
