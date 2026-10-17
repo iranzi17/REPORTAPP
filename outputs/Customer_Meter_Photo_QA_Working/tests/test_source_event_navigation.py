@@ -91,6 +91,15 @@ class ExactLiveEventTests(unittest.TestCase):
         self.assertEqual(navigation.safe_verified_source_uri(
             ALERT, CONFIG, layer=OfflineLayer()), "")
 
+    def test_arcgis_provider_error_keeps_alert_but_never_creates_link(self):
+        class ArcGISProviderFailure(Exception):
+            pass
+        class Remote:
+            def query(self, **kwargs):
+                raise ArcGISProviderFailure("opaque provider error")
+        self.assertEqual(navigation.safe_verified_source_uri(
+            ALERT, CONFIG, layer=Remote()), "")
+
     def test_clean_activity_same_actor_can_carry_verified_context(self):
         entry = dict(ALERT, notification_kind="CLEAN_ACTIVITY", issues=[])
         uri = navigation.verified_source_uri(entry, CONFIG, layer=Layer([feature()]))
