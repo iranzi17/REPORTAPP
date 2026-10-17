@@ -1,3 +1,27 @@
+## Office isolated acceptance — PASS, 17 October 2026
+
+The corrected Windows office V2 shadow-pilot report
+`office_v3_pilot_20261017_141752_4c022ed7.json` confirms that the
+**unchanged** candidate `reportapp-v3-v20261017-000032` passed **71/71
+required regression tests** in six suites (22 watcher, 9 Inbox, 15
+navigation, 10 activity, 11 deferred, 4 QA reports) under
+**ArcGIS Pro 3.4 / Python 3.11.10**. Three-component compatibility passed.
+Full candidate checksum
+`1dac15a37682c79f11508aaea80c344a50dfdb08d7dfede7a19b2ed7575cd948`
+and 83 manifest files were verified. The diagnostic reports **no issues**
+and `PASSED_IN_ISOLATION`; no live repo, Windows Task Scheduler, REG
+source or running add-in was modified. The installed ArcGIS Pro Bridge
+**remains 1.0.3**.
+
+This is NOT production cutover acceptance: scheduled task command,
+registerd Windows URL protocol target, rollback backup ability, process
+safety, ArcGIS map version, and live polling still require a separate
+supervisor-approved acceptance stage. The read-only pre-cutover office
+inventory should collect a sanitized report of the exact existing
+scheduled-task action/trigger, current URI handler status and V2 health
+before a task-change script is authored. Keep existing watcher active
+and Map Zoom paused.
+
 # REPORTAPP Self-Maintenance V3 — guarded pilot
 
 **Status: DEVELOPMENT ONLY.** V3 does not deploy from main, update office code,
