@@ -14,6 +14,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 import zipfile
 
+if not __package__:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from maintenance import self_monitor
 from maintenance.v3_core import Manager, REPO, TAG_PATTERN, atomic_json, read_json
 
@@ -57,7 +60,7 @@ class Dashboard:
         self.overview.insert("1.0", content)
         self.overview.configure(state="disabled")
 
-    def _job(self, label, fn, done=None):
+    def _job(self, label, fn, done=None, refresh_after=True):
         if self.busy:
             messagebox.showwarning("Maintenance busy", "Wait for the current task to finish.")
             return
@@ -71,7 +74,8 @@ class Dashboard:
                     self.message.set("Completed: " + label)
                     if done:
                         done(result)
-                    self.refresh()
+                    if refresh_after:
+                        self.refresh()
                 self.root.after(0, succeeded)
             except Exception as exc:
                 desc = f"{type(exc).__name__}: {str(exc).splitlines()[0][:280]}"
@@ -86,7 +90,8 @@ class Dashboard:
     def refresh(self):
         if self.busy:
             return
-        self._job("Checking local maintenance health", self._get_health, self._show_health)
+        self._job("Checking local maintenance health", self._get_health,
+                  self._show_health, refresh_after=False)
 
     def _get_health(self):
         legacy = self_monitor.collect_health()
