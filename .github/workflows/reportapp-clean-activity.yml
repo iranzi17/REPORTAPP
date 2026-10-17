@@ -8,6 +8,8 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_missed_gap_toast_recovery.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/desktop_toast_channel.py'
       - '.github/workflows/reportapp-clean-activity.yml'
   pull_request:
     branches: [main]
@@ -16,6 +18,8 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_missed_gap_toast_recovery.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/desktop_toast_channel.py'
       - '.github/workflows/reportapp-clean-activity.yml'
   workflow_dispatch:
 
@@ -37,6 +41,7 @@ jobs:
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/desktop_toast_channel.py
       - name: Test clean activity and hourly scan heartbeats
         env:
           PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
@@ -47,3 +52,4 @@ jobs:
         run: |
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_missed_gap_toast_recovery.py -v
