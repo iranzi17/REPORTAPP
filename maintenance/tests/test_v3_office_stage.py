@@ -99,6 +99,16 @@ class PinnedStageTests(unittest.TestCase):
         self.assertEqual(output["error_type"], "AttributeError")
         self.assertFalse(output["v3_activated"])
 
+    def test_report_timestamp_does_not_require_datetime_module(self):
+        # ArcGIS office succeeded at staging but raised AttributeError at
+        # the previous datetime.now(...).strftime filename generation.
+        with patch.object(stage, "datetime", None):
+            p = stage._safe_report({"status": "STAGED_TESTED_NOT_ACTIVATED"},
+                                   local=self.appdata)
+        self.assertTrue(p.is_file())
+        self.assertEqual(json.loads(p.read_text())["status"],
+                         "STAGED_TESTED_NOT_ACTIVATED")
+
     def test_read_only_receipt_does_not_include_private_paths(self):
         report = {"status": "FAILED_SAFE", "error_code": "V2_AUTO_DEPLOY_STILL_ENABLED"}
         path = stage._safe_report(report, local=self.appdata)
