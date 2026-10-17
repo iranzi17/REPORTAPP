@@ -253,6 +253,7 @@ def _lookup(index, service_url, version, gis=None, layer_factory=None):
             ),active)
     result={}
     failures={}
+    seen=set()
     for kind in SOURCE:
         requested={oid:entry for (asset,oid),entry in index.items() if asset==kind}
         if not requested:continue
@@ -271,10 +272,23 @@ def _lookup(index, service_url, version, gis=None, layer_factory=None):
                 attrs=dict(feature.attributes or {})
                 oid=int(attrs["OBJECTID"])
                 if oid not in requested:continue
+                key=(kind,oid)
+                if key in seen:
+                    # Even identical duplicate features from one ArcGIS query
+                    # make the geometry source ambiguous. Never use "last wins".
+                    failures[key]="AMBIGUOUS_OBJECTID_RESPONSE"
+                    result.pop(key,None)
+                    continue
+                seen.add(key)
+                if key in failures:
+                    continue
                 expected=requested[oid]
                 group=attrs.get("ASSETGROUP")
                 if group is None or int(group) not in SOURCE[kind]["groups"]:
                     failures[(kind,oid)]="WRONG_ASSET_GROUP"
+                    continue
+                if not _gid(attrs.get("GLOBALID")) or not _gid(expected["globalid"]):
+                    failures[(kind,oid)]="SOURCE_GLOBALID_MISSING"
                     continue
                 if _gid(attrs.get("GLOBALID"))!=_gid(expected["globalid"]):
                     failures[(kind,oid)]="GLOBALID_CHANGED"
@@ -306,8 +320,10 @@ def export_gap_kmz(reports, output_path, *, service_url=None,version="sde.DEFAUL
     By default, refuse partial KMZ exports rather than silently hiding
     unreachable flagged features. A zero-gap report gets a valid empty KMZ.
     """
+    if str(version).strip().casefold()!="sde.default":
+        raise ValueError("KMZ requires verified sde.DEFAULT source version.")
     index=collect_gaps(reports)
-    geometries,failures=_lookup(index,service_url,version,gis,layer_factory)
+    geometries,failures=_lookup(index,service_url,"sde.DEFAULT",gis,layer_factory)
     if failures and fail_on_missing:
         sample="; ".join(f"{asset}/{oid}: {reason}" for (asset,oid),reason
                          in list(sorted(failures.items()))[:8])
