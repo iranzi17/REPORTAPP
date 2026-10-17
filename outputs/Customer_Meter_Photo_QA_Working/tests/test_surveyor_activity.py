@@ -194,7 +194,7 @@ class CleanSurveyorActivityTests(unittest.TestCase):
         self.assertIn("TEST",payload["title"])
         self.assertIn("no REG feature was evaluated",payload["msg"])
         self.assertTrue(payload["shown"])
-        self.assertEqual(payload["launch"],"reportapp://zoom/line/3510143")
+        self.assertEqual(payload["launch"],"reportapp://zoom/line/3510143?mode=manual")
         self.assertFalse(self.config.with_suffix(".sqlite3").exists())
 
     def test_no_activity_when_not_opted_in(self):
