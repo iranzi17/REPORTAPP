@@ -10,6 +10,7 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_missed_gap_toast_recovery.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/desktop_toast_channel.py'
+      - 'maintenance/switch_gap_alerts_to_main.ps1'
       - '.github/workflows/reportapp-clean-activity.yml'
   pull_request:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_missed_gap_toast_recovery.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/desktop_toast_channel.py'
+      - 'maintenance/switch_gap_alerts_to_main.ps1'
       - '.github/workflows/reportapp-clean-activity.yml'
   workflow_dispatch:
 
@@ -53,3 +55,38 @@ jobs:
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_missed_gap_toast_recovery.py -v
+
+  windows-operator-script-safety:
+    name: PowerShell operator-only watcher switch syntax and safety gates
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Parse intended Windows task switch without running it
+        shell: pwsh
+        run: |
+          $path = "maintenance/switch_gap_alerts_to_main.ps1"
+          $tokens = $null
+          $errors = $null
+          $tree = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path $path).Path, [ref]$tokens, [ref]$errors
+          )
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Host $_ }
+            throw "Operator task switch has invalid PowerShell syntax"
+          }
+          $source = Get-Content -Raw $path
+          foreach ($required in @(
+            "Get-ScheduledTask", "Set-ScheduledTask", "Read-Host",
+            "BACKED_UP", "preflight", "ReadyTask",
+            "ACTIVATE GITHUB MAIN GAP ALERTS",
+            "RESTORE ORIGINAL WATCHER"
+          )) {
+            if (-not $source.Contains($required)) {
+              throw "Operator task script is missing safeguard: $required"
+            }
+          }
+          Write-Host "PowerShell parsed; no Windows Scheduled Tasks were modified."
