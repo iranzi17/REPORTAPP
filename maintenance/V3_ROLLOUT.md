@@ -78,6 +78,36 @@ tracebacks). The office must supply the original marker under
 `%LOCALAPPDATA%\\REPORTAPP\\Maintenance\\blocked_releases` to identify its
 actual reason. A generic `RuntimeError` is **not a root-cause diagnosis**.
 
+## Office isolated compatibility diagnostic — 17 October 2026
+
+The office diagnostic ran with Windows and Python **3.11.10**. It reports
+**66 passed tests across six suites**: navigation 10, Inbox 9, surveyor
+notifications 22, surveyor activity 10, deferred notifications 11, and
+combined QA 4. The office watcher health snapshot was healthy. No direct
+GIS edits, local Git writes, automatic retries or deployments were reported.
+
+However, the office's `test_gap_kmz.py` is **missing**. V2 may silently
+consider `unittest discover -p test_gap_kmz.py` successful when it discovers
+zero tests; absence **does not prove the KMZ updater failure**.
+V3 now always requires and runs combined QA tests. When a V3 package
+contains the `gap_kmz.py` source module, the corresponding
+`test_gap_kmz.py` must be bundled and executed; the builder rejects a
+source/test mismatch. Missing or zero-test suites are fatal during staging.
+
+The office's navigation regression suite ran **10 tests**, but GitHub
+`main` contains **15 navigation test functions** as of this audit.
+This is evidence of a local-versus-repository test-suite difference, not
+proof that the installed ArcGIS Pro add-in has any particular version.
+Do not trust a green local historical test run to validate an updated
+navigation bridge until the exact source and installed add-in are verified.
+
+All five V2 blocked release markers contain only `RuntimeError`; the exact
+historical failing command cannot be recovered from those files.
+The Office diagnostic uses a shadow copy of current local sources, not a
+reproduction of each 2026-10-16 historical release payload. A successful
+shadow run does not retroactively establish whether any historical
+post-update regression passed or failed.
+
 ## Operator dashboard
 
 `maintenance/v3_dashboard.py` is a Tkinter-only, opt-in pilot interface. It
