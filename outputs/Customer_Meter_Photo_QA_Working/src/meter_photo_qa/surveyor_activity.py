@@ -202,7 +202,10 @@ def deliver_activity_test(asset,objectid):
     """Explicitly marked GUI/zoom test: no QA evaluation and no state writes."""
     from winotify import Notification
     from .alert_navigation import is_registered,zoom_uri
-    uri=zoom_uri(asset,objectid)  # validates asset and positive OBJECTID
+    # A user-triggered TEST is an explicit manual Find Asset, never a
+    # purported verified surveyor source event. Legacy bare OBJECTID links
+    # are intentionally refused by Bridge 1.0.4.
+    uri=zoom_uri(asset,objectid,manual=True)
     launch=uri if is_registered() else ""
     popup=Notification(
         app_id="REPORTAPP Surveyor Activity",
