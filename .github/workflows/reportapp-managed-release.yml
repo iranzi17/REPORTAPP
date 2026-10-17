@@ -1,16 +1,11 @@
 name: Publish CI-approved REPORTAPP watcher release
 
+# Retired V2 auto-publisher: office watcher now uses a pinned V3 snapshot.
+# Main branch source is delivered via the user's explicit git pull.
+# Old V2 allowlisted archive omits the new source_event_navigation.py and
+# exact_feature_lookup.py dependencies; publishing it on push would create
+# an incomplete watcher release. Future V3 releases require separate approval.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/reportapp-managed-release.yml'
-      - 'maintenance/self_monitor.py'
-      - 'maintenance/build_safe_release.py'
-      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py'
-      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_activity.py'
-      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/deferred_notifications.py'
-      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +17,8 @@ concurrency:
 
 jobs:
   publish-after-tests:
-    if: github.repository == 'iranzi17/REPORTAPP' && github.ref == 'refs/heads/main'
+    # Obsolete V2 format: kept for historical reference, never publishes.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
