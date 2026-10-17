@@ -1,0 +1,34 @@
+name: REPORTAPP V3 staged snapshot pilot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'maintenance/**'
+      - '.github/workflows/reportapp-v3-pilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-real-candidate:
+    name: Build and stage real source on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline regression requirements
+        run: python -m pip install openpyxl pillow
+      - name: Build a complete real-source pilot archive (never publish)
+        run: python -m maintenance.v3_build --tag reportapp-v3-v20261017-000001 --root . --output v3-pilot.zip
+      - name: Test exact archive staging under isolated versioned root
+        run: python -m maintenance.v3_ci_pilot --archive v3-pilot.zip --tag reportapp-v3-v20261017-000001
+      - name: Check no production installer or release generated
+        run: python -c "from pathlib import Path; assert not Path('reportapp-safe-update.zip').exists()"
