@@ -62,6 +62,22 @@ simulate tampering, path traversal, missing/zero tests, postcheck exceptions,
 interrupted switch and a newer approved release following a blocked old one.
 Document office acceptance before any production cutover.
 
+## Office receipt diagnosis (17 October 2026)
+
+The latest office receipts show **HEALTHY monitoring** (Ready, task result 0,
+30-second scan freshness, no delivery failures) but V2 maintenance
+`BLOCKED_AFTER_FAILURE`. The only confirmed installed release remains
+`reportapp-safe-v20261016-002` and its one changed component is
+`notification_inbox.py`. The records do **not** show the exception of the
+blocked watcher release or prove bridge 1.0.4 is installed.
+
+`maintenance/v3_office_diagnostics.py` now reports sanitized, read-only V2
+release and blocked-marker status. The dashboard can show this and save a
+shareable minimized JSON (no raw paths, usernames, GIS data, tokens or log
+tracebacks). The office must supply the original marker under
+`%LOCALAPPDATA%\\REPORTAPP\\Maintenance\\blocked_releases` to identify its
+actual reason. A generic `RuntimeError` is **not a root-cause diagnosis**.
+
 ## Operator dashboard
 
 `maintenance/v3_dashboard.py` is a Tkinter-only, opt-in pilot interface. It
