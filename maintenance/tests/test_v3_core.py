@@ -106,6 +106,59 @@ class V3Tests(unittest.TestCase):
         self.assertEqual(failure["code"], "TEST_FAILED")
         self.assertEqual(failure["rollback"], "NOT_NEEDED")
 
+    def test_combined_qa_regression_is_mandatory_even_when_other_tests_pass(self):
+        suite = self.work / "tests" / "test_combined_qa_report.py"
+        suite.unlink()
+        with self.assertRaisesRegex(ValueError, "Mandatory"):
+            self.archive()
+
+    def test_kmz_code_without_test_is_rejected_before_approval(self):
+        module = self.root / v3.KMZ_SOURCE
+        module.parent.mkdir(parents=True, exist_ok=True)
+        module.write_text("VALUE = 1\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "KMZ module/test mismatch"):
+            self.archive()
+
+    def test_kmz_test_without_feature_module_is_rejected(self):
+        suite = self.root / v3.KMZ_TEST
+        suite.parent.mkdir(parents=True, exist_ok=True)
+        suite.write_text("import unittest\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "KMZ module/test mismatch"):
+            self.archive()
+
+    def test_kmz_module_and_test_must_be_executed_in_staging(self):
+        module = self.root / v3.KMZ_SOURCE
+        module.parent.mkdir(parents=True, exist_ok=True)
+        module.write_text("VALUE = 1\n", encoding="utf-8")
+        suite = self.root / v3.KMZ_TEST
+        suite.write_text(
+            "import unittest\n"
+            "class Companion(unittest.TestCase):\n"
+            "    def test_map(self): self.assertTrue(True)\n",
+            encoding="utf-8",
+        )
+        data, sha = self.archive()
+        manifest, _ = v3.validate_archive(data, sha, TAG1)
+        self.assertIn("test_gap_kmz.py", manifest["required_tests"])
+        self.approve(TAG1, sha)
+        receipt = self.manager.stage(TAG1, data, sha)
+        self.assertGreaterEqual(receipt["tests"]["test_gap_kmz.py"], 1)
+
+    def test_manifest_cannot_discard_combined_qa_test(self):
+        data, _ = self.archive()
+        replacement = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(data)) as original, zipfile.ZipFile(replacement, "w") as made:
+            for filename in original.namelist():
+                payload = original.read(filename)
+                if filename == "manifest.json":
+                    manifest = json.loads(payload)
+                    manifest["required_tests"].remove("test_combined_qa_report.py")
+                    payload = json.dumps(manifest).encode("utf-8")
+                made.writestr(filename, payload)
+        altered = replacement.getvalue()
+        with self.assertRaisesRegex(ValueError, "mandatory code/tests"):
+            v3.validate_archive(altered, hashlib.sha256(altered).hexdigest(), TAG1)
+
     def test_reject_tampered_file_without_touching_checkout(self):
         data, sha = self.archive()
         name = f"{v3.WORK_REL}/src/meter_photo_qa/notification_inbox.py"
