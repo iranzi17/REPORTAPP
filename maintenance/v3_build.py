@@ -24,6 +24,7 @@ def build(tag, root, destination):
             raise ValueError("Mandatory release source folder missing")
         paths.extend(p for p in folder.rglob(pattern) if p.is_file())
     for relative in ("config/lv_line_quality_rules.json",
+                     "config/report_user_names.json",
                      "config/rwanda_district_sectors.json"):
         if (work / relative).is_file():
             paths.append(work / relative)
