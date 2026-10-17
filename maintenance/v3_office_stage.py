@@ -65,8 +65,11 @@ def stage(package_path, *, appdata=None, python=None,
         "live_notification_sent": False,
         "checks": {},
     }
-    manager = staging_class(v3root, python=python or sys.executable)
+    manager = None
+    report["phase"] = "MANAGER_INITIALIZATION"
     try:
+        manager = staging_class(v3root, python=python or sys.executable)
+        report["phase"] = "ARCGIS_PREFLIGHT"
         if os.name != "nt" and runtime_check:
             raise ReleaseError("PREFLIGHT", "WINDOWS_REQUIRED")
         if sys.version_info[:2] != (3, 11) and runtime_check:
@@ -80,6 +83,7 @@ def stage(package_path, *, appdata=None, python=None,
             if not version.startswith("3.4"):
                 raise ReleaseError("PREFLIGHT", "ARCGIS_3_4_REQUIRED")
             report["checks"]["arcgis_python"] = "CONFIRMED_3_4"
+        report["phase"] = "V2_POLICY_CHECK"
         try:
             v2_policy = read_json(maintenance / "policy.json")
         except (OSError, UnicodeError, ValueError) as exc:
@@ -90,8 +94,10 @@ def stage(package_path, *, appdata=None, python=None,
 
         # Staging never writes a live V3 pointer. A pre-existing pointer
         # means an earlier operator already attempted activation: stop.
+        report["phase"] = "V3_POINTER_CHECK"
         if manager.active.exists() or manager.journal.exists():
             raise ReleaseError("PREFLIGHT", "V3_ACTIVATION_STATE_EXISTS")
+        report["phase"] = "ARCHIVE_CHECK"
         archive = Path(package_path).read_bytes()
         digest = hashlib.sha256(archive).hexdigest()
         if digest != PINNED_SHA256:
@@ -108,6 +114,7 @@ def stage(package_path, *, appdata=None, python=None,
             "approved_sha256": PINNED_SHA256,
             "office_cutover_approved": False,
         }
+        report["phase"] = "STAGING_POLICY"
         current_policy = read_json(manager.policy)
         if current_policy is None:
             atomic_json(manager.policy, approved)
@@ -116,6 +123,7 @@ def stage(package_path, *, appdata=None, python=None,
         ):
             raise ReleaseError("PREFLIGHT", "V3_POLICY_ALREADY_DIFFERENT")
 
+        report["phase"] = "ISOLATED_STAGING"
         version_dir = manager.versions / PINNED_TAG
         existing = read_json(manager.local / "receipts" / (PINNED_TAG + ".json"), {})
         if version_dir.exists():
@@ -142,10 +150,22 @@ def stage(package_path, *, appdata=None, python=None,
             raise ReleaseError("STAGING", "UNEXPECTED_ACTIVATION_POINTER")
         report["checks"]["suite_counts"] = suite_counts
         report["status"] = "STAGED_TESTED_NOT_ACTIVATED"
+        report["phase"] = "COMPLETE"
     except Exception as exc:
         report["status"] = "FAILED_SAFE"
         report["error_stage"] = getattr(exc, "stage", "PREFLIGHT")
         report["error_code"] = getattr(exc, "code", type(exc).__name__)
+        # Save a privacy-safe failure origin, not the traceback or service data.
+        import traceback
+        frames = traceback.extract_tb(exc.__traceback__)
+        if frames:
+            last = frames[-1]
+            report["failure_origin"] = {
+                "module": Path(last.filename).name,
+                "function": last.name,
+                "line": last.lineno,
+            }
+        report["error_type"] = type(exc).__name__
     return report
 
 
@@ -154,16 +174,44 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate", required=True)
     arguments = parser.parse_args()
+    from pathlib import Path
+    import traceback
     try:
         result = stage(arguments.candidate)
-        destination = _safe_report(result)
         print("V3 staging:", result["status"])
+        print("Phase:", result.get("phase", "UNKNOWN"))
         print("Result code:", result.get("error_code", "NONE"))
+        if "failure_origin" in result:
+            print("Failure origin:", result["failure_origin"])
+        # Reaching staging success does NOT mean V3 was activated.
+        destination = _safe_report(result)
         print("Shareable receipt:", destination)
         print("Original live watcher and navigation registration unchanged.")
         return 0 if result["status"] == "STAGED_TESTED_NOT_ACTIVATED" else 2
     except Exception as exc:
-        print("V3 staging unable to write receipt:", type(exc).__name__)
+        # Previously this catch erased ALL evidence of the actual error.
+        # Expose only function, module basename and line; never raw paths.
+        frames = traceback.extract_tb(exc.__traceback__)
+        last = frames[-1] if frames else None
+        report = {
+            "tool": "REPORTAPP_V3_OFFICE_STAGE_V2",
+            "status": "WRAPPER_FAILED_SAFE",
+            "error_type": type(exc).__name__,
+            "phase": "CLI_OR_RECEIPT",
+            "failure_origin": (
+                {"module": Path(last.filename).name,
+                 "function": last.name, "line": last.lineno}
+                if last else None),
+            "original_watcher_task_unchanged": True,
+            "v3_activated": False,
+        }
+        print("Office staging wrapper failure:", report["error_type"])
+        print("Failure origin:", report["failure_origin"])
+        try:
+            destination = _safe_report(report)
+            print("Shareable receipt:", destination)
+        except Exception as report_exc:
+            print("Diagnostic receipt failure:", type(report_exc).__name__)
         return 2
 
 
