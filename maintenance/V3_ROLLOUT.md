@@ -1,3 +1,37 @@
+## Exact task and URL protocol backup confirmed — 17 October 2026
+
+The office reports backup `20261017T143905Z-716105f6` at
+`BACKUP_VERIFIED_ONLY`. It confirms that the complete original Task Scheduler
+XML and HKCU `reportapp://` handler registry entries were copied locally and
+their SHA-256 hashes verified. One `pythonw.exe` action runs the original
+module against the original monitor config every minute, with `IgnoreNew`.
+No task, registry, GIS asset, or production app was changed.
+**This is a verified backup, not an executed rollback rehearsal.**
+
+The previously unknown V2 updater state is now explicitly confirmed:
+`%LOCALAPPDATA%\\REPORTAPP\\Maintenance\\policy.json` has
+`auto_deploy=true`, and the independently scheduled
+`REPORTAPP Self Maintenance` task is **Ready**. Its GitHub issue reporting
+is disabled. The old updater can still discover a new approved V2 release
+and overwrite tracked source despite having blocked historical tags. This
+is a genuine cross-version race and must be resolved.
+
+V3's activation precheck now **refuses to activate** unless the local V2
+policy is readable and explicitly sets `auto_deploy=false`. This guard
+does not itself disable the updater, pause the monitoring task, or change
+the V2 policy. The user must explicitly authorize a guarded health-only
+V2 maintenance mode before V3 cutover. If approved, back up the exact V2
+policy, confirm no maintenance cycle is concurrently running, change only
+`auto_deploy` to false atomically, and verify that subsequent V2 maintenance
+cycles still report watcher health but `deployment=DISABLED`. Do not
+delete the maintenance task or the five old blocked release markers.
+
+Additional unresolved gates: a rollback *rehearsal* rather than a backup
+only; an isolated V3 Inbox/protocol routing test (the HKCU handler currently
+points at legacy repo source); validated ArcGIS Pro 1.0.4 installation and
+restart; tested live watcher polling on the correct REG version; then
+manual approval for the actual task transition.
+
 ## Office isolated acceptance — PASS, 17 October 2026
 
 The corrected Windows office V2 shadow-pilot report
