@@ -195,6 +195,40 @@ class V3Tests(unittest.TestCase):
             self.manager.activate(TAG1)
         self.assertFalse(self.manager.active.exists())
 
+    def test_v2_autodeploy_enabled_blocks_v3_even_with_approved_bridge(self):
+        from maintenance.v3_bridge_audit import scan_installed_bridge
+        v3.atomic_json(self.manager.local.parent / "policy.json",
+                       {"auto_deploy": True, "github_issue_reporting": False})
+        policy = {"office_cutover_approved": True,
+                  "bridge_version_confirmed": "1.0.4",
+                  "bridge_restart_confirmed": True,
+                  "runtime_python_confirmed": self.manager.python}
+        with patch("maintenance.v3_bridge_audit.scan_installed_bridge",
+                   return_value={"status": "VERIFIED_ON_DISK"}):
+            with self.assertRaises(v3.ReleaseError) as blocked:
+                self.manager._precheck(TAG1, policy)
+        self.assertEqual(blocked.exception.code, "V2_AUTODEPLOY_NOT_DISABLED")
+        self.assertTrue(v3.read_json(
+            self.manager.local.parent / "policy.json")["auto_deploy"])
+
+    def test_missing_or_corrupt_v2_policy_blocks_v3_cutover(self):
+        policy = {"office_cutover_approved": True,
+                  "bridge_version_confirmed": "1.0.4",
+                  "bridge_restart_confirmed": True,
+                  "runtime_python_confirmed": self.manager.python}
+        with patch("maintenance.v3_bridge_audit.scan_installed_bridge",
+                   return_value={"status": "VERIFIED_ON_DISK"}):
+            with self.assertRaises(v3.ReleaseError) as missing:
+                self.manager._precheck(TAG1, policy)
+        self.assertEqual(missing.exception.code, "V2_AUTODEPLOY_NOT_DISABLED")
+        (self.manager.local.parent / "policy.json").write_text("{ invalid",
+                                                               encoding="utf-8")
+        with patch("maintenance.v3_bridge_audit.scan_installed_bridge",
+                   return_value={"status": "VERIFIED_ON_DISK"}):
+            with self.assertRaises(v3.ReleaseError) as corrupt:
+                self.manager._precheck(TAG1, policy)
+        self.assertEqual(corrupt.exception.code, "V2_POLICY_UNREADABLE")
+
     def test_activation_and_reversible_second_release(self):
         data, sha = self.archive(TAG1)
         self.approve(TAG1, sha)
