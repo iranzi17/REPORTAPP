@@ -99,6 +99,35 @@ class TransitionTests(unittest.TestCase):
         self.assertEqual(self.reg.command, (self.previous, self.kind))
         self.assertEqual(self.reg.writes, [(self.new, 1), (self.previous, 1)])
 
+    def test_restore_original_handler_only_from_known_staged_value(self):
+        self.execute(nav.APPROVE)
+        self.reg.writes.clear()
+        result = nav.restore(localappdata=self.local, python="python.exe",
+                             read=self.reg.read, write=self.reg.write,
+                             confirmation="RESTORE ORIGINAL REPORTAPP URI HANDLER")
+        self.assertEqual(result["status"], "ORIGINAL_URI_HANDLER_RESTORED")
+        self.assertEqual(self.reg.command, (self.previous, self.kind))
+        self.assertEqual(self.reg.writes, [(self.previous, self.kind)])
+
+    def test_restore_requires_explicit_separate_confirmation(self):
+        self.execute(nav.APPROVE)
+        self.reg.writes.clear()
+        with self.assertRaises(nav.NavigationSwitchError) as err:
+            nav.restore(localappdata=self.local, python="python.exe",
+                        read=self.reg.read, write=self.reg.write,
+                        confirmation="yes")
+        self.assertEqual(err.exception.code, "EXPLICIT_RESTORE_APPROVAL_REQUIRED")
+        self.assertEqual(self.reg.writes, [])
+
+    def test_refuse_restore_over_unrelated_uri_handler(self):
+        self.reg.command = ("UNRELATED URI HANDLER", 1)
+        with self.assertRaises(nav.NavigationSwitchError) as err:
+            nav.restore(localappdata=self.local, python="python.exe",
+                        read=self.reg.read, write=self.reg.write,
+                        confirmation="RESTORE ORIGINAL REPORTAPP URI HANDLER")
+        self.assertEqual(err.exception.code, "UNEXPECTED_URI_HANDLER_REFUSE_RESTORE")
+        self.assertEqual(self.reg.writes, [])
+
     def test_status_does_not_change_registry(self):
         result = nav.status(localappdata=self.local, python="python.exe",
                             read=self.reg.read)
