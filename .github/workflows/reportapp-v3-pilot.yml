@@ -225,3 +225,109 @@ jobs:
           path: build/office-v3-stage/
           if-no-files-found: error
           retention-days: 7
+
+  prepare-watcher-cutover-kit:
+    name: Package guarded office one-minute watcher activation and rollback
+    needs: test-real-candidate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Simulate original task preservation, V3 first cycle and failure rollback
+        run: |
+          python -m unittest discover -s maintenance/tests -p test_v3_office_watcher_cutover.py -v
+          python -m unittest discover -s maintenance/tests -p test_v3_persistent_watcher.py -v
+          python -m unittest discover -s maintenance/tests -p test_v3_prepare_navigation.py -v
+          python -m unittest discover -s maintenance/tests -p test_v3_bridge_audit.py -v
+      - name: Assemble operator-consent office cutover kit
+        shell: bash
+        run: |
+          mkdir -p build/office-watcher/maintenance
+          cp maintenance/v3_office_watcher_cutover.py maintenance/v3_persistent_watcher.py maintenance/v3_core.py maintenance/v3_prepare_navigation.py maintenance/v3_bridge_audit.py build/office-watcher/maintenance/
+          touch build/office-watcher/maintenance/__init__.py
+          cat > build/office-watcher/01_Activate_V3_Watcher.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro Python 3.11 not found. Existing watcher unchanged.
+            pause
+            exit /b 1
+          )
+          cd /d "%~dp0"
+          echo Watcher cutover will ask for explicit approval and watch first scheduled cycle.
+          "%PYTHON%" -m maintenance.v3_office_watcher_cutover --activate
+          if errorlevel 1 (
+            echo Cutover not confirmed. Read generated report; KEEP ZOOM PAUSED.
+          ) else (
+            echo One scheduled V3 watcher cycle confirmed. KEEP ZOOM PAUSED.
+          )
+          pause
+          CMD
+          cat > build/office-watcher/02_Restore_Original_Watcher.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro Python unavailable. Task not modified.
+            pause
+            exit /b 1
+          )
+          cd /d "%~dp0"
+          "%PYTHON%" -m maintenance.v3_office_watcher_cutover --restore
+          if errorlevel 1 (
+            echo Restoration not confirmed. KEEP ZOOM PAUSED.
+          ) else (
+            echo Original one-minute watcher action restored.
+          )
+          pause
+          CMD
+          cat > build/office-watcher/README_FIRST.txt <<'TXT'
+          REPORTAPP V3 OFFICE WATCHER CUTOVER
+          ===================================
+          This is a supervised one-minute watcher cutover, NOT an unattended
+          application updater. It does not pull Git source or download code.
+
+          Preconditions already prepared in office:
+          - Verified 83-file stage reportapp-v3-v20261017-000032
+          - Its 71 test receipts and source identity are confirmed
+          - V2 auto-deploy held, health task preserved
+          - Original scheduled task XML and reportapp:// registry backup saved
+          - Bridge 1.0.4 checksum verified
+          - reportapp:// handler registered to V3 staged navigation source
+          - Map Zoom PAUSED, REG GIS version sde.DEFAULT
+
+          Save and close other critical operations before activation.
+          Double-click 01_Activate_V3_Watcher.cmd.
+          Type EXACTLY: ACTIVATE REPORTAPP V3 WATCHER
+          Let the window observe a scheduled watcher cycle (up to ~3 minutes).
+          A failed first cycle attempts to restore the original task action.
+          No second manual surveyor scan is triggered by this utility.
+
+          Keep both CMD files and the LOCALAPPDATA private backups.
+          For later rollback, while Zoom is PAUSED, run
+          02_Restore_Original_Watcher.cmd and type EXACTLY:
+          RESTORE ORIGINAL REPORTAPP WATCHER
+
+          Do NOT delete the original repo, SQLite data, backup files or
+          locally saved notifications. Do NOT run old auto-sync.
+          Upload only the newest office_v3_watcher_cutover_*.json from:
+          %LOCALAPPDATA%\REPORTAPP\Diagnostics
+          Do not upload private XML/policy rollback files.
+          TXT
+          sed -i 's/$/\r/' build/office-watcher/*.cmd
+          python -m py_compile build/office-watcher/maintenance/*.py
+      - name: Publish operator-only GitHub workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: REPORTAPP_V3_Office_Guarded_Watcher_Cutover
+          path: build/office-watcher/
+          if-no-files-found: error
+          retention-days: 7
