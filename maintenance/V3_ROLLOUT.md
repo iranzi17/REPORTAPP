@@ -118,6 +118,34 @@ test a newly verified alert in a noncritical project. Do **not** silently
 replace the installed add-in through V3 or change a Windows Scheduled Task
 during this manual bridge upgrade.
 
+## Office V3 package acceptance — first run failed safely
+
+On **17 October 2026 at 14:05 UTC**, the ArcGIS Pro 3.4 office pilot
+reported `FAILED_SAFE` against the reviewed 83-file release
+`reportapp-v3-v20261017-000032`. Python **3.11.10**, ArcGIS Pro
+**3.4**, and candidate archive SHA256
+`1dac15a37682c79f11508aaea80c344a50dfdb08d7dfede7a19b2ed7575cd948`
+were confirmed. Bridge remained **1.0.3**. Five suites had import/discovery
+failure (`ImportError`, `TypeError`; only one unittest loader case seen),
+and Inbox had two `TypeError` failures. **Zero live installations or GIS
+updates occurred.**
+
+The V1 standalone office diagnostic modified `subprocess.Popen` **itself**
+into a function in its shadow-test guard. That breaks applications and
+dependencies which introspect or type-check the Python class. This is a
+plausible shared cause of the office failures; the generic exception-only
+report cannot prove causation for all six suites. Do not mislabel this as six
+separate application regressions.
+
+The offline V2 diagnostic preserves the `Popen` class and blocks its
+`__init__` method instead, retaining Python-level network/process safety
+checks. It uses the **identical byte-for-byte pinned application candidate**,
+not a newer release. In a local simulation (non-ArcGIS Python 3.13),
+71 regression tests and the source-event compatibility probe passed. Its
+process/network guard was also checked. **Office Python 3.11 rerun remains
+required**; no production promotion until the corrected office diagnostics
+confirm complete test discovery and passing regressions.
+
 ## Office isolated compatibility diagnostic — 17 October 2026
 
 The office diagnostic ran with Windows and Python **3.11.10**. It reports
