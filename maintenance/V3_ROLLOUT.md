@@ -1,3 +1,37 @@
+## Office V3 watcher cutover: benign Running-state race (17 October 2026)
+
+Office receipt `office_v3_watcher_cutover_20261017T162814Z_cb37ab4b.json` records
+`TASK_BECAME_BUSY`, `CUTOVER_FAILED_SAFE` and
+`rollback=RESTORE_PENDING`. The report also confirms unchanged Bridge and URI
+registry, Map Zoom paused, V2 auto-deploy disabled, and verified private original
+task backup. The error was raised immediately after V3 pointer activation and
+**before** `Set-ScheduledTask`; the original task action was not intentionally
+changed. **However**, `RESTORE_PENDING` is ambiguous about whether policy
+and V3 pointer were fully restored. Do not assume this old receipt confirms
+all rollback details.
+
+This is expected timing behavior for a one-minute watcher: after passing
+preflight in the Ready state, the task may enter Running by the time
+`Set-ScheduledTask` is reached. Revised logic now accepts Ready **or
+Running** during read-only preflight, and waits up to 145 seconds for a
+natural Ready window after activating the pinned snapshot. It never
+stops, disables, re-registers or manually triggers the existing watcher.
+Disabled or unexpectedly missing task states still abort. Bounded busy
+time-out aborts without task action changes.
+
+The failure path now verifies the original task action, the absence of
+an active V3 pointer, and restored exact pre-cutover policy bytes. It
+reports `ORIGINAL_TASK_CONFIRMED_NO_TASK_CHANGE` when applicable and uses
+`CUTOVER_FAILED_REQUIRES_REVIEW` if any restoration check is not confirmed.
+Simulations test Running -> Ready, prolonged Running timeout, Disabled,
+first scheduled V3 cycle confirmation, and failure rollback. Do not
+repeat the 71 office acceptance tests or the 83-file V3 stage.
+
+**Next:** run only the corrected *guarded watcher cutover* package, with
+Map Zoom still paused, and inspect its new sanitized
+`office_v3_watcher_cutover_*.json`. If it reports an existing unexpected
+V3 active pointer or policy, stop rather than deleting files manually.
+
 ## V3 URI switch verified on office; watcher cutover prepared (17 October 2026)
 
 Office receipt `office_v3_navigation_20261017T155602Z_0679d4a6.json`
