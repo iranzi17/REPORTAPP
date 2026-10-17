@@ -1101,8 +1101,14 @@ class _AssetQualityTool:
         )
         version.value = "sde.DEFAULT"
         version.category = "Advanced"
+        gap_kmz = arcpy.Parameter(
+            displayName="Output Google Earth KMZ (confirmed gaps)",
+            name="output_gap_kmz", datatype="DEFile",
+            parameterType="Derived", direction="Output",
+        )
+        gap_kmz.filter.list = ["kmz"]
         return [output, start, end, district, sectors, cells,
-                custom, users, service, boundaries, version]
+                custom, users, service, boundaries, version, gap_kmz]
 
     def updateParameters(self, parameters):
         _apply_boundary_filters(parameters, 3, 4, 5)
@@ -1132,11 +1138,20 @@ class _AssetQualityTool:
             version=parameters[10].valueAsText or "sde.DEFAULT",
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
-        _export_companion_kmz(
+        kmz = _export_companion_kmz(
             {self.asset:summary["output_xlsx"]},
             service_url=parameters[8].valueAsText or None,
             version=parameters[10].valueAsText or "sde.DEFAULT",
         )
+        if kmz.get("output_kmz"):
+            # The companion archive already exists on disk at this point.
+            # Explicit derived output makes it discoverable in GP history,
+            # rather than showing only the Excel report as a tool output.
+            arcpy.SetParameterAsText(11, kmz["output_kmz"])
+            arcpy.AddMessage(
+                "KMZ file saved beside Excel (open separately in Google Earth): "
+                + kmz["output_kmz"]
+            )
         arcpy.AddMessage(
             f"Checked {summary['total']} {self.asset}(s): "
             f"{summary['with_gaps']} with confirmed gaps, "
