@@ -8,6 +8,7 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/combined_qa_report.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_gap_kmz.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_toolbox_gap_kmz_output.py'
       - '.github/workflows/reportapp-gap-kmz.yml'
   pull_request:
     branches: [main]
@@ -41,6 +42,7 @@ jobs:
         run: |
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_combined_qa_report.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_asset_quality_workflow.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_toolbox_gap_kmz_output.py -v
           # ArcGIS Pro toolbox UI tests require arcpy on a licensed Windows
           # installation. The .pyt is syntax-checked above in Linux CI.
 
