@@ -1,3 +1,39 @@
+## V3 URI switch verified on office; watcher cutover prepared (17 October 2026)
+
+Office receipt `office_v3_navigation_20261017T155602Z_0679d4a6.json`
+confirms `VERIFIED_V3_URI_HANDLER_REGISTERED`. The report independently
+verifies Bridge 1.0.4's published package SHA256, the original registry
+backup, private rollback evidence and the still-paused Map Zoom flag.
+**The one-minute watcher task was not modified** and V3 remained staged
+(`v3_active=false`).
+
+For the next phase a manual, reversible watcher task switch is prepared:
+`maintenance/v3_office_watcher_cutover.py` verifies the exact saved task
+XML and V2 hold, checks the already-staged 83-file V3 snapshot and
+six-suite/71-test receipt, validates the installed Bridge checksum and
+HKCU URI handler, and insists that Map Zoom is paused. Once an operator
+explicitly confirms, it copies the V3 launcher and core into stable
+LOCALAPPDATA paths, activates the pinned V3 pointer, and changes ONLY the
+existing `REPORTAPP Surveyor Quality Alerts` task Action while preserving
+its original one-minute trigger and `IgnoreNew` settings. It does NOT
+disable the V2 health-only task, install a bridge, run a second manual
+surveyor scan, change Git files or touch REG features.
+
+The cutover watches up to 190 seconds for a successful **scheduled**
+V3 cycle, and attempts automatic restoration of the original task action,
+V3 active pointer and operator-policy bytes if acceptance fails. A separate
+manual `--restore` option retrieves the original action and policy from
+verified private evidence after a successful cutover. CI regression tests
+cover successful scheduled-cyle and injected failures, including first
+cycle timeout and partial Task Scheduler action changes, using a fake
+task controller. Office execution is **not yet done** and must be
+confirmed by a new sanitized cutover receipt; simulations do not prove
+that Windows permissions will allow `Set-ScheduledTask`.
+
+**Keep Map Zoom paused** until the task cutover is actually confirmed
+and the user validates a new real REG `sde.DEFAULT` edit against the
+correct pole/line/transformer; do not replay old alerts.
+
 ## ArcGIS Pro screenshot: installed Bridge 1.0.4 (17 October 2026)
 
 The office's Add-In Manager now displays **REPORTAPP Alert Zoom Bridge
