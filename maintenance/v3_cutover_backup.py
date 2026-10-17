@@ -50,8 +50,8 @@ def _get_task_xml():
     )
     if run.returncode:
         raise RuntimeError("Unable to export original task; no task changes attempted")
-    result = run.stdout.strip()
-    if not result or len(result.encode("utf-8")) > MAX_TASK_XML:
+    result = run.stdout
+    if not result.strip() or len(result.encode("utf-8")) > MAX_TASK_XML:
         raise RuntimeError("Original Task Scheduler definition missing or oversized")
     return result
 
@@ -180,8 +180,11 @@ def capture(directory=None, *, task_xml_supplier=_get_task_xml,
 def verify_backup(folder):
     folder = Path(folder)
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-    task = folder / manifest["task_filename"]
-    protocol = folder / manifest["protocol_filename"]
+    if (manifest.get("task_filename") != "task_before.xml"
+            or manifest.get("protocol_filename") != "protocol_before.json"):
+        raise ValueError("Untrusted rollback manifest file name")
+    task = folder / "task_before.xml"
+    protocol = folder / "protocol_before.json"
     if task.is_symlink() or protocol.is_symlink():
         raise ValueError("Backup files cannot be symbolic links")
     if (_hash(task.read_bytes()) != manifest["task_sha256"] or
