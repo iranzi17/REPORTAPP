@@ -57,6 +57,14 @@ def safe_verified_source_uri(alert, config, *, layer=None, layer_factory=None):
     try:
         return verified_source_uri(
             alert, config, layer=layer, layer_factory=layer_factory)
-    except (ExactFeatureMismatch, ValueError, KeyError, TypeError, RuntimeError,
-            OSError):
+    except Exception as exc:
+        # ArcGIS Enterprise can raise provider-specific exceptions including
+        # ImportError, request errors and expired-token errors. Never allow a
+        # source verification problem to prevent delivery of the QA popup.
+        # Log only the exception type to avoid credentials or source leakage.
+        import logging
+        logging.getLogger(__name__).warning(
+            "REPORTAPP exact source validation prevented navigation: %s",
+            type(exc).__name__,
+        )
         return ""
