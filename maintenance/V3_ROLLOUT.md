@@ -37,9 +37,11 @@ reconfigure Windows Task Scheduler, or install an ArcGIS Pro add-in.
 
 - Test the complete candidate under **the actual office ArcGIS Pro 3.4 Python**
   and all default configuration paths, not solely in GitHub CI.
-- Add and test a stable V3 watcher launcher that reads the active pointer while
-  passing the **original external** monitor_config path. Prove all relative
-  imports/config files resolve correctly from a versioned snapshot.
+- The pilot now includes `maintenance/v3_launcher.py`, which resolves a
+  verified active pointer and passes the **original external** monitor config,
+  falling back to the unchanged legacy watcher on missing/invalid snapshots.
+  **Office acceptance** must still prove correct imports, configuration paths,
+  one-minute scheduling and live monitoring continuity before task cutover.
 - Validate one-hour continuous watcher polling, alert deduplication, deferred
   notifications, output integrity and navigation against the existing office
   environment without editing REG data.
@@ -59,5 +61,23 @@ Run `python -m unittest discover -s maintenance/tests -v` in CI. Additionally
 simulate tampering, path traversal, missing/zero tests, postcheck exceptions,
 interrupted switch and a newer approved release following a blocked old one.
 Document office acceptance before any production cutover.
+
+## Operator dashboard
+
+`maintenance/v3_dashboard.py` is a Tkinter-only, opt-in pilot interface. It
+shows current V2 watcher health and V3 state, lets the operator select a
+reviewed ZIP, **type an independently approved tag and SHA256**, stage it in
+isolation, inspect diagnostic failure codes, recover an interrupted pointer and
+restore a previous V3 snapshot. Staging and pointer rollback never change the
+Windows watcher task. Do not click through checksum approval without an
+independent protected release record.
+
+## Controlled next phase
+
+Build an office-specific, one-click **cutover assistant** only after the new
+launcher passes a noncritical office acceptance test. Save the existing
+Scheduled Task definition and preserve an immediate, operator-triggered
+revert. The migration must be transactional; the current implementation
+**does not yet reconfigure the Scheduled Task**.
 
 **No release is authorized by this draft.** V2 continues operating unchanged.
