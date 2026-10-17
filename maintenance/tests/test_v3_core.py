@@ -50,6 +50,14 @@ class V3Tests(unittest.TestCase):
         self.config.parent.mkdir(parents=True)
         self.config.write_text('{"watched":["someone"]}', encoding="utf-8")
         self.manager = v3.Manager(self.local)
+        # Synthetic unit fixtures use stubs; the real archive has a
+        # separate full integration probe on Windows and Linux CI.
+        self.compatibility_patch = patch(
+            "maintenance.v3_component_compatibility.check_components",
+            return_value={"status": "COMPATIBLE", "verified_components": 3},
+        )
+        self.compatibility_patch.start()
+        self.addCleanup(self.compatibility_patch.stop)
 
     def archive(self, tag=TAG1):
         name = self.root / (tag + ".zip")
@@ -315,6 +323,35 @@ class V3Tests(unittest.TestCase):
         self.assertEqual(seen, [str(self.work / "src")])
         self.assertEqual(v3.read_json(self.local / "launcher_latest.json")["mode"],
                          "LEGACY_SNAPSHOT_INVALID")
+
+    def test_incompatible_notification_components_never_seal_candidate(self):
+        data, sha = self.archive()
+        self.approve(TAG1, sha)
+        with patch(
+            "maintenance.v3_component_compatibility.check_components",
+            side_effect=v3.ReleaseError(
+                "COMPONENT_COMPATIBILITY", "NAV_HANDLER_MISSING_EVENT_CONTEXT"
+            ),
+        ):
+            with self.assertRaisesRegex(v3.ReleaseError, "NAV_HANDLER_MISSING_EVENT_CONTEXT"):
+                self.manager.stage(TAG1, data, sha)
+        self.assertFalse((self.manager.versions / TAG1).exists())
+        self.assertFalse(self.manager.active.exists())
+        failure = v3.read_json(self.local / "blocked_releases" / TAG1)
+        self.assertEqual(failure["stage"], "COMPONENT_COMPATIBILITY")
+        self.assertEqual(failure["code"], "NAV_HANDLER_MISSING_EVENT_CONTEXT")
+
+    def test_three_component_receipt_is_required_for_activation(self):
+        data, sha = self.archive()
+        self.approve(TAG1, sha)
+        self.manager.stage(TAG1, data, sha)
+        receipt_file = self.local / "receipts" / (TAG1 + ".json")
+        receipt = v3.read_json(receipt_file)
+        receipt.pop("component_checks")
+        v3.atomic_json(receipt_file, receipt)
+        with self.assertRaisesRegex(v3.ReleaseError, "NOT_TESTED_OR_NOT_COMPATIBLE"):
+            self.manager.activate(TAG1)
+        self.assertFalse(self.manager.active.exists())
 
     def test_package_has_no_watch_config_or_generated_reports(self):
         data, _ = self.archive()
