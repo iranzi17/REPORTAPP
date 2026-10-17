@@ -157,7 +157,7 @@ def validate_archive(data, expected_hash, tag):
 
 def _clean_message(error):
     """Keep safe local reason codes; never persist arbitrary HTTP responses or tokens."""
-    detail = str(error).splitlines()[0][:180]
+    detail = str(error).splitlines()[0][:350]
     detail = re.sub(r"https?://\S+", "<url>", detail, flags=re.I)
     detail = re.sub(r"[A-Fa-f0-9]{8}-[A-Fa-f0-9-]{20,}", "<id>", detail)
     detail = re.sub(r"[A-Za-z]:\\[^ ]+", "<local-path>", detail)
@@ -272,7 +272,10 @@ class Manager:
                            "AssertionError:", "RuntimeError:")
                 failures = [line.strip() for line in lines.splitlines()
                             if any(mark in line for mark in markers)]
-                reason = _clean_message(failures[0]) if failures else "No test failure detail"
+                exceptions = [line.strip() for line in lines.splitlines()
+                              if re.match(r"^(AssertionError|KeyError|FileNotFoundError|RuntimeError|ModuleNotFoundError|PermissionError|OSError|ImportError|ValueError):", line.strip())]
+                detail = "; ".join(exceptions[-1:] + failures[:1])
+                reason = _clean_message(detail) if detail else "No test failure detail"
                 raise ReleaseError("STAGING_TESTS", "TEST_FAILED",
                                    f"{name}: {n} tests, exit {result.returncode}; {reason}")
             results[name] = n
