@@ -29,6 +29,9 @@ class V3Tests(unittest.TestCase):
             file = self.root / path
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_text("OK = True\n", encoding="utf-8")
+        bridge_source = self.work / "addins" / "ReportappNavigationBridge" / "BridgeModule.cs"
+        bridge_source.parent.mkdir(parents=True, exist_ok=True)
+        bridge_source.write_text("// Test-only reference, not an installed add-in.\n", encoding="utf-8")
         tracked_map = self.work / "config" / "report_user_names.json"
         tracked_map.parent.mkdir(parents=True, exist_ok=True)
         tracked_map.write_text('{"accounts":[]}', encoding="utf-8")
