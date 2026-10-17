@@ -70,7 +70,7 @@ def _check_saved_original(v3):
     return command, int(record.get("value_type"))
 
 
-def verified_handler(localappdata, python):
+def verified_handler(localappdata, python, *, require_inactive=True):
     root, v3 = local_paths(localappdata)
     policy = read_json(root / "Maintenance" / "policy.json", {})
     if not isinstance(policy, dict) or policy.get("auto_deploy") is not False:
@@ -78,7 +78,7 @@ def verified_handler(localappdata, python):
     if not (root / "Navigation" / "navigation-paused.flag").is_file():
         raise NavigationSwitchError("MAP_ZOOM_MUST_REMAIN_PAUSED")
     manager = Manager(v3, python=python)
-    if manager.active.exists() or manager.journal.exists():
+    if manager.journal.exists() or (require_inactive and manager.active.exists()):
         raise NavigationSwitchError("UNEXPECTED_V3_ACTIVATION")
     receipt = read_json(v3 / "receipts" / (TAG + ".json"), {})
     if (not isinstance(receipt, dict)
@@ -174,7 +174,7 @@ def restore(*, localappdata, python, read=_registry_read,
         raise NavigationSwitchError("WINDOWS_REQUIRED")
     _, v3 = local_paths(localappdata)
     original, kind = _check_saved_original(v3)
-    intended = verified_handler(localappdata, python)
+    intended = verified_handler(localappdata, python, require_inactive=False)
     current = read()
     if current == (original, kind):
         return {"status": "ALREADY_ON_ORIGINAL_HANDLER",
@@ -192,7 +192,7 @@ def restore(*, localappdata, python, read=_registry_read,
 def status(*, localappdata, python, read=_registry_read):
     _, v3 = local_paths(localappdata)
     original, kind = _check_saved_original(v3)
-    expected = verified_handler(localappdata, python)
+    expected = verified_handler(localappdata, python, require_inactive=False)
     current = read()
     return {
         "status": ("STAGED_HANDLER_REGISTERED" if current == (expected, kind)
