@@ -267,8 +267,14 @@ class Manager:
             count = re.search(r"Ran (\d+) tests?\b", lines)
             n = int(count.group(1)) if count else 0
             if result.returncode or n < 1:
+                markers = ("FAIL:", "ERROR:", "ModuleNotFoundError:",
+                           "ImportError:", "FileNotFoundError:",
+                           "AssertionError:", "RuntimeError:")
+                failures = [line.strip() for line in lines.splitlines()
+                            if any(mark in line for mark in markers)]
+                reason = _clean_message(failures[0]) if failures else "No test failure detail"
                 raise ReleaseError("STAGING_TESTS", "TEST_FAILED",
-                                   f"{name}: {n} tests, process exit {result.returncode}")
+                                   f"{name}: {n} tests, exit {result.returncode}; {reason}")
             results[name] = n
         return results
 
