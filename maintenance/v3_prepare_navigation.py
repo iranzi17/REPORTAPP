@@ -165,6 +165,30 @@ def switch(*, localappdata, python, read=_registry_read, write=_registry_write,
     }
 
 
+def restore(*, localappdata, python, read=_registry_read,
+            write=_registry_write, confirmation=None):
+    """Operator-invoked restore of the exact saved original URL handler."""
+    if confirmation != "RESTORE ORIGINAL REPORTAPP URI HANDLER":
+        raise NavigationSwitchError("EXPLICIT_RESTORE_APPROVAL_REQUIRED")
+    if not _is_windows():
+        raise NavigationSwitchError("WINDOWS_REQUIRED")
+    _, v3 = local_paths(localappdata)
+    original, kind = _check_saved_original(v3)
+    intended = verified_handler(localappdata, python)
+    current = read()
+    if current == (original, kind):
+        return {"status": "ALREADY_ON_ORIGINAL_HANDLER",
+                "watcher_task_unchanged": True, "v3_activated": False}
+    if current != (intended, kind):
+        raise NavigationSwitchError("UNEXPECTED_URI_HANDLER_REFUSE_RESTORE")
+    write(original, kind)
+    if read() != (original, kind):
+        raise NavigationSwitchError("ORIGINAL_HANDLER_RESTORE_VERIFY_FAILED")
+    return {"status": "ORIGINAL_URI_HANDLER_RESTORED",
+            "watcher_task_unchanged": True, "v3_activated": False,
+            "map_zoom_paused": True}
+
+
 def status(*, localappdata, python, read=_registry_read):
     _, v3 = local_paths(localappdata)
     original, kind = _check_saved_original(v3)
@@ -184,20 +208,29 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--switch", action="store_true")
+    parser.add_argument("--restore", action="store_true")
     parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
+    if sum(bool(x) for x in (args.switch, args.status, args.restore)) > 1:
+        parser.error("Only one operation per run")
     root = Path(os.environ["LOCALAPPDATA"])
     python = sys.executable
     result = None
     try:
-        if args.switch:
+        if args.switch or args.restore:
             if not sys.stdin.isatty():
                 raise NavigationSwitchError("INTERACTIVE_TERMINAL_REQUIRED")
-            print("Only HKCU reportapp:// URI handler will switch to VERIFIED V3.")
+            print("Only HKCU reportapp:// URI handler will change.")
             print("Zoom must stay PAUSED; current scheduled watcher is unchanged.")
-            answer = input("Type exactly " + APPROVE + " to approve:\n> ")
-            result = switch(localappdata=root, python=python,
-                            confirmation=answer)
+            phrase = (APPROVE if args.switch
+                      else "RESTORE ORIGINAL REPORTAPP URI HANDLER")
+            answer = input("Type exactly " + phrase + " to approve:\n> ")
+            if args.switch:
+                result = switch(localappdata=root, python=python,
+                                confirmation=answer)
+            else:
+                result = restore(localappdata=root, python=python,
+                                 confirmation=answer)
         else:
             result = status(localappdata=root, python=python)
         outcome = 0 if result["status"] != "UNEXPECTED_HANDLER" else 2
