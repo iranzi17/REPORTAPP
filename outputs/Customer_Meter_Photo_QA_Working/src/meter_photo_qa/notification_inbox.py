@@ -189,6 +189,62 @@ def get_alert(conn,row_id):
     row=conn.execute("SELECT * FROM alert_inbox WHERE id=?",(int(row_id),)).fetchone()
     return dict(row) if row else None
 
+def resend_saved_alert(config_path, row_id, *, source_verifier=None, sender=None):
+    """Operator-only recovery of a missed Windows banner, without a new scan.
+
+    A Windows ToastNotifier.show() return cannot prove a banner was displayed.
+    The stored LIVE record provides durable recovery, but an alert is never
+    replayed until its original GlobalID, OBJECTID, UTC edit time, actor, and
+    sde.DEFAULT are freshly verified. No REG edits, SQLite writes, new
+    deduplication markers, or automatic replays.
+    """
+    config_path=Path(config_path).expanduser().resolve()
+    conf=json.loads(config_path.read_text(encoding="utf-8"))
+    if conf.get("channel","desktop")!="desktop":
+        raise ValueError("Saved Windows popup requires desktop delivery.")
+    conn=connect_inbox(config_path)
+    try:
+        row=get_alert(conn,row_id)
+    finally:
+        conn.close()
+    if not row:
+        raise ValueError("Alert not found in the existing REPORTAPP Inbox.")
+    if (row["origin"]!="LIVE" or row["delivery_status"]!="SENT"
+            or not row["event_time_utc_ms"] or not row["globalid"]):
+        raise ValueError(
+            "Only previously dispatched LIVE alerts with verified source "
+            "event identity can be resent. Use Find Asset for legacy alerts."
+        )
+    alert={
+        "asset":row["asset"],"objectid":row["objectid"],
+        "globalid":row["globalid"],"username":row["username"],
+        "event_type":row["event_type"],"created_user":row["created_user"],
+        "last_edited_user":row["last_edited_user"],
+        "event_time_utc_ms":row["event_time_utc_ms"],
+        "issue_digest":row["issue_digest"],
+        "issues":json.loads(row["issues_json"]),
+    }
+    if not alert["issues"]:
+        raise ValueError("This saved alert has no recorded quality gaps.")
+    if source_verifier is None:
+        from .source_event_navigation import verified_source_uri
+        source_verifier=verified_source_uri
+    # Fail closed. A newly edited source cannot be represented by an old toast.
+    source_verifier(alert,conf)
+    if sender is None:
+        from .surveyor_notifications import deliver
+        sender=deliver
+    sender(alert,conf)
+    return {
+        "status":"REISSUED_TO_WINDOWS_NOT_VIEW_CONFIRMED",
+        "alert_id":int(row_id),
+        "objectid":int(row["objectid"]),
+        "source_event_utc_ms":int(row["event_time_utc_ms"]),
+        "database_changed":False,
+        "monitoring_schedule_changed":False,
+    }
+
+
 def set_review(conn,row_id,status,note=None,reviewer=None,now_ms=None):
     if status not in ("OPEN","REVIEWED"):
         raise ValueError("Use OPEN or REVIEWED.")
@@ -1060,7 +1116,30 @@ def launch_gui(config_path):
         except Exception as exc:
             messagebox.showerror("REPORTAPP navigation",str(exc),parent=root)
 
+    def resend_selected_popup():
+        if selected_id[0] is None:
+            messagebox.showinfo("REPORTAPP","Select a saved LIVE QA alert first.",parent=root)
+            return
+        if not messagebox.askyesno(
+            "Resend selected Windows popup",
+            "Verify the CURRENT source edit and resend this saved alert once?\\n"
+            "No REG features or watcher history will change.",parent=root
+        ):
+            return
+        try:
+            result=resend_saved_alert(config,selected_id[0])
+            messagebox.showinfo(
+                "REPORTAPP popup dispatched",
+                "Sent to the Windows notification service again. Windows may "
+                "still suppress banners; check Win + N if needed.\\n"
+                f"Alert ID {result['alert_id']}, OBJECTID {result['objectid']}.",
+                parent=root
+            )
+        except Exception as exc:
+            messagebox.showerror("Popup cannot be resent safely",str(exc),parent=root)
+
     ttk.Button(buttons,text="Zoom in ArcGIS Pro",command=zoom_selected).pack(side="left",padx=9)
+    ttk.Button(buttons,text="Resend Windows Popup",command=resend_selected_popup).pack(side="left",padx=5)
     ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
     ttk.Button(buttons,text="Mark Reviewed",command=lambda:update("REVIEWED")).pack(side="left",padx=9)
     ttk.Button(buttons,text="Reopen",command=lambda:update("OPEN")).pack(side="left",padx=9)
@@ -1096,12 +1175,17 @@ def main(argv=None):
     mode.add_argument("--list",action="store_true",help="Print recent alerts without GUI")
     mode.add_argument("--review",type=int,metavar="ID",help="Mark local alert reviewed")
     mode.add_argument("--reopen",type=int,metavar="ID",help="Reopen local alert")
+    mode.add_argument("--resend-alert",type=int,metavar="ID",help="Operator-only resend of a verified saved LIVE Windows alert")
     mode.add_argument("--add-user",action="append",metavar="USERNAME",help="Add monitored portal username without resetting the config")
     mode.add_argument("--remove-user",action="append",metavar="USERNAME",help="Remove monitored portal username without losing inbox history")
     mode.add_argument("--set-assets",nargs="+",metavar="ASSET",
                       help="Verify and set shared asset classes: line transformer pole")
     parser.add_argument("--note",help="Supervisor remark for --review/--reopen")
     options=parser.parse_args(argv)
+    if options.resend_alert is not None:
+        print(json.dumps(resend_saved_alert(options.config,options.resend_alert),
+                         indent=2,ensure_ascii=False))
+        return 0
     if options.set_assets is not None:
         from .notification_setup import update_monitored_assets
         result=update_monitored_assets(options.config,options.set_assets)
