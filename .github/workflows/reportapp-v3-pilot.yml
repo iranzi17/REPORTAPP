@@ -1,0 +1,333 @@
+name: REPORTAPP V3 staged snapshot pilot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'maintenance/**'
+      - '.github/workflows/reportapp-v3-pilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-real-candidate:
+    name: Build and stage real source on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline regression requirements
+        run: python -m pip install openpyxl pillow
+      - name: Build a complete real-source pilot archive (never publish)
+        run: python -m maintenance.v3_build --tag reportapp-v3-v20261017-000001 --root . --output v3-pilot.zip
+      - name: Test exact archive staging under isolated versioned root
+        run: python -m maintenance.v3_ci_pilot --archive v3-pilot.zip --tag reportapp-v3-v20261017-000001
+      - name: Check no production installer or release generated
+        run: python -c "from pathlib import Path; assert not Path('reportapp-safe-update.zip').exists()"
+
+  prepare-review-candidate:
+    name: Package reviewed candidate (no deployment)
+    needs: test-real-candidate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline regression requirements
+        run: python -m pip install openpyxl pillow
+      - name: Build and revalidate individually versioned candidate
+        shell: bash
+        run: |
+          mkdir -p build
+          TAG="reportapp-v3-v$(date -u +%Y%m%d)-$(printf '%06d' "$GITHUB_RUN_NUMBER")"
+          python -m maintenance.v3_build --tag "$TAG" --root . --output build/reportapp-v3-candidate.zip
+          python -m maintenance.v3_ci_pilot --archive build/reportapp-v3-candidate.zip --tag "$TAG"
+          sha256sum build/reportapp-v3-candidate.zip > build/reportapp-v3-candidate.sha256
+          printf 'Source revision: %s\nReview PR: %s\nCandidate tag: %s\nNOT A PRODUCTION RELEASE\n' "$GITHUB_SHA" "$GITHUB_REF" "$TAG" > build/candidate-provenance.txt
+      - name: Keep draft artifact for review only, not a GitHub Release
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportapp-v3-reviewed-candidate
+          path: |
+            build/reportapp-v3-candidate.zip
+            build/reportapp-v3-candidate.sha256
+            build/candidate-provenance.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  prepare-backup-kit:
+    name: Prepare office rollback evidence tool (read-only)
+    needs: test-real-candidate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify private task backup and no-cutover assertions
+        run: python -m unittest discover -s maintenance/tests -p test_v3_cutover_backup.py -v
+      - name: Assemble single-click office preservation utility
+        shell: bash
+        run: |
+          mkdir -p build/office-backup
+          cp maintenance/v3_cutover_backup.py build/office-backup/v3_cutover_backup.py
+          cat > build/office-backup/Run_V3_Original_Config_Backup.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro Python not found. No changes were made.
+            pause
+            exit /b 1
+          )
+          "%PYTHON%" "%~dp0v3_cutover_backup.py" --backup-only
+          if errorlevel 1 (
+            echo Backup incomplete or requires review. Do not proceed to cutover.
+          ) else (
+            echo Original task and protocol saved locally. No task or registry changed.
+          )
+          pause
+          CMD
+          sed -i 's/$/\r/' build/office-backup/Run_V3_Original_Config_Backup.cmd
+          python -m py_compile build/office-backup/v3_cutover_backup.py
+      - name: Archive pilot kit (no task change, no release promotion)
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportapp-v3-office-original-config-backup
+          path: build/office-backup/
+          retention-days: 7
+          if-no-files-found: error
+
+  prepare-office-stage-kit:
+    name: Package pinned office V3 staging kit (no live activation)
+    needs: test-real-candidate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download EXACT previously office-tested candidate from run 39038152277
+        uses: actions/download-artifact@v4
+        with:
+          name: reportapp-v3-reviewed-candidate
+          run-id: 39038152277
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/pinned-artifact
+      - name: Verify independently reviewed package bytes, regression tests and actual staged source
+        shell: bash
+        run: |
+          python -m pip install openpyxl pillow
+          python -m unittest discover -s maintenance/tests -p test_v3_office_stage.py -v
+          python - <<'PY'
+          import hashlib, pathlib, json, zipfile
+          path = pathlib.Path('build/pinned-artifact/reportapp-v3-candidate.zip')
+          actual = hashlib.sha256(path.read_bytes()).hexdigest()
+          expected = '1dac15a37682c79f11508aaea80c344a50dfdb08d7dfede7a19b2ed7575cd948'
+          assert actual == expected, 'Office-reviewed package hash differs; abort'
+          with zipfile.ZipFile(path) as z:
+              manifest = json.loads(z.read('manifest.json'))
+          assert manifest['tag'] == 'reportapp-v3-v20261017-000032'
+          assert len(manifest['files']) == 83
+          print('Pinned office candidate authentic:', actual)
+          PY
+          python - <<'PY'
+          import json, pathlib, tempfile
+          from maintenance import v3_office_stage as stage
+          with tempfile.TemporaryDirectory(prefix='reportapp-v3-stage-test-') as folder:
+              appdata = pathlib.Path(folder)
+              p = appdata / 'REPORTAPP' / 'Maintenance' / 'policy.json'
+              p.parent.mkdir(parents=True)
+              p.write_text(json.dumps({'auto_deploy': False}), encoding='utf-8')
+              result = stage.stage('build/pinned-artifact/reportapp-v3-candidate.zip',
+                                   appdata=appdata, runtime_check=False)
+              print(json.dumps(result, indent=2))
+              assert result['status'] == 'STAGED_TESTED_NOT_ACTIVATED'
+              assert sum(result['checks']['suite_counts'].values()) >= 71
+              assert not (p.parent / 'v3' / 'active.json').exists()
+          PY
+      - name: Assemble standalone one-click Windows staging kit
+        shell: bash
+        run: |
+          mkdir -p build/office-v3-stage/maintenance
+          cp build/pinned-artifact/reportapp-v3-candidate.zip build/office-v3-stage/reportapp-v3-candidate.zip
+          cp maintenance/v3_core.py maintenance/v3_bridge_audit.py maintenance/v3_component_compatibility.py maintenance/v3_office_stage.py build/office-v3-stage/maintenance/
+          touch build/office-v3-stage/maintenance/__init__.py
+          cat > build/office-v3-stage/Run_V3_Staging_No_Cutover.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro 3.4 Python not found. Nothing was changed.
+            pause
+            exit /b 1
+          )
+          cd /d "%~dp0"
+          echo Preparing REPORTAPP V3 immutable candidate. The live watcher stays unchanged.
+          "%PYTHON%" -m maintenance.v3_office_stage --candidate "%~dp0reportapp-v3-candidate.zip"
+          if errorlevel 1 (
+            echo STAGING NOT COMPLETE. Keep the existing watcher running.
+          ) else (
+            echo STAGING COMPLETE. No application, bridge, or Windows task was switched.
+          )
+          pause
+          CMD
+          cat > build/office-v3-stage/README_FIRST.txt <<'TXT'
+          REPORTAPP V3 OFFICE STAGING - DEVELOPMENT ONLY
+          ================================================
+          Exact office-accepted candidate: reportapp-v3-v20261017-000032
+          Pinned SHA256: 1dac15a37682c79f11508aaea80c344a50dfdb08d7dfede7a19b2ed7575cd948
+          
+          Prerequisites: Windows office PC, ArcGIS Pro 3.4 Python 3.11,
+          V2 auto-deploy already disabled (health-only mode).
+          Double-click Run_V3_Staging_No_Cutover.cmd.
+          Upload only latest office_v3_stage_*.json from:
+          %LOCALAPPDATA%\REPORTAPP\Diagnostics
+          
+          The kit verifies the exact reviewed ZIP, runs six mandatory suites
+          against a new immutable snapshot and confirms all three navigation
+          components agree on source-event identity.
+          It does NOT activate V3, edit registry, stop scheduled tasks, touch
+          the current watcher, alter monitored users, or install Bridge 1.0.4.
+          If any check fails, the current REPORTAPP watcher remains in use.
+          TXT
+          sed -i 's/$/\r/' build/office-v3-stage/Run_V3_Staging_No_Cutover.cmd
+          python -m py_compile build/office-v3-stage/maintenance/*.py
+      - name: Upload reviewed staging kit only (NEVER a production deployment)
+        uses: actions/upload-artifact@v4
+        with:
+          name: REPORTAPP_V3_Office_Stage_No_Cutover
+          path: build/office-v3-stage/
+          if-no-files-found: error
+          retention-days: 7
+
+  prepare-watcher-cutover-kit:
+    name: Package guarded office one-minute watcher activation and rollback
+    needs: test-real-candidate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Simulate original task preservation, V3 first cycle and failure rollback
+        run: |
+          python -m unittest discover -s maintenance/tests -p test_v3_office_watcher_cutover.py -v
+          python -m unittest discover -s maintenance/tests -p test_v3_persistent_watcher.py -v
+          python -m unittest discover -s maintenance/tests -p test_v3_prepare_navigation.py -v
+          python -m unittest discover -s maintenance/tests -p test_v3_bridge_audit.py -v
+      - name: Assemble operator-consent office cutover kit
+        shell: bash
+        run: |
+          mkdir -p build/office-watcher/maintenance
+          cp maintenance/v3_office_watcher_cutover.py maintenance/v3_persistent_watcher.py maintenance/v3_core.py maintenance/v3_prepare_navigation.py maintenance/v3_bridge_audit.py build/office-watcher/maintenance/
+          touch build/office-watcher/maintenance/__init__.py
+          cat > build/office-watcher/01_Activate_V3_Watcher.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro Python 3.11 not found. Existing watcher unchanged.
+            pause
+            exit /b 1
+          )
+          cd /d "%~dp0"
+          echo Watcher cutover will ask for explicit approval and watch first scheduled cycle.
+          "%PYTHON%" -m maintenance.v3_office_watcher_cutover --activate
+          if errorlevel 1 (
+            echo Cutover not confirmed. Read generated report; KEEP ZOOM PAUSED.
+          ) else (
+            echo One scheduled V3 watcher cycle confirmed. KEEP ZOOM PAUSED.
+          )
+          pause
+          CMD
+          cat > build/office-watcher/02_Restore_Original_Watcher.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "PYTHON=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+          if not exist "%PYTHON%" (
+            echo ArcGIS Pro Python unavailable. Task not modified.
+            pause
+            exit /b 1
+          )
+          cd /d "%~dp0"
+          "%PYTHON%" -m maintenance.v3_office_watcher_cutover --restore
+          if errorlevel 1 (
+            echo Restoration not confirmed. KEEP ZOOM PAUSED.
+          ) else (
+            echo Original one-minute watcher action restored.
+          )
+          pause
+          CMD
+          cat > build/office-watcher/README_FIRST.txt <<'TXT'
+          REPORTAPP V3 OFFICE WATCHER CUTOVER
+          ===================================
+          This is a supervised one-minute watcher cutover, NOT an unattended
+          application updater. It does not pull Git source or download code.
+
+          Preconditions already prepared in office:
+          - Verified 83-file stage reportapp-v3-v20261017-000032
+          - Its 71 test receipts and source identity are confirmed
+          - V2 auto-deploy held, health task preserved
+          - Original scheduled task XML and reportapp:// registry backup saved
+          - Bridge 1.0.4 checksum verified
+          - reportapp:// handler registered to V3 staged navigation source
+          - Map Zoom PAUSED, REG GIS version sde.DEFAULT
+
+          Save and close other critical operations before activation.
+          Double-click 01_Activate_V3_Watcher.cmd.
+          Type EXACTLY: ACTIVATE REPORTAPP V3 WATCHER
+          Let the window observe a scheduled watcher cycle (up to ~3 minutes).
+          A failed first cycle attempts to restore the original task action.
+          No second manual surveyor scan is triggered by this utility.
+
+          Keep both CMD files and the LOCALAPPDATA private backups.
+          For later rollback, while Zoom is PAUSED, run
+          02_Restore_Original_Watcher.cmd and type EXACTLY:
+          RESTORE ORIGINAL REPORTAPP WATCHER
+
+          Do NOT delete the original repo, SQLite data, backup files or
+          locally saved notifications. Do NOT run old auto-sync.
+          Upload only the newest office_v3_watcher_cutover_*.json from:
+          %LOCALAPPDATA%\REPORTAPP\Diagnostics
+          Do not upload private XML/policy rollback files.
+          TXT
+          sed -i 's/$/\r/' build/office-watcher/*.cmd
+          python -m py_compile build/office-watcher/maintenance/*.py
+      - name: Publish operator-only GitHub workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: REPORTAPP_V3_Office_Guarded_Watcher_Cutover
+          path: build/office-watcher/
+          if-no-files-found: error
+          retention-days: 7
