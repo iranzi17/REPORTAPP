@@ -25,12 +25,14 @@ def main():
         receipt = manager.stage(args.tag, data, sha)
         assert receipt["status"] == "STAGED_TESTED", receipt
         assert all(count > 0 for count in receipt["tests"].values())
+        assert receipt.get("component_checks", {}).get("status") == "COMPATIBLE"
         assert manager.status()["active"] is None
         assert not manager.active.exists()
         print(json.dumps({
             "status": "CI_ISOLATED_STAGING_PASSED",
             "file_isolation": "separate temporary directory",
             "release": args.tag, "suite_counts": receipt["tests"],
+            "component_compatibility": receipt["component_checks"],
             "production_activated": False,
             "REG_source_modified": False,
         }, indent=2))
