@@ -124,6 +124,45 @@ def analyze_task_xml(xml_text):
     return info
 
 
+def get_legacy_maintenance_flags():
+    """Read only V2 policy and task state; never update policy or tasks."""
+    local = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "REPORTAPP" / "Maintenance"
+    policy_file = local / "policy.json"
+    flags = {"policy_present": policy_file.is_file(),
+             "auto_deploy_enabled": None,
+             "github_issue_reporting_enabled": None,
+             "self_maintenance_task_state": "UNKNOWN"}
+    if policy_file.is_file():
+        try:
+            content = json.loads(policy_file.read_text(encoding="utf-8-sig"))
+            if isinstance(content, dict):
+                for field, output in (
+                    ("auto_deploy", "auto_deploy_enabled"),
+                    ("github_issue_reporting", "github_issue_reporting_enabled"),
+                ):
+                    if isinstance(content.get(field), bool):
+                        flags[output] = content[field]
+        except (OSError, ValueError):
+            pass
+    if os.name == "nt":
+        try:
+            script = ("$task=Get-ScheduledTask -TaskName 'REPORTAPP Self Maintenance' "
+                      "-ErrorAction SilentlyContinue;"
+                      "if($task){[string]$task.State}else{'NOT_INSTALLED'}")
+            run = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, encoding="utf-8", timeout=20,
+            )
+            state = run.stdout.strip()
+            if run.returncode == 0 and state in (
+                "Ready", "Running", "Disabled", "NOT_INSTALLED"
+            ):
+                flags["self_maintenance_task_state"] = state
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return flags
+
+
 def analyze_registry(snapshot):
     key = snapshot.get("open_command") or {}
     root = snapshot.get("url_protocol") or {}
@@ -140,7 +179,8 @@ def analyze_registry(snapshot):
 
 
 def capture(directory=None, *, task_xml_supplier=_get_task_xml,
-            registry_supplier=_get_registry):
+            registry_supplier=_get_registry,
+            legacy_flags_supplier=get_legacy_maintenance_flags):
     """Save original configuration only. No live changes and no restore attempt."""
     if directory is None:
         local = Path(os.environ.get("LOCALAPPDATA") or Path.home())
@@ -154,6 +194,7 @@ def capture(directory=None, *, task_xml_supplier=_get_task_xml,
     checks = analyze_task_xml(xml)
     registry = registry_supplier()
     reg_checks = analyze_registry(registry)
+    maintenance_flags = legacy_flags_supplier()
     snapshot = json.dumps(registry, indent=2, sort_keys=True).encode("utf-8")
     directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -169,6 +210,7 @@ def capture(directory=None, *, task_xml_supplier=_get_task_xml,
                 "protocol_sha256": _hash(snapshot),
                 "backed_up_utc": datetime.now(timezone.utc).isoformat(),
                 "task_checks": checks, "handler_checks": reg_checks,
+                "legacy_maintenance_flags": maintenance_flags,
                 "backup_verified": False, "rollback_rehearsed": False,
                 "changes_to_live_task": False, "changes_to_registry": False,
                 "cutover_authorized": False}
@@ -201,6 +243,7 @@ def verify_backup(folder):
         "original_registry_evidence_saved": True,
         "task_checks": task_checks,
         "protocol_checks": reg_checks,
+        "legacy_maintenance_flags": manifest.get("legacy_maintenance_flags"),
         "backup_task_sha256": manifest["task_sha256"],
         "backup_protocol_sha256": manifest["protocol_sha256"],
         "backup_folder": str(folder),
