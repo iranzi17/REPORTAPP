@@ -32,6 +32,10 @@ class NavigationSwitchError(RuntimeError):
         self.code = code
 
 
+def _is_windows():
+    return os.name == "nt"
+
+
 def digest(value):
     return hashlib.sha256(value).hexdigest()
 
@@ -120,7 +124,7 @@ def switch(*, localappdata, python, read=_registry_read, write=_registry_write,
            confirmation=None):
     if confirmation != APPROVE:
         raise NavigationSwitchError("EXPLICIT_APPROVAL_REQUIRED")
-    if os.name != "nt":
+    if not _is_windows():
         raise NavigationSwitchError("WINDOWS_REQUIRED")
     _, v3 = local_paths(localappdata)
     previous, kind = _check_saved_original(v3)
