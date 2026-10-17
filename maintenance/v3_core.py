@@ -35,6 +35,7 @@ REQUIRED_FILES = {
     f"{WORK_REL}/tests/test_notification_inbox.py",
     f"{WORK_REL}/tests/test_alert_navigation.py",
     f"{WORK_REL}/config/report_user_names.json",
+    f"{WORK_REL}/addins/ReportappNavigationBridge/BridgeModule.cs",
 }
 REQUIRED_TESTS = (
     "test_surveyor_notifications.py",
@@ -74,6 +75,7 @@ def safe_path(name):
     if rel.startswith("tests/test_") and rel.endswith(".py") and "/" not in rel[len("tests/"):]:
         return True
     return rel in {
+        "addins/ReportappNavigationBridge/BridgeModule.cs",
         "config/lv_line_quality_rules.json",
         "config/report_user_names.json",
         "config/rwanda_district_sectors.json",
