@@ -58,6 +58,9 @@ class LauncherTests(unittest.TestCase):
     def test_v3_exact_candidate_and_original_config_forwarded(self):
         manager = ManagerFake(self.root, active=launcher.PINNED_TAG,
                               version=self.version)
+        original_manager = launcher.Manager
+        launcher.Manager = lambda *_args, **_kwargs: manager
+        self.addCleanup(lambda: setattr(launcher, "Manager", original_manager))
         seen = []
         def fake_run(command, cwd, env, timeout):
             seen.append((command, cwd, env, timeout))
