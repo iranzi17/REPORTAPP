@@ -285,7 +285,9 @@ def format_details(record):
         f"Notification delivered/logged: {format_time(record['received_utc_ms'])}",
         f"Original creator: {record['created_user'] or 'Not available'}",
         f"Last editor: {record['last_edited_user'] or 'Not available'}",
-        f"Delivery: {record['delivery_status']}",
+        ("Windows toast dispatched (banner not confirmed)"
+         if record["delivery_status"]=="SENT"
+         else f"Delivery: {record['delivery_status']}"),
         f"Review: {record['review_status']}",
         f"Review by: {record['reviewed_by'] or 'Not yet reviewed'}",
         f"Reviewed at: {format_time(record['reviewed_at_utc_ms'])}",
