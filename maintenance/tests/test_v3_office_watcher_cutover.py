@@ -108,6 +108,49 @@ class CutoverTests(unittest.TestCase):
         self.assertTrue(entry["interval_1min"])
         self.assertTrue(entry["ignore_new"])
 
+    def test_powershell_saved_utf8_bytes_with_utf16_declaration(self):
+        # The office backup exports an XML text declaration saying UTF-16,
+        # but PowerShell returns a decoded string, saved as UTF-8 bytes.
+        payload = ('<?xml version="1.0" encoding="UTF-16"?>\r\n' +
+                   xml_for(self.original).split("?>", 1)[1]).encode("utf-8")
+        result = cutover.read_task_action(payload)
+        self.assertEqual(result["exe"], self.original["exe"])
+        self.assertEqual(result["args"], self.original["args"])
+        self.assertTrue(result["interval_1min"])
+        self.assertTrue(result["ignore_new"])
+
+    def test_native_utf16_bom_task_export(self):
+        payload = ('<?xml version="1.0" encoding="UTF-16"?>\n' +
+                   xml_for(self.original).split("?>", 1)[1]).encode("utf-16")
+        self.assertEqual(cutover.read_task_action(payload)["args"],
+                         self.original["args"])
+
+    def test_utf8_bom_task_export(self):
+        payload = ('<?xml version="1.0" encoding="UTF-8"?>\n' +
+                   xml_for(self.original).split("?>", 1)[1]).encode("utf-8-sig")
+        self.assertEqual(cutover.read_task_action(payload)["cwd"],
+                         self.original["cwd"])
+
+    def test_export_str_unicode_with_utf16_declaration(self):
+        payload = '<?xml version="1.0" encoding="UTF-16"?>\n' + xml_for(
+            self.original).split("?>", 1)[1]
+        self.assertTrue(cutover.read_task_action(payload)["ignore_new"])
+
+    def test_bad_task_xml_still_fails_closed(self):
+        with self.assertRaises(cutover.CutoverError) as caught:
+            cutover.read_task_action(b'<?xml version="1.0" encoding="UTF-16"?>\n<Task><Actions>')
+        self.assertEqual(caught.exception.code, "TASK_XML_INVALID")
+
+    def test_xml_wrong_root_is_not_accepted(self):
+        with self.assertRaises(cutover.CutoverError) as caught:
+            cutover.read_task_action('<NotATask><Actions/></NotATask>')
+        self.assertEqual(caught.exception.code, "TASK_XML_UNEXPECTED_ROOT")
+
+    def test_unknown_or_corrupt_xml_encoding_is_rejected(self):
+        with self.assertRaises(cutover.CutoverError) as caught:
+            cutover.read_task_action(b'\xff\x00\xff')
+        self.assertEqual(caught.exception.code, "TASK_XML_ENCODING_INVALID")
+
     def test_refuses_without_explicit_phrase_before_inspection(self):
         with self.assertRaises(cutover.CutoverError) as caught:
             cutover.activate(localappdata=self.local, python="python.exe",
