@@ -149,18 +149,22 @@ try {
         SaveReport 'MAIN_WATCHER_FIRST_CYCLE_OK' 'Live gap alerts now use current checked-out GitHub main.'
     } catch {
         # No REG/SQLite data is ever changed by this task-action restore.
+        $originalError = $_.Exception.Message
         if ($switched) {
             try {
                 $t = ReadyTask
                 if (SameAction $t.Actions[0] $target) {
                     Set-ScheduledTask -TaskName $taskName -Action $previous | Out-Null
                 }
+                if (-not (SameAction (Get-ScheduledTask -TaskName $taskName).Actions[0] $previous)) {
+                    throw 'Exact original Task Scheduler action was not restored.'
+                }
             } catch {
                 SaveReport 'ROLLBACK_REQUIRES_REVIEW' $_.Exception.Message
                 throw
             }
         }
-        SaveReport 'CUTOVER_ABORTED_OR_ROLLED_BACK' $_.Exception.Message
+        SaveReport 'CUTOVER_ABORTED_OR_ROLLED_BACK' $originalError
         throw
     }
 } catch {
