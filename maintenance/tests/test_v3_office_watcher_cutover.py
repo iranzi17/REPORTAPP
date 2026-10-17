@@ -28,9 +28,10 @@ class FakeTask:
         self.operations = []
         self.on_new = on_new
         self.fail_switch = False
+        self.state_sequence = []
 
     def state(self):
-        return "Ready"
+        return self.state_sequence.pop(0) if self.state_sequence else "Ready"
 
     def definition(self):
         return xml_for(self.action)
@@ -94,12 +95,12 @@ class CutoverTests(unittest.TestCase):
             "config": self.config, "legacy_src": self.src,
         }
 
-    def approved(self, wait_seconds=12, sleeping=lambda _: None):
+    def approved(self, wait_seconds=12, sleeping=lambda _: None, **kwargs):
         with patch.object(cutover, "check_prerequisites", return_value=self.stage):
             return cutover.activate(
                 localappdata=self.local, python="C:/ArcGIS/python.exe",
                 kit_root=self.kit, approval=cutover.CONSENT,
-                wait_seconds=wait_seconds, sleeping=sleeping)
+                wait_seconds=wait_seconds, sleeping=sleeping, **kwargs)
 
     def test_read_xml_preserves_original_trigger_and_overlap(self):
         entry = cutover.read_task_action(xml_for(self.original))
@@ -185,11 +186,64 @@ class CutoverTests(unittest.TestCase):
                           side_effect=lambda: calls.pop(0) if calls else 1500):
             result = self.approved(wait_seconds=50)
         self.assertEqual(result["watcher_status"], "CUTOVER_FAILED_SAFE")
-        self.assertEqual(result["rollback"], "TASK_ACTION_RESTORED")
+        self.assertEqual(result["rollback"], "ORIGINAL_TASK_RESTORED")
         self.assertEqual(len(self.task.operations), 2)
         self.assertEqual(self.task.action, self.original)
         self.assertFalse(self.manager.active.exists())
         self.assertEqual(self.manager.policy.read_bytes(), self.previous_policy)
+
+    def test_running_watcher_finishes_naturally_before_task_action_switch(self):
+        # The office failure TASK_BECAME_BUSY happened between preflight and
+        # Set-ScheduledTask. Running -> Running -> Ready is expected in a
+        # one-minute monitoring task and must not interrupt the old watcher.
+        self.task.state_sequence = ["Running", "Running", "Ready"]
+        self.task.on_new = lambda action: atomic_json(
+            self.v3 / "launcher_latest.json", {
+                "started_epoch_seconds": 999999999999,
+                "mode": "V3_VERIFIED", "status": "OK", "exit_code": 0})
+        waits = []
+        result = self.approved(sleeping=waits.append)
+        self.assertEqual(result["watcher_status"], "V3_FIRST_SCHEDULED_CYCLE_OK")
+        self.assertEqual(result["busy_window_polls"], 3)
+        self.assertEqual(len(waits), 2)
+        self.assertEqual(len(self.task.operations), 1)
+        self.assertIn("run_v3_once.py", self.task.action["args"])
+
+    def test_running_watcher_timeout_refuses_task_change_and_restores_pointer(self):
+        # Controlled fake monotonic clock makes timeout deterministic without
+        # sleeping 145 seconds. Original task must remain entirely unchanged.
+        self.task.state_sequence = ["Running"] * 8
+        ticks = iter([0, 4, 8, 12, 16])
+        result = self.approved(
+            ready_wait_seconds=10, ready_clock=lambda: next(ticks),
+            sleeping=lambda _: None)
+        self.assertEqual(result["error_code"], "WATCHER_BUSY_TIMEOUT_NO_TASK_CHANGE")
+        self.assertEqual(result["watcher_status"], "CUTOVER_FAILED_SAFE")
+        self.assertEqual(result["rollback"], "ORIGINAL_TASK_CONFIRMED_NO_TASK_CHANGE")
+        self.assertFalse(result["task_change_attempted"])
+        self.assertTrue(result["original_task_action_confirmed"])
+        self.assertTrue(result["v3_pointer_inactive"])
+        self.assertTrue(result["v3_policy_restored"])
+        self.assertEqual(self.task.operations, [])
+        self.assertEqual(self.task.action, self.original)
+        self.assertFalse(self.manager.active.exists())
+        self.assertEqual(self.manager.policy.read_bytes(), self.previous_policy)
+
+    def test_disabled_task_never_triggered_or_reconfigured(self):
+        self.task.state_sequence = ["Disabled"]
+        result = self.approved()
+        self.assertEqual(result["watcher_status"], "CUTOVER_FAILED_SAFE")
+        self.assertEqual(result["error_code"], "WATCHER_TASK_DISABLED_OR_UNAVAILABLE")
+        self.assertEqual(self.task.operations, [])
+        self.assertFalse(self.manager.active.exists())
+
+    def test_busy_wait_function_uses_ready_without_action_change(self):
+        self.task.state_sequence = ["Running", "Ready"]
+        checks = cutover.wait_for_safe_task_window(
+            self.task, max_wait_seconds=20, sleeping=lambda _: None)
+        self.assertEqual(checks["status"], "READY")
+        self.assertEqual(checks["polls"], 2)
+        self.assertEqual(self.task.operations, [])
 
     def test_partial_set_action_failure_restores_original(self):
         self.task.fail_switch = True
