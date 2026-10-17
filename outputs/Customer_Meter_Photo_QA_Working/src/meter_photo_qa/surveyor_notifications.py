@@ -395,12 +395,13 @@ def deliver(alert,config):
         # separate required component; without it the request stays queued.
         from .alert_navigation import is_registered
         from .source_event_navigation import safe_verified_source_uri
+        from .desktop_toast_channel import DESKTOP_APP_ID
         # Do not let a stale FeatureServer response or an OBJECTID-only
         # link open a different asset. Re-fetch exact GlobalID on the
         # sde.DEFAULT layer before offering a clickable action.
         launch=(safe_verified_source_uri(alert,config) if is_registered() else "")
         popup=Notification(
-            app_id="REPORTAPP Quality Alerts",title=subject,
+            app_id=DESKTOP_APP_ID,title=subject,
             msg=message[:400],duration="long",launch=launch,
         )
         if launch:
