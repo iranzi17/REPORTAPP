@@ -11,8 +11,16 @@ Staged in REPORTAPP:
 - src/meter_photo_qa/exact_feature_lookup.py
 - tests/test_exact_feature_lookup.py
 
-These are NEW, ISOLATED, READ-ONLY files. NOT wired into live monitoring,
-navigation, or KMZ processing yet. Do not treat this branch as the office fix.
+The exact feature lookup remains read-only. It is now connected to the
+desktop **QA-gap** and **clean-surveyor-activity** toast link builders via
+`source_event_navigation.py`. A click action is produced ONLY after a
+second independent service query confirms GlobalID, OBJECTID, source editor,
+source event timestamp and `sde.DEFAULT`; there is no latest-by-creator
+fallback. Service errors preserve the QA popup **without** a clickable
+zoom action. The Windows ArcGIS Pro Bridge remains authoritative at click
+time and repeats source checks before selection. **These changes are in
+draft PR #17 only; the installed office V3 does not yet contain them.**
+KMZ processing remains separate in PR #12.
 
 ## Why not copy the whole old application?
 Substations Data Assistant searches recently CREATED items sorted by
@@ -69,3 +77,51 @@ The staged helper uses a bounded (maximum two) read-only ArcGIS
 FeatureLayer.query by validated GlobalID and verifies exact OBJECTID and
 optional event time/editor. It has no portal credentials and performs no
 feature editing, map selection, or zoom.
+
+
+## Reviewed updated Substations v2.3 rather than old main
+
+Reviewed these current Kotlin implementations on branch
+`development/v2.3-field-assistant-mvp`:
+- `FieldAssistantRecentCreationResolver.kt` refuses ambiguous recent
+  creation candidates and a full 20-item cap.
+- `FieldAssistantPolicy.kt` scopes explicit "just created" intent to
+  a 60-second window and verifies site/equipment class.
+- `FieldAssistantIdentityStore.kt` prevents same-day GlobalID identity
+  repointing.
+
+REPORTAPP **must not** copy creator-scoped 60-second discovery: it monitors
+older edited network assets, not only newly created devices. The adopted
+principles are exact GlobalID re-fetch, reject duplicates, match OBJECTID
+and latest CREATE/EDIT actor/timestamp, then leave both map selection and
+extent unchanged on mismatch.
+
+## Source Event Time: implemented changes in PR #17
+
+1. `surveyor_notifications.deliver`: only add a desktop click action after
+   `safe_verified_source_uri` successfully refetches the exact notified
+   feature on `sde.DEFAULT`. A mismatch leaves the toast readable but
+   not clickable. The original event UTC milliseconds are not replaced
+   by latest-by-creator or local toast arrival time.
+2. `surveyor_activity.deliver_clean_activity`: clean notifications
+   no longer use unverified `reportapp://zoom/<asset>/<OBJECTID>`;
+   they require the same exact GlobalID / timestamp / editor / version
+   as QA gaps.
+3. Explicit GUI TEST notifications now use `mode=manual`; they are not
+   falsely presented as validated surveyor submissions.
+4. New offline regression suites cover two poles from the same surveyor,
+   freshly edited older pole, delayed or stale edits, wrong GlobalID,
+   different editor, wrong version, missing/ambiguous service results,
+   and ArcGIS errors. GitHub Actions test on Windows and Linux.
+5. The existing 1.0.4 compiled Bridge still checks map source identity at
+   click time, so the re-fetch on toast does NOT authorize any automatic
+   zoom. Map Zoom pause remains authoritative.
+
+**Not verified**: actual office ArcGIS Pro click-through after these new
+Python files are installed. No production merge, task change, auto-update,
+portal credential change, or KMZ mixing is permitted on this PR.
+
+**Deployment caution:** This draft PR branches from main, whereas office
+V3 is already running a *separately pinned* 83-file snapshot from PR #16.
+Treat these as future versioned source changes. Never overwrite the live
+immutable snapshot or Git checkout with ad-hoc single-file edits.
