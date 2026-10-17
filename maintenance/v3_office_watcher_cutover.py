@@ -292,6 +292,11 @@ def activate(*, localappdata, python, kit_root, approval=None, task=None,
                     current.get("mode") == "V3_VERIFIED" and
                     current.get("status") == "OK" and
                     current.get("exit_code") == 0):
+                atomic_json(private / "transaction.json", {
+                    "status": "VERIFIED_SWITCHED", "release": TAG,
+                    "policy_before_sha256": sha(old_policy),
+                    "task_before_sha256": sha((private / "original_task_before.xml").read_bytes()),
+                    "verified_epoch_seconds": time.time()})
                 report.update({"watcher_status": "V3_FIRST_SCHEDULED_CYCLE_OK",
                                "rollback": "NOT_NEEDED",
                                "config": "ORIGINAL_UNCHANGED",
@@ -332,26 +337,110 @@ def activate(*, localappdata, python, kit_root, approval=None, task=None,
         return report
 
 
+def restore_legacy(*, localappdata, python, confirmation=None, task=None):
+    """Restore original one-minute watcher action after a successful cutover."""
+    if confirmation != "RESTORE ORIGINAL REPORTAPP WATCHER":
+        raise CutoverError("EXPLICIT_ROLLBACK_APPROVAL_REQUIRED")
+    localappdata = Path(localappdata)
+    v3 = localappdata / "REPORTAPP" / "Maintenance" / "v3"
+    original, config, legacy_src = original_configuration(
+        v3 / "cutover_backups" / BACKUP_ID)
+    if not (localappdata / "REPORTAPP" / "Navigation" / "navigation-paused.flag").is_file():
+        raise CutoverError("MAP_ZOOM_NOT_PAUSED")
+    task = task or WindowsTask()
+    if task.state() != "Ready":
+        raise CutoverError("WATCHER_TASK_MUST_BE_READY")
+    current = read_task_action(task.definition())
+    expected = new_task_action(original, v3 / "run_v3_once.py", config, legacy_src)
+    if (current["exe"], current["args"], current["cwd"]) == (
+            original["exe"], original["args"], original["cwd"]):
+        return {"watcher_status": "ORIGINAL_WATCHER_ALREADY_ACTIVE",
+                "rollback": "NOT_NEEDED"}
+    if (current["exe"], current["args"], current["cwd"]) != (
+            expected["exe"], expected["args"], expected["cwd"]):
+        raise CutoverError("WATCHER_ACTION_NOT_EXPECTED")
+    if not current["interval_1min"] or not current["ignore_new"]:
+        raise CutoverError("SCHEDULE_DRIFTED")
+    manager = Manager(v3, python=python)
+    if manager.journal.exists():
+        raise CutoverError("V3_TRANSACTION_INCOMPLETE")
+    active = read_json(manager.active, {})
+    if active.get("tag") != TAG:
+        raise CutoverError("CURRENT_ACTIVE_RELEASE_NOT_PINNED")
+    txfolder = v3 / "cutover_transactions"
+    valid = []
+    for folder in txfolder.iterdir() if txfolder.exists() else []:
+        policy_file = folder / "policy_before.json"
+        txfile = folder / "transaction.json"
+        if not policy_file.is_file() or not txfile.is_file():
+            continue
+        tx = read_json(txfile, {})
+        policybytes = policy_file.read_bytes()
+        if (tx.get("release") == TAG and
+                tx.get("policy_before_sha256") == sha(policybytes)):
+            valid.append((folder.name, policybytes))
+    if len(valid) != 1:
+        # Require exact backup identity instead of guessing between
+        # multiple previous cutover attempts.
+        raise CutoverError("CUTOVER_POLICY_BACKUP_AMBIGUOUS")
+    old_policy = valid[0][1]
+    task.set_action(original)
+    restored = read_task_action(task.definition())
+    if (restored["exe"], restored["args"], restored["cwd"]) != (
+            original["exe"], original["args"], original["cwd"]):
+        raise CutoverError("ORIGINAL_TASK_RESTORE_NOT_VERIFIED")
+    # Exact legacy task action restored before V3 pointer is retired.
+    manager.active.unlink(missing_ok=True)
+    if manager.active.exists():
+        raise CutoverError("V3_POINTER_RETIRE_FAILED")
+    tmp = manager.policy.with_name(manager.policy.name + "." + uuid.uuid4().hex + ".tmp")
+    tmp.write_bytes(old_policy)
+    os.replace(tmp, manager.policy)
+    atomic_json(v3 / "rollback_latest.json", {
+        "status": "ORIGINAL_TASK_RESTORED",
+        "tag": TAG,
+        "at_epoch_seconds": time.time(),
+        "map_zoom_paused": True,
+        "URI_handler_unchanged": True,
+    })
+    return {"watcher_status": "ORIGINAL_WATCHER_RESTORED",
+            "rollback": "ORIGINAL_TASK_ACTION_AND_V3_POINTER_RESTORED",
+            "v2_auto_deploy_disabled": True, "map_zoom_paused": True,
+            "bridge_unchanged": True, "registry_unchanged": True}
+
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--activate", action="store_true")
+    operations = parser.add_mutually_exclusive_group(required=True)
+    operations.add_argument("--activate", action="store_true")
+    operations.add_argument("--restore", action="store_true")
     args = parser.parse_args()
     local = Path(os.environ.get("LOCALAPPDATA") or Path.home())
     report = {"watcher_status": "NOT_STARTED"}
-    if not args.activate or not sys.stdin.isatty():
-        report = {"watcher_status": "FAILED_SAFE", "error_code": "EXPLICIT_INTERACTIVE_APPROVAL_REQUIRED"}
+    if not sys.stdin.isatty():
+        report = {"watcher_status": "FAILED_SAFE",
+                  "error_code": "EXPLICIT_INTERACTIVE_APPROVAL_REQUIRED"}
     else:
-        print("Task switch: one-minute REPORTAPP Surveyor Quality Alerts only.")
-        print("V2 auto-deploy stays OFF, Map Zoom stays PAUSED.")
-        print("The script watches for the first successful scheduled V3 cycle;")
-        print("it restores the old task action automatically if verification fails.")
-        print("Confirm ArcGIS Pro was restarted with Bridge 1.0.4.")
-        answer = input("To proceed type exactly " + CONSENT + "\n> ")
+        phrase = (CONSENT if args.activate
+                  else "RESTORE ORIGINAL REPORTAPP WATCHER")
+        if args.activate:
+            print("Switch only the existing one-minute watcher to V3.")
+            print("Map Zoom stays PAUSED; V2 auto-deploy stays OFF.")
+            print("Wait for the first successful scheduled V3 cycle.")
+        else:
+            print("Restore the exact original watcher action from your verified backup.")
+            print("Bridge and Windows navigation handler will not change.")
+        answer = input("Type exactly " + phrase + "\\n> ")
         try:
-            report = activate(localappdata=local, python=sys.executable,
-                              kit_root=Path(__file__).resolve().parents[1],
-                              approval=answer)
+            if args.activate:
+                report = activate(localappdata=local, python=sys.executable,
+                                  kit_root=Path(__file__).resolve().parents[1],
+                                  approval=answer)
+            else:
+                report = restore_legacy(localappdata=local, python=sys.executable,
+                                        confirmation=answer)
         except Exception as exc:
             report = {"watcher_status": "FAILED_SAFE",
                       "error_code": getattr(exc, "code", type(exc).__name__)}
@@ -359,7 +448,9 @@ def main():
     print("Watcher cutover status:", report["watcher_status"])
     print("Rollback:", report.get("rollback", "NO_TASK_CHANGE"))
     print("Shareable report:", filename)
-    return 0 if report["watcher_status"] == "V3_FIRST_SCHEDULED_CYCLE_OK" else 2
+    return 0 if report["watcher_status"] in (
+        "V3_FIRST_SCHEDULED_CYCLE_OK", "ORIGINAL_WATCHER_RESTORED",
+        "ORIGINAL_WATCHER_ALREADY_ACTIVE") else 2
 
 
 if __name__ == "__main__":
