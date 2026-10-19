@@ -720,10 +720,11 @@ def launch_gui(config_path):
         try:
             result=queue_find_asset(asset_choice.get(),find_oid.get())
             request=result["request"]
-            find_status.set(
-                f"Queued {asset_choice.get()} OBJECTID {request['objectid']}; "
-                "ArcGIS Pro will zoom if the record is accessible."
-            )
+            track_zoom_request({
+                "alert_id":"manual", "asset":request["asset"],
+                "objectid":request["objectid"],
+                "request_file":result["queue_file"],
+            })
         except Exception as exc:
             find_status.set("Unable to queue navigation. Check asset and OBJECTID.")
             messagebox.showerror("Find Asset",str(exc),parent=root)
@@ -1324,11 +1325,7 @@ def launch_gui(config_path):
         if selected_id[0] is None:
             return
         try:
-            result=queue_inbox_row_zoom(config,selected_id[0])
-            find_status.set(
-                f"Inbox alert {result['alert_id']}: OBJECTID {result['objectid']} "
-                "queued. ArcGIS Pro must verify the current source before selecting."
-            )
+            track_zoom_request(queue_inbox_row_zoom(config,selected_id[0]))
         except Exception as exc:
             messagebox.showerror("REPORTAPP navigation",str(exc),parent=root)
 
@@ -1368,8 +1365,8 @@ def launch_gui(config_path):
         if recent_request[0]!=path or not root.winfo_exists():
             return
         receipt=navigation_receipt(path)
-        label=(f"Alert {result['alert_id']} — {result['asset'].upper()} "
-               f"OBJECTID {result['objectid']}: ")
+        label=(f"{'Find asset' if result['alert_id']=='manual' else 'Alert '+str(result['alert_id'])}"
+               f" — {result['asset'].upper()} OBJECTID {result['objectid']}: ")
         if receipt["status"]=="PENDING" and attempt<17:
             root.after(1000,lambda:show_bridge_result(result,attempt+1))
             return
@@ -1394,8 +1391,10 @@ def launch_gui(config_path):
 
     def track_zoom_request(result):
         recent_request[0]=result["request_file"]
+        title=("Find asset" if result["alert_id"]=="manual" else
+               f"Alert {result['alert_id']}")
         find_status.set(
-            f"Alert {result['alert_id']} — {result['asset'].upper()} "
+            f"{title} — {result['asset'].upper()} "
             f"OBJECTID {result['objectid']} queued; awaiting ArcGIS Pro verification."
         )
         root.after(1000,lambda:show_bridge_result(result))
@@ -1533,11 +1532,7 @@ def launch_gui(config_path):
         if row_id is None:
             return
         try:
-            queued=queue_inbox_row_zoom(config,row_id)
-            find_status.set(
-                f"New gap alert {queued['alert_id']}, OBJECTID "
-                f"{queued['objectid']} queued. Await ArcGIS Pro verification."
-            )
+            track_zoom_request(queue_inbox_row_zoom(config,row_id))
             dismiss_gap_popup()
         except Exception as exc:
             messagebox.showerror("Popup Zoom",str(exc),parent=active_popup[0] or root)
