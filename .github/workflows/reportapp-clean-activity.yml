@@ -9,6 +9,7 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_missed_gap_toast_recovery.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_inbox_row_zoom_fallback.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/desktop_toast_channel.py'
       - 'maintenance/switch_gap_alerts_to_main.ps1'
       - '.github/workflows/reportapp-clean-activity.yml'
@@ -20,6 +21,7 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/notification_inbox.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_activity.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_missed_gap_toast_recovery.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_inbox_row_zoom_fallback.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/desktop_toast_channel.py'
       - 'maintenance/switch_gap_alerts_to_main.ps1'
       - '.github/workflows/reportapp-clean-activity.yml'
@@ -54,6 +56,7 @@ jobs:
         run: |
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_notifications.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_notification_inbox.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_inbox_row_zoom_fallback.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_missed_gap_toast_recovery.py -v
 
   windows-operator-script-safety:
