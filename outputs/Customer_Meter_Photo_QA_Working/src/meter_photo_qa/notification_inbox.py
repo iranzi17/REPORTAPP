@@ -881,6 +881,7 @@ def launch_gui(config_path):
     # The manual gap-checker never opens the scheduled watcher, writes review
     # history or sends alerts. The user explicitly presses this button.
     manual_window=[None]
+    manual_scan_active=[False]
 
     def open_manual_gap_checker():
         if manual_window[0] is not None and manual_window[0].winfo_exists():
@@ -1033,6 +1034,13 @@ def launch_gui(config_path):
         def run_check():
             if scanning[0]:
                 return
+            if manual_scan_active[0]:
+                scan_status.set(
+                    "A previous manual scan is still running. "
+                    "Wait until it finishes; overlapping REG requests are blocked."
+                )
+                return
+            manual_scan_active[0]=True
             scanning[0]=True
             check_button.configure(state="disabled")
             period_box.configure(state="disabled")
@@ -1053,6 +1061,10 @@ def launch_gui(config_path):
                     inbox_results.put(("success",outcome))
                 except Exception as exc:
                     inbox_results.put(("error",f"{type(exc).__name__}: {exc}"))
+                finally:
+                    # A closed dialog cannot leave behind a permanently busy
+                    # guard. This changes local memory only, never REG records.
+                    manual_scan_active[0]=False
             threading.Thread(target=worker,daemon=True).start()
             win.after(200,poll)
 
