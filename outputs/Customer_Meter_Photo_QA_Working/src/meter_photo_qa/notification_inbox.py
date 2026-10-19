@@ -665,6 +665,8 @@ def launch_gui(config_path):
     import tkinter as tk
     from tkinter import ttk, messagebox
     from tkinter.scrolledtext import ScrolledText
+    import queue
+    import threading
 
     config=Path(config_path).expanduser().resolve()
     root=tk.Tk()
@@ -695,6 +697,17 @@ def launch_gui(config_path):
     ttk.Label(controls,text="Search username / OBJECTID / GlobalID").pack(side="left")
     search=ttk.Entry(controls,textvariable=search_value,width=35)
     search.pack(side="left",padx=(8,10))
+
+    manual_bar=ttk.Frame(root,padding=(12,1,12,5))
+    manual_bar.pack(fill="x")
+    ttk.Button(
+        manual_bar,text="Check Surveyor Gaps Now",
+        command=lambda:open_manual_gap_checker(),
+    ).pack(side="left")
+    ttk.Label(
+        manual_bar,
+        text="On demand only | no automatic alerts | recent changes, not a full historical audit",
+    ).pack(side="left",padx=(12,0))
 
     # Independent from the alert-only search. Do not create an alert for
     # a clean asset; the bridge can open any accessible source OBJECTID.
@@ -863,6 +876,206 @@ def launch_gui(config_path):
             refresh()
         except Exception as exc:
             messagebox.showerror("Review update failed",str(exc))
+
+
+    # The manual gap-checker never opens the scheduled watcher, writes review
+    # history or sends alerts. The user explicitly presses this button.
+    manual_window=[None]
+    manual_scan_active=[False]
+
+    def open_manual_gap_checker():
+        if manual_window[0] is not None and manual_window[0].winfo_exists():
+            manual_window[0].lift()
+            return
+        from .surveyor_notifications import manual_gap_scan, MANUAL_SCAN_HOURS
+        win=tk.Toplevel(root)
+        manual_window[0]=win
+        win.title("REPORTAPP | On-demand Surveyor Gap Check")
+        win.geometry("1000x650")
+        win.minsize(750,480)
+        top=ttk.Frame(win,padding=12)
+        top.pack(fill="x")
+        ttk.Label(top,text="Surveyor gaps — manual snapshot",
+                  font=("Segoe UI",14,"bold")).pack(anchor="w")
+        ttk.Label(
+            top,text="Only configured surveyors; read-only REG queries when you click. "
+                     "No popups, monitoring task changes or Inbox history updates.",
+            wraplength=940,
+        ).pack(anchor="w",pady=(3,8))
+        bar=ttk.Frame(top)
+        bar.pack(fill="x")
+        ttk.Label(bar,text="Recent edits in the last").pack(side="left")
+        period=tk.StringVar(value="6")
+        period_box=ttk.Combobox(
+            bar,textvariable=period,values=("1","6","24"),
+            state="readonly",width=5,
+        )
+        period_box.pack(side="left",padx=7)
+        ttk.Label(bar,text="hours").pack(side="left")
+        scan_status=tk.StringVar(value="Not scanned.")
+        ttk.Label(top,textvariable=scan_status,wraplength=930).pack(
+            anchor="w",pady=(9,0),
+        )
+        columns=("Surveyor","Asset","OBJECTID","Gaps","Last edited")
+        grid_frame=ttk.Frame(win,padding=(12,0,12,0))
+        grid_frame.pack(fill="both",expand=True)
+        results=ttk.Treeview(
+            grid_frame,columns=columns,show="headings",height=10,
+            selectmode="browse",
+        )
+        for col,width in zip(columns,(170,110,115,65,185)):
+            results.heading(col,text=col)
+            results.column(col,width=width,stretch=col=="Surveyor")
+        scroller=ttk.Scrollbar(grid_frame,orient="vertical",command=results.yview)
+        results.configure(yscrollcommand=scroller.set)
+        results.pack(side="left",fill="both",expand=True)
+        scroller.pack(side="right",fill="y")
+        ttk.Label(win,text="Selected asset's detected gaps:",
+                  font=("Segoe UI",10,"bold")).pack(anchor="w",padx=12,pady=(7,0))
+        gap_details=ScrolledText(win,height=7,wrap="word",state="disabled")
+        gap_details.pack(fill="both",expand=True,padx=12,pady=(5,8))
+        actions=ttk.Frame(win,padding=(12,0,12,12))
+        actions.pack(fill="x")
+        current_rows=[[]]
+        scanning=[False]
+        inbox_results=queue.Queue()
+
+        def update_details(_event=None):
+            items=results.selection()
+            if not items:
+                return
+            entry=current_rows[0][int(items[0])]
+            gap_details.configure(state="normal")
+            gap_details.delete("1.0","end")
+            gap_details.insert(
+                "1.0",
+                f"Surveyor: {entry['username']}\n"
+                f"Asset: {entry['asset'].upper()} | OBJECTID: {entry['objectid']}\n"
+                f"Current GlobalID at check: {entry['globalid']}\n"
+                f"Latest source edit: {format_time(entry['event_time_utc_ms'])}\n\n"+
+                "\n".join(f"{i}. {issue}" for i,issue in enumerate(entry["issues"],1))+
+                "\n\nThis is a recent snapshot, not a verified historical notification.",
+            )
+            gap_details.configure(state="disabled")
+
+        def zoom_manual_selection(_event=None):
+            items=results.selection()
+            if not items:
+                messagebox.showinfo("Select an asset","Choose a gap row first.",parent=win)
+                return
+            entry=current_rows[0][int(items[0])]
+            asset_labels={"line":"LV Line","pole":"LV Pole",
+                          "transformer":"Transformer"}
+            try:
+                queued=queue_find_asset(
+                    asset_labels[entry["asset"]],entry["objectid"]
+                )
+                track_zoom_request({
+                    "alert_id":"manual","asset":entry["asset"],
+                    "objectid":entry["objectid"],
+                    "mode":"FIND_CURRENT_ASSET_NOT_HISTORICAL_EVENT",
+                    "request_file":queued["queue_file"],
+                })
+                scan_status.set(
+                    f"Zoom requested: {entry['asset'].upper()} "
+                    f"OBJECTID {entry['objectid']}. Check the main Inbox Bridge status."
+                )
+            except Exception as exc:
+                messagebox.showerror("Map navigation",str(exc),parent=win)
+
+        results.bind("<<TreeviewSelect>>",update_details)
+        results.bind("<Double-1>",zoom_manual_selection)
+        ttk.Button(
+            actions,text="Zoom selected asset",command=zoom_manual_selection
+        ).pack(side="left")
+        check_button=ttk.Button(actions,text="Run gap check")
+        check_button.pack(side="right")
+
+        def finish_check(result):
+            current_rows[0]=result["gaps"]
+            for item in results.get_children():
+                results.delete(item)
+            for index,entry in enumerate(current_rows[0]):
+                results.insert("", "end",iid=str(index),values=(
+                    entry["username"],entry["asset"].upper(),entry["objectid"],
+                    len(entry["issues"]),format_time(entry["event_time_utc_ms"]),
+                ))
+            scan_status.set(
+                f"Complete | {result['lookback_hours']}h | "
+                f"{result['surveyors_checked']} surveyors | "
+                f"Records checked: {result['records_scanned']} | "
+                f"{result['gap_assets']} assets with gaps | "
+                "No Windows alerts or Inbox writes."
+            )
+            if current_rows[0]:
+                results.selection_set("0")
+                update_details()
+
+        def poll():
+            if not win.winfo_exists():
+                return
+            try:
+                status,payload=inbox_results.get_nowait()
+            except queue.Empty:
+                if scanning[0]:
+                    win.after(200,poll)
+                return
+            scanning[0]=False
+            check_button.configure(state="normal")
+            period_box.configure(state="readonly")
+            if status=="error":
+                scan_status.set(
+                    "Scan incomplete — no gap results shown. "
+                    +str(payload)
+                )
+            else:
+                finish_check(payload)
+
+        def run_check():
+            if scanning[0]:
+                return
+            if manual_scan_active[0]:
+                scan_status.set(
+                    "A previous manual scan is still running. "
+                    "Wait until it finishes; overlapping REG requests are blocked."
+                )
+                return
+            manual_scan_active[0]=True
+            scanning[0]=True
+            check_button.configure(state="disabled")
+            period_box.configure(state="disabled")
+            current_rows[0]=[]
+            for item in results.get_children():
+                results.delete(item)
+            gap_details.configure(state="normal")
+            gap_details.delete("1.0","end")
+            gap_details.configure(state="disabled")
+            hours=int(period.get())
+            scan_status.set(
+                f"Checking configured surveyors' recent {hours}h edits... "
+                "This is an on-demand server query, not continuous monitoring."
+            )
+            def worker():
+                try:
+                    outcome=manual_gap_scan(config,hours=hours)
+                    inbox_results.put(("success",outcome))
+                except Exception as exc:
+                    inbox_results.put(("error",f"{type(exc).__name__}: {exc}"))
+                finally:
+                    # A closed dialog cannot leave behind a permanently busy
+                    # guard. This changes local memory only, never REG records.
+                    manual_scan_active[0]=False
+            threading.Thread(target=worker,daemon=True).start()
+            win.after(200,poll)
+
+        check_button.configure(command=run_check)
+        def close_window():
+            win.destroy()
+            manual_window[0]=None
+
+        win.protocol("WM_DELETE_WINDOW",close_window)
+        # One click on Check Surveyor Gaps Now starts one finite manual scan.
+        run_check()
 
     def manage_surveyors():
         """Local add/remove actions preserve existing selected-account timing."""

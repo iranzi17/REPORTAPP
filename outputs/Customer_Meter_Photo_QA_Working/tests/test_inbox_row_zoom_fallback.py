@@ -287,6 +287,20 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
         overlay.layout()
         self.assertEqual([iid for iid,_ in created],["1"])
 
+    def test_on_demand_gap_button_does_not_start_automatic_watcher(self):
+        source=(Path(__file__).resolve().parents[1]/
+                "src/meter_photo_qa/notification_inbox.py").read_text(encoding="utf-8")
+        self.assertIn('text="Check Surveyor Gaps Now"',source)
+        self.assertIn('from .surveyor_notifications import manual_gap_scan',source)
+        self.assertIn('manual_gap_scan(config,hours=hours)',source)
+        self.assertIn('threading.Thread(target=worker,daemon=True).start()',source)
+        self.assertIn('max_per_asset=MANUAL_SCAN_MAX_PER_ASSET',(
+            Path(__file__).resolve().parents[1]/
+            "src/meter_photo_qa/surveyor_notifications.py").read_text(encoding="utf-8"))
+        self.assertIn('check_button.configure(command=run_check)',source)
+        self.assertIn('run_check()',source)
+        self.assertNotIn('Register-ScheduledTask',source)
+
     def test_current_asset_button_is_one_click_and_never_asks_confirmation(self):
         """Direct queue, no modal confirmation; historical verification remains optional."""
         source=(Path(__file__).resolve().parents[1]/

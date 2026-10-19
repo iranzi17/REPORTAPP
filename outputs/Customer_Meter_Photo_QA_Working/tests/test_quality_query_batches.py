@@ -68,6 +68,30 @@ class QualityBatchTests(unittest.TestCase):
         self.assertEqual([len(q["object_ids"].split(",")) for q in attrs], [75, 75, 55])
         self.assertTrue(all(q.get("return_all_records") is False for q in attrs))
 
+    def test_manual_safety_cap_stops_before_attribute_queries(self):
+        service=FakeLineService(make_rows(15),area_ids={"all":list(range(1,16))})
+        with self.assertRaisesRegex(RuntimeError,"manual scan safety cap"):
+            query_attributes_in_batches(
+                service,"1=1","sde.DEFAULT",["OBJECTID","GLOBALID"],
+                [("Recent surveyor data","all")],
+                lambda layer,**kw:layer.query(**{k:v for k,v in kw.items() if k!="attempts"}),
+                max_matching_ids=10,query_attempts=1,
+            )
+        self.assertEqual(len(service.queries),1)
+        self.assertTrue(service.queries[0]["return_ids_only"])
+        self.assertFalse(any("object_ids" in q for q in service.queries))
+
+    def test_manual_cap_allows_small_eligible_snapshot(self):
+        service=FakeLineService(make_rows(3),area_ids={"all":[1,2,3]})
+        rows=query_attributes_in_batches(
+            service,"1=1","sde.DEFAULT",["OBJECTID","GLOBALID"],
+            [("Recent surveyor data","all")],
+            lambda layer,**kw:layer.query(**{k:v for k,v in kw.items() if k!="attempts"}),
+            max_matching_ids=3,query_attempts=1,
+        )
+        self.assertEqual(len(rows),3)
+        self.assertEqual(sum("object_ids" in q for q in service.queries),1)
+
     def test_no_matching_rows_returns_empty_without_attribute_request(self):
         layer = FakeLineService(make_rows(1), area_ids={"A": []})
         self.assertEqual(query_batch(layer, [("A", "A")]), [])

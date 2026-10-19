@@ -44,6 +44,72 @@ CONFIG={"enabled":True,"usernames":["ninamenye9683"],"assets":["pole"],
 
 
 class NotificationTests(unittest.TestCase):
+    def test_manual_gap_query_never_sends_toasts_or_updates_saved_history(self):
+        from meter_photo_qa.surveyor_notifications import manual_gap_scan
+        now_ms=1792404000000
+        recent=now_ms-20*60*1000
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg=Path(tmp)/"monitor_config.json"
+            setup=dict(CONFIG,version="sde.DEFAULT",enabled_at_utc_ms=1234)
+            cfg.write_text(json.dumps(setup),encoding="utf-8")
+            sqlite=cfg.with_suffix(".sqlite3")
+            sqlite.write_bytes(b"KEEP THIS DATABASE")
+            recorded=[]
+            def collector(conf,**kwargs):
+                recorded.append((conf,kwargs))
+                self.assertEqual(kwargs["lookback_hours"],6)
+                self.assertEqual(kwargs["query_margin_hours"],1)
+                self.assertEqual(kwargs["max_per_asset"],600)
+                return {"pole":([
+                    pole(recent,append="No",height=13.5),
+                    dict(pole(recent),OBJECTID=202,
+                         created_date=recent-1000,
+                         last_edited_user="otheruser"),
+                    dict(pole(now_ms-8*3600000),OBJECTID=203),
+                ],FIELDS,{},None,None)}
+            with patch("meter_photo_qa.surveyor_notifications.record_findings",
+                       return_value=(["Append Cable missing"],[])):
+                result=manual_gap_scan(cfg,now_ms=now_ms,collector=collector)
+            self.assertEqual(result["gap_assets"],1)
+            self.assertEqual(result["gaps"][0]["objectid"],201)
+            self.assertEqual(result["records_scanned"],{"pole":3})
+            self.assertEqual(result["notifications_sent"],0)
+            self.assertFalse(result["watcher_schedule_changed"])
+            self.assertEqual(cfg.read_text(encoding="utf-8"),json.dumps(setup))
+            self.assertEqual(sqlite.read_bytes(),b"KEEP THIS DATABASE")
+            self.assertEqual(len(recorded),1)
+
+    def test_manual_query_rejects_incomplete_scans_and_bad_hours(self):
+        from meter_photo_qa.surveyor_notifications import manual_gap_scan
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg=Path(tmp)/"monitor_config.json"
+            cfg.write_text(json.dumps(dict(CONFIG,version="sde.DEFAULT")),
+                           encoding="utf-8")
+            with self.assertRaisesRegex(ValueError,"Choose 1, 6 or 24"):
+                manual_gap_scan(cfg,hours=48)
+            with self.assertRaisesRegex(RuntimeError,"Incomplete source scan"):
+                manual_gap_scan(
+                    cfg,now_ms=1792404000000,
+                    collector=lambda _config,**_kwargs:{},
+                )
+
+    def test_manual_query_fails_closed_for_unverified_required_checks(self):
+        from meter_photo_qa.surveyor_notifications import manual_gap_scan
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg=Path(tmp)/"monitor_config.json"
+            cfg.write_text(json.dumps(dict(CONFIG,version="sde.DEFAULT")),
+                           encoding="utf-8")
+            now_ms=1792404000000
+            with patch("meter_photo_qa.surveyor_notifications.record_findings",
+                       return_value=([],["Pole Height"])): 
+                with self.assertRaisesRegex(RuntimeError,"unresolved template checks"):
+                    manual_gap_scan(
+                        cfg,now_ms=now_ms,
+                        collector=lambda _config,**_kwargs:{
+                            "pole":([pole(now_ms-10000)],FIELDS,{},None,None),
+                        },
+                    )
+
     def test_naive_arcgis_editor_time_is_utc_not_office_local_time(self):
         from meter_photo_qa.surveyor_notifications import timestamp_ms, submission_actor
         source=std_datetime.datetime(2026,10,16,16,46,0)

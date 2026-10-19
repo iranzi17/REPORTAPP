@@ -190,11 +190,12 @@ def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=Non
     return output
 
 
-def _feature_rows(layer,version,where,fields,asset):
+def _feature_rows(layer,version,where,fields,asset,*,max_per_asset=None,query_attempts=2):
     records=query_attributes_in_batches(
         layer,where,version,fields,[("Selected surveyor activity (national)",None)],
         _query_with_retry,batch_size=120,asset_label=asset,
         duplicate_globalid_policy="report",
+        max_matching_ids=max_per_asset,query_attempts=query_attempts,
     )
     if len(records)>MAX_PER_ASSET:
         raise RuntimeError(
@@ -241,21 +242,32 @@ def _monitor_gis(config, gis=None):
         ) from exc
 
 
-def collect(config,now_ms=None,gis=None,source_url=None):
+def collect(config,now_ms=None,gis=None,source_url=None,*,
+            lookback_hours=None,query_margin_hours=None,max_per_asset=None):
     """Return complete current quality findings across all eligible assets.
 
     Every layer must finish successfully before sending any notifications.
     """
     from arcgis.features import FeatureLayer
     now_ms=now_ms or int(_dt.datetime.now(_dt.timezone.utc).timestamp()*1000)
+    hours=LOOKBACK_HOURS if lookback_hours is None else int(lookback_hours)
+    if not 1<=hours<=LOOKBACK_HOURS:
+        raise ValueError("Lookback must be between 1 and 24 hours.")
     start_ms=max(
-        int(config["enabled_at_utc_ms"]),
-        now_ms-LOOKBACK_HOURS*3600*1000,
+        int(config["enabled_at_utc_ms"]),now_ms-hours*3600*1000,
     )
     start=_dt.datetime.fromtimestamp(start_ms/1000,_dt.timezone.utc)
-    # The existing ArcGIS Enterprise layer supports TIMESTAMP predicates.
-    # Widen a day, then exact-filter client-side to avoid timezone cutoffs.
-    start_day=(start-_dt.timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+    # Scheduled watcher keeps the conservative historical predicate.
+    # On-demand reads use a one-hour timestamp cushion, with exact client
+    # filtering, rather than fetching up to two days every button press.
+    if query_margin_hours is None:
+        sql_start=(start-_dt.timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+    else:
+        if not 0<=query_margin_hours<=2:
+            raise ValueError("Manual scan margin must be between 0 and 2 hours.")
+        sql_start=(start-_dt.timedelta(hours=query_margin_hours)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
     accounts=sorted(set(config["usernames"]),key=str.casefold)
     if not accounts:
         raise ValueError("Choose at least one surveyor to watch.")
@@ -301,13 +313,16 @@ def collect(config,now_ms=None,gis=None,source_url=None):
         where=(
             f"ASSETGROUP IN ({groups}) AND "
             f"(created_user IN ({quoted}) OR last_edited_user IN ({quoted})) AND "
-            "((created_date >= TIMESTAMP '"+start_day+"') OR "
-            "(last_edited_date >= TIMESTAMP '"+start_day+"'))"
+            "((created_date >= TIMESTAMP '"+sql_start+"') OR "
+            "(last_edited_date >= TIMESTAMP '"+sql_start+"'))"
         )
         if asset in ("pole","transformer"):
             where+=" AND ASSETTYPE IN ("+",".join(map(str,sorted(ASSETS[asset]["types"])))+")"
         fields=list(dict.fromkeys(available[name.casefold()] for name in required))
-        records=_feature_rows(layer,config.get("version","sde.DEFAULT"),where,fields,asset)
+        records=_feature_rows(
+            layer,config.get("version","sde.DEFAULT"),where,fields,asset,
+            max_per_asset=max_per_asset,query_attempts=1 if max_per_asset else 2,
+        )
         records=[r for r in records if (event_timestamp(r) or 0)>=start_ms]
         if asset=="line":
             domains=_domain_maps(layer)
@@ -318,6 +333,80 @@ def collect(config,now_ms=None,gis=None,source_url=None):
         result[asset]=(records,schema,domains,rules,expectations)
     return result
 
+
+
+MANUAL_SCAN_HOURS=(1,6,24)
+MANUAL_SCAN_MAX_PER_ASSET=600
+
+
+def manual_gap_scan(config_path, *, hours=6, now_ms=None, collector=None):
+    """One user-triggered, bounded, read-only snapshot; never send alerts.
+
+    No watcher State/SQLite access, no notification dispatch, no enabled
+    setting or surveyor list changes. Shows *current gaps on recent edits*
+    rather than claiming to audit every historical network feature.
+    """
+    if isinstance(hours,bool) or hours not in MANUAL_SCAN_HOURS:
+        raise ValueError("Choose 1, 6 or 24 hours for a manual gap check.")
+    path=Path(config_path).expanduser().resolve()
+    original=json.loads(path.read_text(encoding="utf-8"))
+    users=original.get("usernames") or []
+    assets=original.get("assets") or []
+    if not users or not assets:
+        raise ValueError("Select surveyors and assets before checking gaps.")
+    if str(original.get("version","sde.DEFAULT")).casefold()!="sde.default":
+        raise ValueError("Only the read-only sde.DEFAULT scan is supported.")
+    now_ms=int(now_ms if now_ms is not None else
+               _dt.datetime.now(_dt.timezone.utc).timestamp()*1000)
+    start_ms=now_ms-hours*3600000
+    config=dict(original)
+    config["enabled_at_utc_ms"]=start_ms  # Memory only; no config file edits.
+    query=collector or collect
+    snapshots=query(
+        config,now_ms=now_ms,lookback_hours=hours,
+        query_margin_hours=1,max_per_asset=MANUAL_SCAN_MAX_PER_ASSET,
+    )
+    if set(snapshots)!=set(assets):
+        raise RuntimeError("Incomplete source scan; no partial gap result shown.")
+    watched={str(user).casefold() for user in users}
+    scanned={}
+    gaps=[]
+    for asset,(records,fields,domains,rules,phase_expectations) in snapshots.items():
+        scanned[asset]=len(records)
+        for row in records:
+            actor,event_type=submission_actor(row)
+            modified=event_timestamp(row)
+            oid=row.get("OBJECTID")
+            if (actor.casefold() not in watched or modified is None
+                or not start_ms<=modified<=now_ms or oid is None):
+                continue
+            issues,unverified=record_findings(
+                asset,row,fields,domains,rules,phase_expectations,
+                include_pole_manufacturer=(
+                    config.get("pole_manufacturer_gap_enabled",False) is True
+                ),
+            )
+            if unverified:
+                raise RuntimeError(
+                    f"{asset}: unresolved template checks {unverified}; "
+                    "manual scan aborted rather than producing false gaps."
+                )
+            if issues:
+                gaps.append({
+                    "username":actor,"asset":asset,"objectid":int(oid),
+                    "globalid":str(row.get("GLOBALID") or ""),
+                    "event_type":event_type,"event_time_utc_ms":modified,
+                    "issues":issues,
+                })
+    gaps.sort(key=lambda x:(-x["event_time_utc_ms"],x["asset"],x["objectid"]))
+    return {
+        "mode":"MANUAL_READ_ONLY","lookback_hours":hours,
+        "since_utc_ms":start_ms,"checked_at_utc_ms":now_ms,
+        "surveyors_checked":len(watched),"assets":list(assets),
+        "records_scanned":scanned,"gap_assets":len(gaps),"gaps":gaps,
+        "watcher_schedule_changed":False,"inbox_history_changed":False,
+        "notifications_sent":0,
+    }
 
 def preflight(config_path, *, collector=None, now_ms=None, check_delivery=True):
     """Verify standalone GIS/schema access without alerts or SQLite changes."""
