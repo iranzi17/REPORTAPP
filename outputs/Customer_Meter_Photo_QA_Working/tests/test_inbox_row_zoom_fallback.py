@@ -13,6 +13,7 @@ import unittest
 from meter_photo_qa.notification_inbox import (
     connect_inbox, record_alert, mark_delivery, import_legacy_events,
     get_alert, queue_inbox_row_zoom, row_zoom_action, fresh_sent_alerts,
+    InboxZoomButtonOverlay,
 )
 
 EVENT_MS=1792404000000
@@ -130,13 +131,100 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
                 fresh_sent_alerts(db,0,limit=0)
         finally:db.close()
 
+    def test_real_row_buttons_trigger_only_the_exact_clicked_row(self):
+        class FakeTree:
+            def __init__(self):
+                self.positions={"41":(30,15,160,22),"42":(30,38,160,22)}
+            def get_children(self,parent=""):
+                self.last_parent=parent
+                return ["41","42"]
+            def bbox(self,iid,column):
+                assert column=="Zoom"
+                return self.positions.get(iid,())
+            def winfo_width(self):
+                return 400
+            def winfo_height(self):
+                return 220
+
+        class FakeButton:
+            def __init__(self,command):
+                self.command=command
+                self.position=None
+                self.destroyed=False
+            def place(self,**kwargs):
+                self.position=kwargs
+            def destroy(self):
+                self.destroyed=True
+
+        tree=FakeTree()
+        clicked=[]
+        created=[]
+        def factory(iid,callback):
+            result=FakeButton(callback)
+            created.append((iid,result))
+            return result
+
+        overlay=InboxZoomButtonOverlay(tree,factory,clicked.append)
+        overlay.layout()
+        self.assertEqual(len(created),2)
+        self.assertEqual(len(overlay.buttons),2)
+        self.assertEqual(overlay.buttons["41"].position,
+                         {"x":32,"y":16,"width":156,"height":20})
+        self.assertEqual(clicked,[])  # Rendering never initiates zoom.
+        overlay.layout()
+        self.assertEqual(len(created),2)  # No duplicate controls on redraw.
+        overlay.buttons["41"].command()
+        overlay.buttons["42"].command()
+        self.assertEqual(clicked,[41,42])
+        tree.positions.pop("41")
+        overlay.layout()
+        self.assertTrue(created[0][1].destroyed)
+        self.assertEqual(set(overlay.buttons),{"42"})
+        overlay.clear()
+        self.assertFalse(overlay.buttons)
+        self.assertTrue(created[1][1].destroyed)
+
+    def test_hidden_and_clipped_rows_do_not_have_click_targets(self):
+        class FakeTree:
+            def get_children(self,parent=""):
+                return ["1","2","3","4"]
+            def bbox(self,iid,column):
+                return {
+                    "1":(0,0,100,20),
+                    "2":(),
+                    "3":(0,200,100,20),
+                    "4":(0,20,10,5),
+                }[iid]
+            def winfo_width(self):
+                return 400
+            def winfo_height(self):
+                return 100
+
+        class FakeButton:
+            def place(self,**kwargs):
+                pass
+            def destroy(self):
+                pass
+
+        created=[]
+        overlay=InboxZoomButtonOverlay(
+            FakeTree(),lambda iid,command: (
+                created.append((iid,command)) or FakeButton()
+            ),lambda row:None,
+        )
+        overlay.layout()
+        self.assertEqual([iid for iid,_ in created],["1"])
+
     def test_inbox_popups_never_automatically_zoom_or_replay_old_history(self):
         path=Path(__file__).resolve().parents[1]/(
             "src/meter_photo_qa/notification_inbox.py")
         source=path.read_text(encoding="utf-8")
         self.assertIn('names=("ID","Received","Surveyor","Asset"',source)
         self.assertIn('"Delivery","Zoom")',source)
-        self.assertIn('tree.identify_column(event.x)!="#9"',source)
+        self.assertIn('zoom_buttons=InboxZoomButtonOverlay(',source)
+        self.assertIn('return ttk.Button(tree,text=caption,command=command',source)
+        self.assertIn('command=lambda *args: (tree.yview(*args),schedule_zoom_buttons())',source)
+        self.assertNotIn('tree.identify_column(event.x)',source)
         self.assertIn('text="In-app gap popups"',source)
         self.assertIn('root.after(10000,poll_new_gap_alerts)',source)
         self.assertIn('COALESCE(MAX(id),0)',source)
