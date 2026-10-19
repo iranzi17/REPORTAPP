@@ -565,6 +565,10 @@ def launch_gui(config_path):
               font=("Segoe UI",17,"bold")).pack(side="left")
     counter=ttk.Label(heading,text="")
     counter.pack(side="right")
+    in_app_popups=tk.BooleanVar(value=True)
+    ttk.Checkbutton(
+        heading,text="In-app gap popups",variable=in_app_popups,
+    ).pack(side="right",padx=(0,16))
 
     controls=ttk.Frame(root,padding=(12,0,12,8))
     controls.pack(fill="x")
@@ -1272,8 +1276,125 @@ def launch_gui(config_path):
         except Exception:
             pass
         root.after(15000,auto_refresh)
+    # The Windows toast API reports dispatch, NOT confirmation of a visible
+    # banner. Offer a second, in-process popup while the Inbox is open.
+    # Baseline at launch to avoid flooding the screen with 358 older alerts.
+    # Keep at most ONE popup for a new burst, always require a click to zoom.
+    active_popup=[None]
+    popup_alert_id=[None]
+    popup_label=[None]
+    last_delivered_id=[0]
+
+    def dismiss_gap_popup():
+        window=active_popup[0]
+        active_popup[0]=None
+        popup_alert_id[0]=None
+        popup_label[0]=None
+        if window is not None and window.winfo_exists():
+            window.destroy()
+
+    def zoom_from_gap_popup():
+        row_id=popup_alert_id[0]
+        if row_id is None:
+            return
+        try:
+            queued=queue_inbox_row_zoom(config,row_id)
+            find_status.set(
+                f"New gap alert {queued['alert_id']}, OBJECTID "
+                f"{queued['objectid']} queued. Await ArcGIS Pro verification."
+            )
+            dismiss_gap_popup()
+        except Exception as exc:
+            messagebox.showerror("Popup Zoom",str(exc),parent=active_popup[0] or root)
+
+    def show_new_gap_popup(latest, count):
+        record_id=int(latest["id"])
+        popup_alert_id[0]=record_id
+        summary=(
+            f"NEW QA GAP — {latest['asset'].upper()} "
+            f"OBJECTID {latest['objectid']}\n"
+            f"Surveyor: {latest['username']}  |  "
+            f"Missing/invalid fields: {len(json.loads(latest['issues_json']))}\n"
+            f"{count} new delivered gap alert(s). See Inbox for the others.\n"
+            "REPORTAPP recorded Windows dispatch; banner visibility is unknown."
+        )
+        win=active_popup[0]
+        if win is not None and win.winfo_exists():
+            popup_label[0].configure(text=summary)
+            return
+        win=tk.Toplevel(root)
+        active_popup[0]=win
+        win.title("REPORTAPP | New live quality gaps")
+        win.geometry(
+            f"470x185+{max(0,win.winfo_screenwidth()-500)}"
+            f"+{max(0,win.winfo_screenheight()-260)}"
+        )
+        win.resizable(False,False)
+        # Never call focus_force/grab_set or ArcGIS navigation here.
+        win.wm_attributes("-topmost",True)
+        surface=ttk.Frame(win,padding=13)
+        surface.pack(fill="both",expand=True)
+        popup_label[0]=ttk.Label(
+            surface,text=summary,justify="left",wraplength=445,
+        )
+        popup_label[0].pack(anchor="w")
+        actions=ttk.Frame(surface)
+        actions.pack(fill="x",pady=(13,0))
+        ttk.Button(actions,text="Zoom in ArcGIS Pro",
+                   command=zoom_from_gap_popup).pack(side="left")
+        def locate_in_inbox():
+            oid=str(latest["objectid"])
+            filter_value.set("ALL")
+            search_value.set(oid)
+            refresh()
+            if tree.exists(str(popup_alert_id[0])):
+                tree.selection_set(str(popup_alert_id[0]))
+                tree.see(str(popup_alert_id[0]))
+                on_selection()
+            dismiss_gap_popup()
+        ttk.Button(actions,text="Show in Inbox",
+                   command=locate_in_inbox).pack(side="left",padx=7)
+        ttk.Button(actions,text="Dismiss",
+                   command=dismiss_gap_popup).pack(side="right")
+        win.protocol("WM_DELETE_WINDOW",dismiss_gap_popup)
+
+    def poll_new_gap_alerts():
+        try:
+            db=connect_inbox(config)
+            try:
+                delivered=fresh_sent_alerts(db,last_delivered_id[0])
+                if delivered:
+                    count=db.execute(
+                        """SELECT COUNT(*) FROM alert_inbox WHERE id>?
+                           AND origin='LIVE' AND delivery_status='SENT'""",
+                        (last_delivered_id[0],),
+                    ).fetchone()[0]
+            finally:
+                db.close()
+            if delivered:
+                last_delivered_id[0]=max(int(r["id"]) for r in delivered)
+                if in_app_popups.get():
+                    show_new_gap_popup(delivered[0],count)
+            elif not in_app_popups.get():
+                dismiss_gap_popup()
+        except Exception:
+            # Leave the Inbox usable during a transient SQLite contention.
+            # Do not acknowledge unread events or change watcher state.
+            pass
+        root.after(10000,poll_new_gap_alerts)
+
     refresh()
+    # Ignore preexisting delivered records on GUI launch. Only alerts newly
+    # delivered while the Inbox is open produce an in-app popup.
+    db=connect_inbox(config)
+    try:
+        last_delivered_id[0]=int(db.execute(
+            "SELECT COALESCE(MAX(id),0) FROM alert_inbox"
+        ).fetchone()[0])
+    finally:
+        db.close()
     root.after(15000,auto_refresh)
+    root.after(10000,poll_new_gap_alerts)
     root.mainloop()
 
 def main(argv=None):
