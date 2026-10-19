@@ -20,8 +20,9 @@ from meter_photo_qa.surveyor_notifications import run_once
 GID="{142A4DBA-F393-4597-90A9-3878A86827B9}"
 ACTOR="julesmugae72"
 OID=4573130
-NOW=int(datetime.datetime(2026,10,19,12,0,
-    tzinfo=datetime.timezone.utc).timestamp()*1000)
+# Run a live-dispatch test against the test runner's actual UTC clock;
+# fixed future timestamps would wrongly trigger the 10-minute freshness guard.
+NOW=int(datetime.datetime.now(datetime.timezone.utc).timestamp()*1000)
 EVENT=NOW-305000
 
 def record(*,id=OID,gid=GID,actor=ACTOR,event=EVENT):
