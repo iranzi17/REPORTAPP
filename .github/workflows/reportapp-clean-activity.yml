@@ -155,5 +155,44 @@ jobs:
             throw "Original V3 task action restore argument lost"
           }
           Write-Host "Mocked live/restore task actions retain exact string arguments."
+          # A failed prior activation may have retained its backup while
+          # the original V3 task stayed active. Reuse ONLY exact original
+          # and intended-main actions; reject stale/modified backups.
+          foreach ($functionName in @('SameAction','Test-PreviousBackupMatches')) {
+            $fn = $tree.Find({
+              param($node)
+              $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+              $node.Name -eq $functionName
+            }, $true)
+            if (-not $fn) { throw "Missing backup validation helper: $functionName" }
+            Invoke-Expression $fn.Extent.Text
+          }
+          $old = NewAction $exe '"C:\Stable V3\run_v3_once.py" --config "C:\Office\monitor_config.json"' $cwd
+          $new = NewAction $exe $cmdline $cwd
+          $backup = [pscustomobject]@{
+            status='BACKED_UP'
+            original=[pscustomobject]@{exe=$old.Execute;args=$old.Arguments;cwd=$old.WorkingDirectory}
+            target=[pscustomobject]@{exe=$new.Execute;args=$new.Arguments;cwd=$new.WorkingDirectory}
+          }
+          if (-not (Test-PreviousBackupMatches $backup $old $new)) {
+            throw "Exact original V3 action backup should be reused safely"
+          }
+          $backup.target.args = '-m wrong.monitor --config "C:\Office\config.json"'
+          if (Test-PreviousBackupMatches $backup $old $new) {
+            throw "Corrupted previous target was incorrectly trusted"
+          }
+          $backup.target.args = $new.Arguments
+          $backup.original.exe = ''
+          if (Test-PreviousBackupMatches $backup $old $new) {
+            throw "Incomplete backup should never prompt or authorize switch"
+          }
+          $source = Get-Content -Raw $path
+          if ($source -match ' --preflight(\\s|\\r|\\n)' -or
+              -not $source.Contains('LOCAL_PREFLIGHT_OK') -or
+              -not $source.Contains('Test-PreviousBackupMatches')) {
+            throw "Expected read-only, local-only preflight not installed"
+          }
+          Write-Host "Previous V3 task backup reuse is strictly validated; no tasks modified."
+
           Write-Host "Exact .pyt.xml exception safe; all executable/config changes rejected."
           Write-Host "PowerShell parsed; no Windows Scheduled Tasks were modified."

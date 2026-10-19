@@ -38,6 +38,21 @@ function SameAction($actual,$expected) {
             ($actual.Arguments -eq $expected.Arguments) -and
             ($actual.WorkingDirectory -eq $expected.WorkingDirectory))
 }
+function Test-PreviousBackupMatches($stored,$current,$requested) {
+    # Only reuse authentic-to-this-task rollback evidence; never overwrite
+    # a backup after a partial or failed activation.
+    if (-not $stored -or $stored.status -ne 'BACKED_UP' -or
+        -not $stored.original -or -not $stored.target) { return $false }
+    foreach ($item in @($stored.original,$stored.target)) {
+        if ([string]::IsNullOrWhiteSpace($item.exe) -or
+            [string]::IsNullOrWhiteSpace($item.args) -or
+            [string]::IsNullOrWhiteSpace($item.cwd)) { return $false }
+    }
+    $savedOriginal = NewAction $stored.original.exe $stored.original.args $stored.original.cwd
+    $savedTarget = NewAction $stored.target.exe $stored.target.args $stored.target.cwd
+    return ( (SameAction $current $savedOriginal) -and
+             (SameAction $requested $savedTarget) )
+}
 function Test-AllowedArcGISMetadataEdit([string]$entry) {
     # Status format: two position flags, space, repo-relative file path.
     # Deliberately allow ONLY a modified (unstaged) ArcGIS-generated XML.
@@ -88,9 +103,6 @@ try {
         SaveReport 'ORIGINAL_WATCHER_RESTORED' 'Existing one-minute trigger retained.'
         exit 0
     }
-    if (Test-Path $backup) {
-        throw 'Prior switch backup exists. Do not overwrite; run with -Restore if necessary.'
-    }
     $branch = (& git -C $repo branch --show-current).Trim()
     if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') { throw 'Git checkout must be main.' }
     $dirty = @(& git -C $repo status --porcelain --untracked-files=no)
@@ -136,19 +148,47 @@ try {
     if (-not (Test-Path $interactivePython)) { throw 'ArcGIS Pro Python is missing.' }
     $target = NewAction $exe ('-m meter_photo_qa.surveyor_notifications --config "'+$config+'"') $src
     if (SameAction $previous $target) { throw 'Task already uses current source; no switch needed.' }
-    Write-Host 'Running read-only REG schema, Python dependencies and GIS access preflight.'
+    # An earlier attempt can save the task Action then abort safely because
+    # the GIS service is down. Never overwrite/delete that rollback evidence.
+    # Reuse it only if BOTH original and intended new Action match exactly.
+    $reuseBackup = $false
+    if (Test-Path -LiteralPath $backup) {
+        $stored = Get-Content -LiteralPath $backup -Raw | ConvertFrom-Json
+        if (-not (Test-PreviousBackupMatches $stored $previous $target)) {
+            throw 'Previous backup and currently verified task/target do not match. No switch.'
+        }
+        $reuseBackup = $true
+        Write-Host 'Verified original task Action backup; it will be reused without modifications.'
+    }
+    # Offline application preflight only: full national ArcGIS queries are
+    # unreliable during REG server incidents. The first actual scheduled
+    # cycle, NOT this offline check, must succeed for cutover acceptance.
+    Write-Host 'Running local Python/configuration preflight (no REG FeatureServer queries).'
     $env:PYTHONPATH = $src
-    & $interactivePython -m meter_photo_qa.surveyor_notifications --config $config --preflight
-    if ($LASTEXITCODE -ne 0) { throw 'Preflight failed: original task preserved.' }
+    $localConfig = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
+    if ($localConfig.enabled -ne $true -or
+        $localConfig.version -ine 'sde.DEFAULT' -or
+        $localConfig.channel -ne 'desktop' -or
+        @($localConfig.usernames).Count -eq 0 -or
+        (@($localConfig.assets) -notcontains 'pole') -or
+        (@($localConfig.assets) -notcontains 'line') -or
+        (@($localConfig.assets) -notcontains 'transformer')) {
+        throw 'Original monitored accounts, assets, enabled state or desktop channel are invalid.'
+    }
+    & $interactivePython -B -c 'import winotify, arcgis.features; from meter_photo_qa import surveyor_notifications, source_event_navigation, desktop_toast_channel'
+    if ($LASTEXITCODE -ne 0) { throw 'Local preflight failed; original task preserved.' }
+    Write-Host 'LOCAL_PREFLIGHT_OK: imports/config valid, no GIS queries sent.'
     $answer = Read-Host 'Type ACTIVATE GITHUB MAIN GAP ALERTS to update the existing watcher task'
     if ($answer -cne 'ACTIVATE GITHUB MAIN GAP ALERTS') { throw 'Operator did not approve task change.' }
-    $record = [pscustomobject]@{
-        status='BACKED_UP'
-        head_sha=$head
-        original=@{ exe=$previous.Execute; args=$previous.Arguments; cwd=$previous.WorkingDirectory }
-        target=@{ exe=$target.Execute; args=$target.Arguments; cwd=$target.WorkingDirectory }
+    if (-not $reuseBackup) {
+        $record = [pscustomobject]@{
+            status='BACKED_UP'
+            head_sha=$head
+            original=@{ exe=$previous.Execute; args=$previous.Arguments; cwd=$previous.WorkingDirectory }
+            target=@{ exe=$target.Execute; args=$target.Arguments; cwd=$target.WorkingDirectory }
+        }
+        $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $backup -Encoding UTF8
     }
-    $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $backup -Encoding UTF8
     $switched = $false
     try {
         $task = ReadyTask
