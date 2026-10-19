@@ -1343,13 +1343,23 @@ def launch_gui(config_path):
         ttk.Button(actions,text="Zoom in ArcGIS Pro",
                    command=zoom_from_gap_popup).pack(side="left")
         def locate_in_inbox():
-            oid=str(latest["objectid"])
+            row_id=popup_alert_id[0]
+            if row_id is None:
+                return
+            db=connect_inbox(config)
+            try:
+                current=get_alert(db,row_id)
+            finally:
+                db.close()
+            if current is None:
+                dismiss_gap_popup()
+                return
             filter_value.set("ALL")
-            search_value.set(oid)
+            search_value.set(str(current["objectid"]))
             refresh()
-            if tree.exists(str(popup_alert_id[0])):
-                tree.selection_set(str(popup_alert_id[0]))
-                tree.see(str(popup_alert_id[0]))
+            if tree.exists(str(row_id)):
+                tree.selection_set(str(row_id))
+                tree.see(str(row_id))
                 on_selection()
             dismiss_gap_popup()
         ttk.Button(actions,text="Show in Inbox",
