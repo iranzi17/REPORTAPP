@@ -48,6 +48,7 @@ jobs:
         run: |
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_exact_feature_lookup.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_source_event_navigation.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_live_gap_scanned_toast.py -v
       - name: Existing watcher and Inbox regression tests
         env:
           PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
@@ -84,6 +85,7 @@ jobs:
             "src/meter_photo_qa/surveyor_activity.py",
             "tests/test_exact_feature_lookup.py",
             "tests/test_source_event_navigation.py",
+            "tests/test_live_gap_scanned_toast.py",
             "tests/test_alert_navigation.py",
             "tests/test_surveyor_activity.py",
             "docs/SUBSTATIONS_FEATURE_LOOKUP_HANDOFF.md",
