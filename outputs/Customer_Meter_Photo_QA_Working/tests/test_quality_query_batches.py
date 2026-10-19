@@ -161,6 +161,112 @@ class QualityBatchTests(unittest.TestCase):
             len([q for q in layer.queries if q.get("return_ids_only")]), 53,
         )
 
+
+    @patch("meter_photo_qa.quality_query_batches.time.sleep")
+    def test_transient_sde_default_version_error_retries_same_polygon_once(self, sleep):
+        layer = FakeLineService(make_rows(2), area_ids={"A": [1, 2]})
+        calls = []
+        def flaky(target, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise RuntimeError(
+                    "ArcGIS query failed after 2 attempts: "
+                    "Failed to find Version 'sde.DEFAULT'. (Error Code: 400)"
+                )
+            return target.query(**{
+                k: v for k, v in kwargs.items() if k != "attempts"
+            })
+        messages=[]
+        result=query_attributes_in_batches(
+            layer, "ASSETGROUP IN (9,10)", "sde.DEFAULT",
+            ["OBJECTID","GLOBALID"], [("Gakenke / Ruli", "A")],
+            flaky, progress=messages.append,
+        )
+        self.assertEqual(len(result),2)
+        sleep.assert_called_once_with(8)
+        self.assertEqual(calls[0]["attempts"],2)
+        self.assertEqual(calls[1]["attempts"],1)
+        self.assertEqual(calls[0]["gdb_version"],"sde.DEFAULT")
+        self.assertEqual(calls[0]["geometry_filter"],calls[1]["geometry_filter"])
+        self.assertEqual(calls[0]["where"],calls[1]["where"])
+        self.assertEqual(calls[1]["gdb_version"],"sde.DEFAULT")
+        self.assertTrue(any("source version unchanged" in x for x in messages))
+
+    @patch("meter_photo_qa.quality_query_batches.time.sleep")
+    def test_persistent_missing_default_version_cancels_without_attribute_query(self, sleep):
+        layer=FakeLineService(make_rows(1),area_ids={"A":[1]})
+        calls=[]
+        def missing(target,**kwargs):
+            calls.append(kwargs)
+            if kwargs.get("geometry_filter")=="A":
+                raise RuntimeError("Failed to find Version 'sde.DEFAULT'. (Error Code: 400)")
+            return target.query(**{
+                k: v for k,v in kwargs.items() if k!="attempts"
+            })
+        with self.assertRaisesRegex(RuntimeError,"NOT generated.*Failed to find Version"):
+            query_attributes_in_batches(
+                layer,"1=1","sde.DEFAULT",["OBJECTID","GLOBALID"],
+                [("Gakenke / Ruli","A")],missing,
+            )
+        self.assertEqual(len(calls),2)
+        self.assertEqual([x["attempts"] for x in calls],[2,1])
+        self.assertTrue(all(x["gdb_version"]=="sde.DEFAULT" for x in calls))
+        self.assertFalse(any("object_ids" in x for x in calls))
+        sleep.assert_called_once_with(8)
+
+    @patch("meter_photo_qa.quality_query_batches.time.sleep")
+    def test_failed_other_version_never_falls_back_or_retries(self,sleep):
+        calls=[]
+        def missing(target,**kwargs):
+            calls.append(kwargs)
+            raise RuntimeError("Failed to find Version 'another.VERSION'. (Error Code: 400)")
+        with self.assertRaisesRegex(RuntimeError,"NOT generated"):
+            query_attributes_in_batches(
+                SimpleNamespace(properties=SimpleNamespace(maxRecordCount=2000)),
+                "1=1","another.VERSION",["OBJECTID"],
+                [("A",None)],missing,
+            )
+        self.assertEqual(len(calls),1)
+        self.assertEqual(calls[0]["gdb_version"],"another.VERSION")
+        sleep.assert_not_called()
+
+    @patch("meter_photo_qa.quality_query_batches.time.sleep")
+    def test_count_verification_rechecks_version_before_confirming_empty(self,sleep):
+        layer=FakeLineService(make_rows(1),area_ids={"A":None})
+        count_attempts=[]
+        def maybe(target,**kwargs):
+            if kwargs.get("return_count_only"):
+                count_attempts.append(kwargs["attempts"])
+                if len(count_attempts)==1:
+                    raise RuntimeError("Failed to find Version 'sde.DEFAULT' (Error Code: 400)")
+            return target.query(**{k:v for k,v in kwargs.items() if k!="attempts"})
+        rows=query_attributes_in_batches(
+            layer,"1=1","sde.DEFAULT",["OBJECTID"],
+            [("Gakenke / Muzo","A")],maybe,
+        )
+        self.assertEqual(rows,[])
+        self.assertEqual(count_attempts,[2,1])
+        sleep.assert_called_once_with(8)
+
+    @patch("meter_photo_qa.quality_query_batches.time.sleep")
+    def test_attribute_batch_version_recheck_preserves_requested_oids(self,sleep):
+        layer=FakeLineService(make_rows(2),area_ids={"A":[1,2]})
+        batch_queries=[]
+        def flaky(target,**kwargs):
+            if "object_ids" in kwargs:
+                batch_queries.append(dict(kwargs))
+                if len(batch_queries)==1:
+                    raise RuntimeError("Failed to find Version 'sde.DEFAULT' (Error Code: 400)")
+            return target.query(**{k:v for k,v in kwargs.items() if k!="attempts"})
+        rows=query_attributes_in_batches(
+            layer,"1=1","sde.DEFAULT",["OBJECTID","GLOBALID"],
+            [("A","A")],flaky,
+        )
+        self.assertEqual(len(rows),2)
+        self.assertEqual(batch_queries[0]["object_ids"],batch_queries[1]["object_ids"])
+        self.assertEqual(batch_queries[1]["gdb_version"],"sde.DEFAULT")
+        sleep.assert_called_once_with(8)
+
     def test_503_fails_without_partial_report(self):
         layer = FakeLineService(make_rows(3))
         def simulated(layer, **kwargs):
