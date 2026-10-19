@@ -25,7 +25,11 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
             if not mapping.get(key):
                 mapping[key] = name
         attributes = {**EXTRA_POLE_VALUES, **attributes}
-    return evaluate_asset_raw(attributes, asset, mapping, domains)
+    # Legacy rule tests exercise the explicitly enabled option. Production
+    # and new default tests use evaluate_asset_raw without this opt-in.
+    return evaluate_asset_raw(
+        attributes, asset, mapping, domains, include_pole_manufacturer=True,
+    )
 
 
 class AssetQualityTests(unittest.TestCase):
@@ -69,6 +73,35 @@ class AssetQualityTests(unittest.TestCase):
         self.assertEqual(result["status"], "NOT_VERIFIED")
         self.assertIn("name", result["unverified_checks"])
 
+    def test_manufacturer_is_optional_by_default_and_opt_in_retains_legacy_rule(self):
+        mapping={
+            "manufacturer":"Manufacturers","notes":"Notes",
+            "append_cable":"Append_Cable","height":"Pole_Height",
+            **EXTRA_POLE_FIELDS,
+        }
+        original={
+            "ASSETGROUP":7,"ASSETTYPE":1,"OBJECTID":3456,
+            "GLOBALID":"{MFGOPTION}","Manufacturers":None,"Notes":"",
+            "Append_Cable":"No","Pole_Height":10,
+            **EXTRA_POLE_VALUES,
+        }
+        default=evaluate_asset_raw(original,"pole",mapping)
+        self.assertEqual(default["issues"],[])
+        self.assertEqual(default["status"],"NO_GAPS_FOUND")
+        self.assertEqual(default["values"]["manufacturer_status"],"MISSING_MANUFACTURER_NOTES")
+        chosen=evaluate_asset_raw(original,"pole",mapping,include_pole_manufacturer=True)
+        self.assertIn("Manufacturer missing and Notes empty",chosen["issues"])
+        self.assertEqual(chosen["status"],"GAP")
+        # Missing manufacturer schema must not mark the record as unverified.
+        missing=dict(mapping,manufacturer=None)
+        unverified=evaluate_asset_raw(original,"pole",missing)
+        self.assertNotIn("manufacturer",unverified["unverified_checks"])
+        self.assertEqual(unverified["status"],"NO_GAPS_FOUND")
+        # Other mandatory pole checks remain active with option off.
+        incomplete=evaluate_asset_raw(dict(original,Append_Cable=None),"pole",mapping)
+        self.assertTrue(any("Append Cable" in text for text in incomplete["issues"]))
+        self.assertFalse(any("Manufacturer missing" in text for text in incomplete["issues"]))
+
     def test_substandard_structure_exempts_manufacturer_even_without_notes(self):
         from meter_photo_qa.asset_quality import is_substandard_pole_structure
         mapping={
@@ -99,7 +132,7 @@ class AssetQualityTests(unittest.TestCase):
                 self.assertEqual(is_substandard_pole_structure(
                     raw,domain.get("PoleStructure")),exempt)
                 row=dict(original,PoleStructure=raw)
-                result=evaluate_asset_raw(row,"pole",mapping,domain)
+                result=evaluate_asset_raw(row,"pole",mapping,domain,include_pole_manufacturer=True)
                 flagged=any("Manufacturer missing" in issue for issue in result["issues"])
                 self.assertEqual(flagged,not exempt)
                 if exempt:
@@ -110,7 +143,7 @@ class AssetQualityTests(unittest.TestCase):
         # Substandard does not excuse Append Cable or other pole deficiencies.
         row=dict(original,PoleStructure="Substandard",Append_Cable=None,
                  InsulatorTypes=None,Number_Circuit=0)
-        result=evaluate_asset_raw(row,"pole",mapping)
+        result=evaluate_asset_raw(row,"pole",mapping,include_pole_manufacturer=True)
         self.assertEqual(result["values"]["manufacturer_status"],"SUBSTANDARD_EXEMPT")
         self.assertEqual(len(result["issues"]),3)
         self.assertTrue(any("Append Cable" in issue for issue in result["issues"]))
