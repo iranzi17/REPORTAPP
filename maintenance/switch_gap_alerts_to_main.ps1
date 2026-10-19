@@ -30,6 +30,16 @@ function SameAction($actual,$expected) {
             ($actual.Arguments -eq $expected.Arguments) -and
             ($actual.WorkingDirectory -eq $expected.WorkingDirectory))
 }
+function Test-AllowedArcGISMetadataEdit([string]$entry) {
+    # Status format: two position flags, space, repo-relative file path.
+    # Deliberately allow ONLY a modified (unstaged) ArcGIS-generated XML.
+    # Any staged deletion, rename, executable or config modification blocks.
+    if ([string]::IsNullOrWhiteSpace($entry) -or $entry.Length -lt 4) { return $false }
+    $state = $entry.Substring(0,2)
+    $name = $entry.Substring(3).Replace('\','/')
+    return ($state -ceq ' M' -and
+        $name -ceq 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt.xml')
+}
 function ReadyTask([int]$seconds=145) {
     $until=(Get-Date).AddSeconds($seconds)
     while ((Get-Date) -le $until) {
@@ -82,13 +92,8 @@ try {
     # This file is not executable Python, nor watcher configuration.
     # Preserve it IN PLACE rather than stashing, restoring or resetting it.
     # Do not generalize this exception to other XML, Python or task files.
-    $metadata = 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt.xml'
     $otherChanges = @($dirty | Where-Object {
-        if ([string]::IsNullOrWhiteSpace($_)) { return $false }
-        if ($_.Length -lt 4) { return $true }
-        $state = $_.Substring(0,2)
-        $name = $_.Substring(3).Replace('\\','/')
-        return -not ($state -ceq ' M' -and $name -ceq $metadata)
+        -not (Test-AllowedArcGISMetadataEdit $_)
     })
     if ($otherChanges.Count -gt 0) {
         throw ('Tracked executable/config/other changes detected; no switch. ' +
