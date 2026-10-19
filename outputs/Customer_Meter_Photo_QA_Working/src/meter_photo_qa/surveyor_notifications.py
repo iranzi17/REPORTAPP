@@ -175,6 +175,17 @@ def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=Non
                 "created_user":str(a.get("created_user") or ""),
                 "last_edited_user":str(a.get("last_edited_user") or ""),
                 "event_time_utc_ms":submitted,"issues":issues,"issue_digest":digest,
+                # Provenance from this completed sde.DEFAULT batch query.
+                # Primitive values are safe to preserve in delayed JSON.
+                # The add-in independently validates the current GIS edit on click.
+                "source_scan_at_utc_ms":int(now_ms),
+                "source_scan_evidence":{
+                    "OBJECTID":int(oid),"GLOBALID":str(gid),
+                    "created_date":timestamp_ms(a.get("created_date")),
+                    "last_edited_date":timestamp_ms(a.get("last_edited_date")),
+                    "created_user":str(a.get("created_user") or ""),
+                    "last_edited_user":str(a.get("last_edited_user") or ""),
+                },
             })
     return output
 
@@ -401,12 +412,25 @@ def deliver(alert,config):
         # registered the reportapp:// handler. The ArcGIS Pro add-in is a
         # separate required component; without it the request stays queued.
         from .alert_navigation import is_registered
-        from .source_event_navigation import safe_verified_source_uri
+        from .source_event_navigation import safe_verified_source_uri, safe_scanned_event_uri
         from .desktop_toast_channel import DESKTOP_APP_ID
         # Do not let a stale FeatureServer response or an OBJECTID-only
         # link open a different asset. Re-fetch exact GlobalID on the
         # sde.DEFAULT layer before offering a clickable action.
-        launch=(safe_verified_source_uri(alert,config) if is_registered() else "")
+        handler_registered=is_registered()
+        # Immediate gap alerts originate in the completed authenticated
+        # watcher scan; no second fragile REG query is needed for this
+        # notification. The ArcGIS Pro Bridge STILL performs its independent
+        # sde.DEFAULT GlobalID/OBJECTID/editor/time check at the click.
+        if not handler_registered:
+            launch=""
+            zoom_status="HANDLER_UNREGISTERED"
+        elif alert.get("source_scan_evidence") and not alert.get("deferred_historical"):
+            launch=safe_scanned_event_uri(alert,config)
+            zoom_status="SCANNED_EVENT_VALIDATED" if launch else "SCAN_EVIDENCE_REJECTED"
+        else:
+            launch=safe_verified_source_uri(alert,config)
+            zoom_status="LIVE_RECHECK_VALIDATED" if launch else "LIVE_RECHECK_UNAVAILABLE"
         popup=Notification(
             app_id=DESKTOP_APP_ID,title=subject,
             msg=message[:400],duration="long",launch=launch,
@@ -414,6 +438,7 @@ def deliver(alert,config):
         if launch:
             popup.add_actions(label="Zoom in ArcGIS Pro",launch=launch)
         popup.show()
+        return {"zoom_action_included":bool(launch),"zoom_status":zoom_status}
     elif channel=="smtp":
         host=os.environ.get("REPORTAPP_ALERT_SMTP_HOST")
         user=os.environ.get("REPORTAPP_ALERT_SMTP_USER")
@@ -481,7 +506,7 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
             # Persist first so any transient popup cannot be the only record.
             inbox_id=record_alert(state.db,item,now_ms)
             try:
-                sender(item,config)
+                delivery_info=sender(item,config)
             except Exception as exc:
                 mark_delivery(state.db,inbox_id,"SEND_FAILED",str(exc))
                 with logfile.open("a",encoding="utf-8") as fh:
@@ -508,6 +533,14 @@ def run_once(config_path,now_ms=None,collector=None,sender=None,
                     "source_event_type":item["event_type"],
                     "source_last_editor":item["last_edited_user"],
                     "issues":item["issues"],
+                    "zoom_action_included":(
+                        delivery_info.get("zoom_action_included")
+                        if isinstance(delivery_info,dict) else None
+                    ),
+                    "zoom_status":(
+                        delivery_info.get("zoom_status")
+                        if isinstance(delivery_info,dict) else "UNAVAILABLE_FROM_SENDER"
+                    ),
                 },ensure_ascii=False)+"\n")
             sent+=1
             if is_historical(item["event_time_utc_ms"],now_ms):
