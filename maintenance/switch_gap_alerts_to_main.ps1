@@ -38,6 +38,21 @@ function SameAction($actual,$expected) {
             ($actual.Arguments -eq $expected.Arguments) -and
             ($actual.WorkingDirectory -eq $expected.WorkingDirectory))
 }
+function Test-PreviousBackupMatches($stored,$current,$requested) {
+    # Only reuse authentic-to-this-task rollback evidence; never overwrite
+    # a backup after a partial or failed activation.
+    if (-not $stored -or $stored.status -ne 'BACKED_UP' -or
+        -not $stored.original -or -not $stored.target) { return $false }
+    foreach ($item in @($stored.original,$stored.target)) {
+        if ([string]::IsNullOrWhiteSpace($item.exe) -or
+            [string]::IsNullOrWhiteSpace($item.args) -or
+            [string]::IsNullOrWhiteSpace($item.cwd)) { return $false }
+    }
+    $savedOriginal = NewAction $stored.original.exe $stored.original.args $stored.original.cwd
+    $savedTarget = NewAction $stored.target.exe $stored.target.args $stored.target.cwd
+    return ( (SameAction $current $savedOriginal) -and
+             (SameAction $requested $savedTarget) )
+}
 function Test-AllowedArcGISMetadataEdit([string]$entry) {
     # Status format: two position flags, space, repo-relative file path.
     # Deliberately allow ONLY a modified (unstaged) ArcGIS-generated XML.
@@ -139,14 +154,7 @@ try {
     $reuseBackup = $false
     if (Test-Path -LiteralPath $backup) {
         $stored = Get-Content -LiteralPath $backup -Raw | ConvertFrom-Json
-        if ($stored.status -ne 'BACKED_UP' -or
-            -not $stored.original -or -not $stored.target) {
-            throw 'Previous task Action backup is incomplete. No switch.'
-        }
-        $storedOriginal = NewAction $stored.original.exe $stored.original.args $stored.original.cwd
-        $storedTarget = NewAction $stored.target.exe $stored.target.args $stored.target.cwd
-        if (-not (SameAction $previous $storedOriginal) -or
-            -not (SameAction $target $storedTarget)) {
+        if (-not (Test-PreviousBackupMatches $stored $previous $target)) {
             throw 'Previous backup and currently verified task/target do not match. No switch.'
         }
         $reuseBackup = $true
