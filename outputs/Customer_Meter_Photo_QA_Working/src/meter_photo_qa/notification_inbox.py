@@ -544,6 +544,54 @@ def bootstrap_maintainer_update(*,repository=None):
     }
 
 
+
+class InboxZoomButtonOverlay:
+    """Real per-visible-row buttons placed over the Treeview Zoom cells.
+
+    ttk.Treeview has no embedded-cell-button API; bare cell text is not a
+    button. This adapter owns only tkinter child widgets and never triggers
+    navigation until one of the actual buttons is pressed.
+    """
+
+    def __init__(self, tree, button_factory, on_click):
+        self.tree = tree
+        self.button_factory = button_factory
+        self.on_click = on_click
+        self.buttons = {}
+
+    def clear(self):
+        for button in self.buttons.values():
+            button.destroy()
+        self.buttons.clear()
+
+    def layout(self):
+        visible = set()
+        for iid in self.tree.get_children(""):
+            bounds = self.tree.bbox(iid, "Zoom")
+            if not bounds:
+                continue
+            x, y, width, height = bounds
+            if width < 30 or height < 12:
+                continue
+            if (x >= self.tree.winfo_width() or
+                    y >= self.tree.winfo_height() or
+                    x + width <= 0 or y + height <= 0):
+                continue
+            visible.add(iid)
+            button = self.buttons.get(iid)
+            if button is None:
+                button = self.button_factory(
+                    iid, lambda row=iid: self.on_click(int(row))
+                )
+                self.buttons[iid] = button
+            button.place(
+                x=x + 2, y=y + 1,
+                width=max(1, width - 4), height=max(1, height - 2),
+            )
+        for iid in set(self.buttons) - visible:
+            self.buttons.pop(iid).destroy()
+
+
 def launch_gui(config_path):
     # Import lazily so scheduled monitoring never imports GUI components.
     import tkinter as tk
@@ -630,8 +678,13 @@ def launch_gui(config_path):
     for col,width in zip(names,widths):
         tree.heading(col,text=col)
         tree.column(col,width=width,stretch=col in ("Surveyor","Received"))
-    scroll=ttk.Scrollbar(tree_frame,orient="vertical",command=tree.yview)
-    tree.configure(yscrollcommand=scroll.set)
+    scroll=ttk.Scrollbar(
+        tree_frame,orient="vertical",
+        command=lambda *args: (tree.yview(*args),schedule_zoom_buttons()),
+    )
+    tree.configure(yscrollcommand=lambda start,end: (
+        scroll.set(start,end),schedule_zoom_buttons(),
+    ))
     tree.pack(side="left",fill="both",expand=True)
     scroll.pack(side="right",fill="y")
 
@@ -690,6 +743,7 @@ def launch_gui(config_path):
                 count_total=conn.execute("SELECT COUNT(*) FROM alert_inbox").fetchone()[0]
             finally:
                 conn.close()
+            zoom_buttons.clear()
             for item in tree.get_children():
                 tree.delete(item)
             for item in rows:
@@ -712,6 +766,7 @@ def launch_gui(config_path):
                 details.delete("1.0","end")
                 details.configure(state="disabled")
                 notes.delete("1.0","end")
+            schedule_zoom_buttons()
             if migration["skipped"]:
                 messagebox.showwarning("Legacy alert import",
                     f"Skipped {migration['skipped']} invalid event log lines.")
@@ -1226,16 +1281,17 @@ def launch_gui(config_path):
         except Exception as exc:
             messagebox.showerror("Popup cannot be resent safely",str(exc),parent=root)
 
-    # The same safe navigation is available on EACH record, not just a
-    # bottom-of-window selected-row control. A Treeview cell is a click target.
-    def click_row_zoom(event):
-        if tree.identify_region(event.x,event.y)!="cell" or (
-                tree.identify_column(event.x)!="#9"):
-            return
-        row=tree.identify_row(event.y)
-        if not row:
+    # ttk.Treeview values are labels, NOT buttons. Provide a real ttk.Button
+    # in each visible Zoom cell, bound to that exact immutable Inbox row ID.
+    # Scrolling, resizing and data refresh reposition these buttons.
+    zoom_overlay_job=[None]
+
+    def click_row_zoom(row_id):
+        row=str(row_id)
+        if not tree.exists(row):
             return
         tree.selection_set(row)
+        tree.see(row)
         selected_id[0]=int(row)
         detail()
         try:
@@ -1247,9 +1303,33 @@ def launch_gui(config_path):
             )
         except Exception as exc:
             messagebox.showerror("Row zoom not queued",str(exc),parent=root)
-        return "break"
 
-    tree.bind("<ButtonRelease-1>",click_row_zoom,add="+")
+    def create_row_zoom_button(iid, command):
+        action=tree.set(iid,"Zoom")
+        caption="Find asset" if action=="Find current asset" else "Zoom"
+        return ttk.Button(tree,text=caption,command=command,style="TButton")
+
+    zoom_buttons=InboxZoomButtonOverlay(
+        tree,create_row_zoom_button,click_row_zoom
+    )
+
+    def render_zoom_buttons():
+        zoom_overlay_job[0]=None
+        if tree.winfo_exists():
+            zoom_buttons.layout()
+
+    def schedule_zoom_buttons():
+        if zoom_overlay_job[0] is None and tree.winfo_exists():
+            zoom_overlay_job[0]=root.after_idle(render_zoom_buttons)
+
+    # No cell-click guesswork: only pressing an actual row button queues zoom.
+    tree.bind("<Configure>",lambda _event:schedule_zoom_buttons(),add="+")
+    tree.bind("<MouseWheel>",lambda _event:schedule_zoom_buttons(),add="+")
+    tree.bind("<Button-4>",lambda _event:schedule_zoom_buttons(),add="+")
+    tree.bind("<Button-5>",lambda _event:schedule_zoom_buttons(),add="+")
+    tree.bind("<KeyRelease>",lambda _event:schedule_zoom_buttons(),add="+")
+    tree.bind("<ButtonRelease-1>",lambda _event:schedule_zoom_buttons(),add="+")
+
     ttk.Button(buttons,text="Zoom in ArcGIS Pro",command=zoom_selected).pack(side="left",padx=9)
     ttk.Button(buttons,text="Resend Windows Popup",command=resend_selected_popup).pack(side="left",padx=5)
     ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
