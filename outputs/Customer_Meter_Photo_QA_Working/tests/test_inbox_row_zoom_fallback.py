@@ -9,11 +9,12 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 
 from meter_photo_qa.notification_inbox import (
     connect_inbox, record_alert, mark_delivery, import_legacy_events,
     get_alert, queue_inbox_row_zoom, row_zoom_action, fresh_sent_alerts,
-    InboxZoomButtonOverlay,
+    InboxZoomButtonOverlay, queue_inbox_current_asset, navigation_receipt,
 )
 
 EVENT_MS=1792404000000
@@ -131,6 +132,77 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
                 fresh_sent_alerts(db,0,limit=0)
         finally:db.close()
 
+    def test_live_current_asset_request_is_separate_and_readonly(self):
+        db=connect_inbox(self.cfg)
+        try:
+            alert_id=record_alert(db,item(3639762),EVENT_MS+1000)
+            mark_delivery(db,alert_id,"SENT")
+            before=[dict(row) for row in db.execute(
+                "SELECT * FROM alert_inbox ORDER BY id"
+            )]
+        finally:
+            db.close()
+        current=queue_inbox_current_asset(self.cfg,alert_id,folder=self.queue)
+        req=json.loads(Path(current["request_file"]).read_text(encoding="utf-8"))
+        self.assertEqual(current["mode"],"FIND_CURRENT_ASSET_NOT_HISTORICAL_EVENT")
+        self.assertEqual(req["origin"],"REPORTAPP_MANUAL_FIND")
+        self.assertEqual(req["asset"],"pole")
+        self.assertEqual(req["objectid"],3639762)
+        self.assertNotIn("expected_globalid",req)
+        self.assertNotIn("expected_event_utc_ms",req)
+        self.assertNotIn("expected_actor",req)
+        db=connect_inbox(self.cfg)
+        try:
+            self.assertEqual(before,[dict(row) for row in db.execute(
+                "SELECT * FROM alert_inbox ORDER BY id"
+            )])
+        finally:
+            db.close()
+        strict=queue_inbox_row_zoom(self.cfg,alert_id,folder=self.queue)
+        verified=json.loads(Path(strict["request_file"]).read_text(encoding="utf-8"))
+        self.assertEqual(verified["origin"],"REPORTAPP_VERIFIED_ALERT")
+        self.assertEqual(verified["expected_event_utc_ms"],EVENT_MS)
+        self.assertEqual(verified["expected_globalid"],
+                         "142a4dba-f393-4597-90a9-3878a86827b9")
+
+    def test_missing_alert_does_not_queue_current_asset(self):
+        with self.assertRaises(ValueError):
+            queue_inbox_current_asset(self.cfg,9999,folder=self.queue)
+        self.assertFalse(list(self.queue.iterdir()))
+
+    def test_bridge_receipts_distinguish_failed_success_and_pending(self):
+        directory=Path(self.temp.name)/"APP"/"Navigation"
+        queue=directory/"Requests"
+        queue.mkdir(parents=True)
+        first=queue/(uuid.uuid4().hex+".json")
+        second=queue/(uuid.uuid4().hex+".json")
+        first.write_text("{}",encoding="utf-8")
+        self.assertEqual(navigation_receipt(first)["status"],"PENDING")
+        first.rename(Path(str(first)+".failed"))
+        (directory/"bridge-errors.log").write_text(
+            "2026-10-19T14:00:00+02:00 "+second.name+": Other request.\n"
+            "2026-10-19T14:02:00+02:00 "+first.name+
+            ": Map feature has a DIFFERENT edit time/editor from notification.\n",
+            encoding="utf-8",
+        )
+        outcome=navigation_receipt(first)
+        self.assertEqual(outcome["status"],"FAILED")
+        self.assertIn("DIFFERENT edit time/editor",outcome["detail"])
+        self.assertNotIn("Other request",outcome["detail"])
+        Path(str(second)+".done").write_text("{}",encoding="utf-8")
+        ok=navigation_receipt(second)
+        self.assertEqual(ok["status"],"DONE")
+        self.assertEqual(ok["detail"],"Other request.")
+        with self.assertRaises(ValueError):
+            navigation_receipt(queue/"badfilename.json")
+
+    def test_superseded_receipt_does_not_claim_success(self):
+        path=Path(self.temp.name)/(uuid.uuid4().hex+".json")
+        Path(str(path)+".superseded").write_text("",encoding="utf-8")
+        self.assertEqual(navigation_receipt(path)["status"],"SUPERSEDED")
+        self.assertEqual(navigation_receipt(Path(self.temp.name)/(uuid.uuid4().hex+".json"))["status"],
+                         "UNKNOWN")
+
     def test_real_row_buttons_trigger_only_the_exact_clicked_row(self):
         class FakeTree:
             def __init__(self):
@@ -222,7 +294,11 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
         self.assertIn('names=("ID","Received","Surveyor","Asset"',source)
         self.assertIn('"Delivery","Zoom")',source)
         self.assertIn('zoom_buttons=InboxZoomButtonOverlay(',source)
-        self.assertIn('return ttk.Button(tree,text=caption,command=command',source)
+        self.assertIn('ttk.Button(frame,text="Alert edit",command=command',source)
+        self.assertIn('command=lambda row=int(iid):find_current_row(row)',source)
+        self.assertIn('navigation_receipt(path)',source)
+        self.assertIn('ttk.Button(frame,text="Alert edit",command=command',source)
+        self.assertIn('ttk.Button(frame,text="Current asset",',source)
         self.assertIn('command=lambda *args: (tree.yview(*args),schedule_zoom_buttons())',source)
         self.assertNotIn('tree.identify_column(event.x)',source)
         self.assertIn('text="In-app gap popups"',source)

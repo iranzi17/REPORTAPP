@@ -239,6 +239,74 @@ def queue_inbox_row_zoom(config_path, row_id, *, folder=None):
     }
 
 
+
+
+def queue_inbox_current_asset(config_path, row_id, *, folder=None):
+    """Explicit operator request to inspect THIS alert's CURRENT asset.
+
+    This is not a verified historical source event. Exact stored asset type
+    and OBJECTID determine the manual request; no surveyor-based search or
+    silent fallback can substitute a different asset. The UI must explain
+    the difference and obtain a separate click/confirmation.
+    """
+    config_path=Path(config_path).expanduser().resolve()
+    db=connect_inbox(config_path)
+    try:
+        record=get_alert(db,row_id)
+    finally:
+        db.close()
+    if record is None:
+        raise ValueError("Selected Inbox alert is no longer available.")
+    from .alert_navigation import enqueue, zoom_uri
+    uri=zoom_uri(record["asset"],record["objectid"],manual=True)
+    queued=enqueue(uri,folder=folder)
+    return {
+        "alert_id":int(record["id"]), "asset":record["asset"],
+        "objectid":int(record["objectid"]), "mode":"FIND_CURRENT_ASSET_NOT_HISTORICAL_EVENT",
+        "request_file":queued["queue_file"],
+        "bridge_result":"QUEUED_NOT_YET_VERIFIED",
+    }
+
+
+def navigation_receipt(request_file):
+    """Read the exact ArcGIS Bridge receipt and its bounded local diagnostic.
+
+    A .json request is only queued; .json.done confirms the Bridge's
+    selection result. No source edits, watcher changes, polling retries or
+    queue modifications occur. A different click cannot satisfy this receipt.
+    """
+    path=Path(request_file).expanduser().resolve()
+    if not (path.name.endswith(".json") and
+            len(path.stem)==32 and
+            all(char in "0123456789abcdef" for char in path.stem)):
+        raise ValueError("Invalid navigation request receipt identity.")
+    for suffix,status in (
+        (".done","DONE"),(".failed","FAILED"),
+        (".invalid","INVALID"),(".superseded","SUPERSEDED"),
+        (".paused","PAUSED")
+    ):
+        if not Path(str(path)+suffix).is_file():
+            continue
+        note=""
+        logfile=path.parent.parent/"bridge-errors.log"
+        if logfile.is_file():
+            # Tail bounded bytes, not a potentially unlimited operator log.
+            with logfile.open("rb") as source:
+                source.seek(max(0,logfile.stat().st_size-131072))
+                recent=source.read().decode("utf-8",errors="replace")
+            needle=path.name+": "
+            for line in reversed(recent.splitlines()):
+                if needle in line:
+                    note=line.split(needle,1)[1].strip()
+                    break
+        return {"status":status,"detail":note,"request_file":str(path)}
+    if path.is_file():
+        return {"status":"PENDING","detail":"Waiting for ArcGIS Pro Bridge to process this click.",
+                "request_file":str(path)}
+    return {"status":"UNKNOWN","detail":"No matching Bridge receipt found.",
+            "request_file":str(path)}
+
+
 def fresh_sent_alerts(conn, after_id, limit=25):
     """Only new successfully dispatched LIVE gap events since Inbox opened.
 
@@ -652,10 +720,11 @@ def launch_gui(config_path):
         try:
             result=queue_find_asset(asset_choice.get(),find_oid.get())
             request=result["request"]
-            find_status.set(
-                f"Queued {asset_choice.get()} OBJECTID {request['objectid']}; "
-                "ArcGIS Pro will zoom if the record is accessible."
-            )
+            track_zoom_request({
+                "alert_id":"manual", "asset":request["asset"],
+                "objectid":request["objectid"],
+                "request_file":result["queue_file"],
+            })
         except Exception as exc:
             find_status.set("Unable to queue navigation. Check asset and OBJECTID.")
             messagebox.showerror("Find Asset",str(exc),parent=root)
@@ -665,7 +734,7 @@ def launch_gui(config_path):
     ).pack(side="left")
     # This feedback is deliberately 'queued', not 'found', until the
     # separate ArcGIS Pro bridge finishes its selection.
-    ttk.Label(root,textvariable=find_status).pack(
+    ttk.Label(root,textvariable=find_status,wraplength=1070).pack(
         fill="x",padx=18,pady=(0,6)
     )
     oid_entry.bind("<Return>",lambda _event:find_asset())
@@ -1256,11 +1325,7 @@ def launch_gui(config_path):
         if selected_id[0] is None:
             return
         try:
-            result=queue_inbox_row_zoom(config,selected_id[0])
-            find_status.set(
-                f"Inbox alert {result['alert_id']}: OBJECTID {result['objectid']} "
-                "queued. ArcGIS Pro must verify the current source before selecting."
-            )
+            track_zoom_request(queue_inbox_row_zoom(config,selected_id[0]))
         except Exception as exc:
             messagebox.showerror("REPORTAPP navigation",str(exc),parent=root)
 
@@ -1291,28 +1356,109 @@ def launch_gui(config_path):
     # Scrolling, resizing and data refresh reposition these buttons.
     zoom_overlay_job=[None]
 
-    def click_row_zoom(row_id):
+    # Watch exactly the queued request; processing and verification are
+    # performed by the installed ArcGIS Pro Bridge, never by the Inbox.
+    recent_request=[None]
+
+    def show_bridge_result(result, attempt=0):
+        path=result["request_file"]
+        if recent_request[0]!=path or not root.winfo_exists():
+            return
+        receipt=navigation_receipt(path)
+        label=(f"{'Find asset' if result['alert_id']=='manual' else 'Alert '+str(result['alert_id'])}"
+               f" — {result['asset'].upper()} OBJECTID {result['objectid']}: ")
+        if receipt["status"]=="PENDING" and attempt<17:
+            root.after(1000,lambda:show_bridge_result(result,attempt+1))
+            return
+        if receipt["status"]=="DONE":
+            find_status.set(label+"ArcGIS Pro Bridge reports successful selection.")
+        elif receipt["status"]=="FAILED":
+            reason=receipt["detail"] or "Bridge rejected the request; see bridge-errors.log."
+            if "DIFFERENT edit time/editor" in reason:
+                reason=("Original alert edit differs from the current source. "
+                        "Use Current to inspect today's asset; event remains unverified.")
+            find_status.set(label+"NOT zoomed. "+reason)
+        elif receipt["status"]=="SUPERSEDED":
+            find_status.set(label+"Not zoomed: a newer click superseded this request.")
+        elif receipt["status"]=="INVALID":
+            find_status.set(label+"Not zoomed: "+(receipt["detail"] or "Request invalid/expired."))
+        elif receipt["status"]=="PAUSED":
+            find_status.set(label+"Navigation was paused; old clicks will not be replayed.")
+        elif receipt["status"]=="PENDING":
+            find_status.set(label+"Not completed within 17 seconds; check ArcGIS Pro Bridge.")
+        else:
+            find_status.set(label+"No Bridge receipt available; inspect navigation log.")
+
+    def track_zoom_request(result):
+        recent_request[0]=result["request_file"]
+        title=("Find asset" if result["alert_id"]=="manual" else
+               f"Alert {result['alert_id']}")
+        find_status.set(
+            f"{title} — {result['asset'].upper()} "
+            f"OBJECTID {result['objectid']} queued; awaiting ArcGIS Pro verification."
+        )
+        root.after(1000,lambda:show_bridge_result(result))
+
+    def select_inbox_row(row_id):
         row=str(row_id)
         if not tree.exists(row):
-            return
+            return False
         tree.selection_set(row)
         tree.see(row)
         selected_id[0]=int(row)
         detail()
+        return True
+
+    def click_row_zoom(row_id):
+        if not select_inbox_row(row_id):
+            return
         try:
-            record_result=queue_inbox_row_zoom(config,int(row))
-            find_status.set(
-                f"Inbox alert {row} — {record_result['asset'].upper()} "
-                f"OBJECTID {record_result['objectid']} queued; "
-                "ArcGIS Pro will check the exact source before zooming."
-            )
+            track_zoom_request(queue_inbox_row_zoom(config,row_id))
         except Exception as exc:
-            messagebox.showerror("Row zoom not queued",str(exc),parent=root)
+            messagebox.showerror("Alert edit zoom not queued",str(exc),parent=root)
+
+    def find_current_row(row_id):
+        if not select_inbox_row(row_id):
+            return
+        db=connect_inbox(config)
+        try:
+            record=get_alert(db,row_id)
+        finally:
+            db.close()
+        if record is None:
+            messagebox.showerror("Find current asset","Alert record no longer exists.",parent=root)
+            return
+        if not messagebox.askyesno(
+            "Inspect current REG asset",
+            f"Find CURRENT {record['asset'].upper()} OBJECTID {record['objectid']} "
+            "in ArcGIS Pro?\n\n"
+            "This action uses the exact asset type and OBJECTID from this "
+            "Inbox row. It does NOT verify the original alert edit time, "
+            "surveyor or GlobalID. The ArcGIS Pro Bridge still checks "
+            "the REG source layer and sde.DEFAULT.\n\n"
+            "No GIS feature or Inbox history will be changed.",
+            parent=root,
+        ):
+            return
+        try:
+            track_zoom_request(queue_inbox_current_asset(config,row_id))
+        except Exception as exc:
+            messagebox.showerror("Current asset not queued",str(exc),parent=root)
 
     def create_row_zoom_button(iid, command):
         action=tree.set(iid,"Zoom")
-        caption="Find asset" if action=="Find current asset" else "Zoom"
-        return ttk.Button(tree,text=caption,command=command,style="TButton")
+        frame=ttk.Frame(tree)
+        if action=="Find current asset":
+            ttk.Button(frame,text="Current asset",
+                       command=lambda row=int(iid):find_current_row(row)
+                       ).pack(fill="both",expand=True)
+        else:
+            ttk.Button(frame,text="Alert edit",command=command
+                       ).pack(side="left",fill="both",expand=True)
+            ttk.Button(frame,text="Current",
+                       command=lambda row=int(iid):find_current_row(row)
+                       ).pack(side="left",fill="both",expand=True,padx=(3,0))
+        return frame
 
     zoom_buttons=InboxZoomButtonOverlay(
         tree,create_row_zoom_button,click_row_zoom
@@ -1336,6 +1482,9 @@ def launch_gui(config_path):
     tree.bind("<ButtonRelease-1>",lambda _event:schedule_zoom_buttons(),add="+")
 
     ttk.Button(buttons,text="Zoom in ArcGIS Pro",command=zoom_selected).pack(side="left",padx=9)
+    ttk.Button(buttons,text="Find selected current asset",
+               command=lambda:find_current_row(selected_id[0])
+               if selected_id[0] is not None else None).pack(side="left",padx=5)
     ttk.Button(buttons,text="Resend Windows Popup",command=resend_selected_popup).pack(side="left",padx=5)
     ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
     ttk.Button(buttons,text="Mark Reviewed",command=lambda:update("REVIEWED")).pack(side="left",padx=9)
@@ -1383,11 +1532,7 @@ def launch_gui(config_path):
         if row_id is None:
             return
         try:
-            queued=queue_inbox_row_zoom(config,row_id)
-            find_status.set(
-                f"New gap alert {queued['alert_id']}, OBJECTID "
-                f"{queued['objectid']} queued. Await ArcGIS Pro verification."
-            )
+            track_zoom_request(queue_inbox_row_zoom(config,row_id))
             dismiss_gap_popup()
         except Exception as exc:
             messagebox.showerror("Popup Zoom",str(exc),parent=active_popup[0] or root)
