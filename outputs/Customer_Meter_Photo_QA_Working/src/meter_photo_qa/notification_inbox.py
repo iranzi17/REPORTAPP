@@ -1399,7 +1399,8 @@ def launch_gui(config_path):
     db=connect_inbox(config)
     try:
         last_delivered_id[0]=int(db.execute(
-            "SELECT COALESCE(MAX(id),0) FROM alert_inbox"
+            """SELECT COALESCE(MAX(id),0) FROM alert_inbox
+               WHERE origin='LIVE' AND delivery_status='SENT'"""
         ).fetchone()[0])
     finally:
         db.close()
