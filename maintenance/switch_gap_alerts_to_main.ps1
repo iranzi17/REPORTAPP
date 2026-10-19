@@ -30,6 +30,16 @@ function SameAction($actual,$expected) {
             ($actual.Arguments -eq $expected.Arguments) -and
             ($actual.WorkingDirectory -eq $expected.WorkingDirectory))
 }
+function Test-AllowedArcGISMetadataEdit([string]$entry) {
+    # Status format: two position flags, space, repo-relative file path.
+    # Deliberately allow ONLY a modified (unstaged) ArcGIS-generated XML.
+    # Any staged deletion, rename, executable or config modification blocks.
+    if ([string]::IsNullOrWhiteSpace($entry) -or $entry.Length -lt 4) { return $false }
+    $state = $entry.Substring(0,2)
+    $name = $entry.Substring(3).Replace('\','/')
+    return ($state -ceq ' M' -and
+        $name -ceq 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt.xml')
+}
 function ReadyTask([int]$seconds=145) {
     $until=(Get-Date).AddSeconds($seconds)
     while ((Get-Date) -le $until) {
@@ -76,8 +86,22 @@ try {
     $branch = (& git -C $repo branch --show-current).Trim()
     if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') { throw 'Git checkout must be main.' }
     $dirty = @(& git -C $repo status --porcelain --untracked-files=no)
-    if ($LASTEXITCODE -ne 0 -or ($dirty | Where-Object { $_ })) {
-        throw 'Tracked Git files are modified; resolve them before switching.'
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot check Git working tree status.' }
+    # ArcGIS Pro rewrites the tracked companion .pyt.xml toolbox metadata
+    # (often a single XML property) during ordinary map/toolbox use.
+    # This file is not executable Python, nor watcher configuration.
+    # Preserve it IN PLACE rather than stashing, restoring or resetting it.
+    # Do not generalize this exception to other XML, Python or task files.
+    $otherChanges = @($dirty | Where-Object {
+        -not (Test-AllowedArcGISMetadataEdit $_)
+    })
+    if ($otherChanges.Count -gt 0) {
+        throw ('Tracked executable/config/other changes detected; no switch. ' +
+               'Only the known locally modified ArcGIS toolbox .pyt.xml is permitted: ' +
+               ($otherChanges -join '; '))
+    }
+    if ($dirty.Count -gt 0) {
+        Write-Host 'Preserving ArcGIS toolbox metadata change in place; it is NOT part of the watcher.'
     }
     $head = (& git -C $repo rev-parse HEAD).Trim()
     $origin = (& git -C $repo rev-parse refs/remotes/origin/main).Trim()

@@ -89,4 +89,32 @@ jobs:
               throw "Operator task script is missing safeguard: $required"
             }
           }
+          # Exercise only the isolated status-check function, never run the
+          # operator script or connect to Task Scheduler.
+          $helper = $tree.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq 'Test-AllowedArcGISMetadataEdit'
+          }, $true)
+          if (-not $helper) { throw "Missing exact metadata safety helper" }
+          Invoke-Expression $helper.Extent.Text
+          $xml = 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt.xml'
+          if (-not (Test-AllowedArcGISMetadataEdit (" M " + $xml))) {
+            throw 'Legitimate unstaged ArcGIS toolbox metadata must be permitted'
+          }
+          foreach ($bad in @(
+            ("M  " + $xml),
+            (" D " + $xml),
+            ("R  " + $xml),
+            (" M " + $xml + '.backup'),
+            ' M outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt',
+            ' M outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_notifications.py',
+            ' M outputs/Customer_Meter_Photo_QA_Working/outputs/monitor_config.json',
+            ' M maintenance/switch_gap_alerts_to_main.ps1'
+          )) {
+            if (Test-AllowedArcGISMetadataEdit $bad) {
+              throw "Unsafe tracked worktree change incorrectly allowed: $bad"
+            }
+          }
+          Write-Host "Exact .pyt.xml exception safe; all executable/config changes rejected."
           Write-Host "PowerShell parsed; no Windows Scheduled Tasks were modified."
