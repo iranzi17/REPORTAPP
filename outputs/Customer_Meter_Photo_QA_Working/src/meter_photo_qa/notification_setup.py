@@ -116,6 +116,7 @@ def configure_monitoring(
         "version":"sde.DEFAULT",
         "feature_service_url":"https://gisweb.reg.rw/server/rest/services/REGUN_Service__Versio2/FeatureServer",
         "poll_interval_seconds":60,
+        "pole_manufacturer_gap_enabled":False,
         "minimum_notification_age_seconds":300,
         "lookback_hours":24,
         "notices_sent_at_setup":0,
@@ -328,3 +329,47 @@ def update_monitored_assets(config_path, assets, *, now_ms=None, validator=None)
         "backup":str(backup),
         "config_path":str(path),
     }
+
+def set_pole_manufacturer_gap_check(config_path, include):
+    """Enable/disable OPTIONAL Manufacturer-only pole gap alerts, safely.
+
+    Uses the existing one-minute task and monitored users; never rewrites
+    the event database, surveyor activation timestamps or GIS features.
+    """
+    if type(include) is not bool:
+        raise ValueError("Manufacturer gap option must be a boolean.")
+    path=Path(config_path).expanduser().resolve()
+    config=json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(config,dict) or not isinstance(config.get("usernames"),list):
+        raise ValueError("Invalid REPORTAPP monitor configuration.")
+    if "enabled_at_utc_ms" not in config or not config.get("assets"):
+        raise ValueError("Missing watcher configuration metadata.")
+    previous=config.get("pole_manufacturer_gap_enabled",False)
+    if type(previous) is not bool:
+        raise ValueError("Existing Manufacturer setting is not a boolean.")
+    if previous is include:
+        return {"status":"UNCHANGED","pole_manufacturer_gap_enabled":include}
+    config["pole_manufacturer_gap_enabled"]=include
+    backup=path.with_name(
+        path.stem+"_backup_"+datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        +path.suffix
+    )
+    shutil.copy2(path,backup)
+    temporary=None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",encoding="utf-8",dir=path.parent,
+            prefix="."+path.stem+"_",suffix=".tmp",delete=False,
+        ) as handle:
+            temporary=Path(handle.name)
+            json.dump(config,handle,indent=2,ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary,path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    return {"status":"UPDATED","pole_manufacturer_gap_enabled":include,
+            "backup":str(backup),"config_path":str(path)}
+
