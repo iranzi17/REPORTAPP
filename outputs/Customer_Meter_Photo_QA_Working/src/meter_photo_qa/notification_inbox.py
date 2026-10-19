@@ -998,6 +998,44 @@ def launch_gui(config_path):
     ttk.Button(controls,text="Site Status",command=configure_site_presence).pack(
         side="left",padx=(8,0)
     )
+    # Opt-in for the legacy pole Manufacturer rule. The default is OFF;
+    # any Manufacturer value is still visible in Excel and source attributes.
+    from .notification_setup import set_pole_manufacturer_gap_check
+    def _manufacturer_setting():
+        live=json.loads(config.read_text(encoding="utf-8"))
+        return live.get("pole_manufacturer_gap_enabled",False) is True
+
+    manufacturer_var=tk.BooleanVar(value=_manufacturer_setting())
+    def toggle_manufacturer_gaps():
+        requested=manufacturer_var.get()
+        previous=not requested
+        if not messagebox.askyesno(
+            "Optional Pole Manufacturer",
+            ("Include missing Pole Manufacturer in future gap notifications?"
+             if requested else
+             "Stop counting missing Pole Manufacturer as a notification gap?")
+            +"\nOther pole rules are unchanged.",
+            parent=root,
+        ):
+            manufacturer_var.set(previous)
+            return
+        try:
+            set_pole_manufacturer_gap_check(config,requested)
+            messagebox.showinfo(
+                "Manufacturer rule updated",
+                "The configuration is saved. New scans using the current "
+                "REPORTAPP source will use this rule. Existing sent alerts "
+                "and GIS data are unchanged.",
+                parent=root,
+            )
+        except Exception as exc:
+            manufacturer_var.set(previous)
+            messagebox.showerror("Rule not updated",str(exc),parent=root)
+    ttk.Checkbutton(
+        controls,text="Include Pole Manufacturer gaps",
+        variable=manufacturer_var,command=toggle_manufacturer_gaps,
+    ).pack(side="left",padx=(8,0))
+
     def _navigation_paused():
         from .alert_navigation import queue_folder
         return (queue_folder().parent/"navigation-paused.flag").exists()
@@ -1178,12 +1216,22 @@ def main(argv=None):
     mode.add_argument("--review",type=int,metavar="ID",help="Mark local alert reviewed")
     mode.add_argument("--reopen",type=int,metavar="ID",help="Reopen local alert")
     mode.add_argument("--resend-alert",type=int,metavar="ID",help="Operator-only resend of a verified saved LIVE Windows alert")
+    mode.add_argument("--pole-manufacturer",choices=("include","exclude"),
+                      help="Opt in/out of pole Manufacturer gaps in the existing live monitor")
     mode.add_argument("--add-user",action="append",metavar="USERNAME",help="Add monitored portal username without resetting the config")
     mode.add_argument("--remove-user",action="append",metavar="USERNAME",help="Remove monitored portal username without losing inbox history")
     mode.add_argument("--set-assets",nargs="+",metavar="ASSET",
                       help="Verify and set shared asset classes: line transformer pole")
     parser.add_argument("--note",help="Supervisor remark for --review/--reopen")
     options=parser.parse_args(argv)
+    if options.pole_manufacturer is not None:
+        from .notification_setup import set_pole_manufacturer_gap_check
+        print(json.dumps(
+            set_pole_manufacturer_gap_check(
+                options.config, options.pole_manufacturer=="include"
+            ),indent=2,ensure_ascii=False
+        ))
+        return 0
     if options.resend_alert is not None:
         print(json.dumps(resend_saved_alert(options.config,options.resend_alert),
                          indent=2,ensure_ascii=False))
