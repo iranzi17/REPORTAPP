@@ -22,8 +22,16 @@ function SaveReport($state, $reason) {
     Write-Host ("REPORTAPP: "+$state+" "+$reason)
     Write-Host ("Report: "+$report)
 }
-function NewAction($exe,$args,$working) {
-    return New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $working
+function NewAction {
+    param(
+        [Parameter(Mandatory=$true)][string]$Executable,
+        [Parameter(Mandatory=$true)][string]$ArgumentLine,
+        [Parameter(Mandatory=$true)][string]$WorkingFolder
+    )
+    # PowerShell reserves $args for automatic unbound function arguments.
+    # A parameter named $args can resolve to an array/empty collection,
+    # which ScheduledTasks cannot coerce to its required -Argument string.
+    return New-ScheduledTaskAction -Execute $Executable -Argument $ArgumentLine -WorkingDirectory $WorkingFolder
 }
 function SameAction($actual,$expected) {
     return (($actual.Execute -eq $expected.Execute) -and
