@@ -62,7 +62,9 @@ class NotificationTests(unittest.TestCase):
                 self.assertEqual(kwargs["max_per_asset"],600)
                 return {"pole":([
                     pole(recent,append="No",height=13.5),
-                    dict(pole(recent),OBJECTID=202,last_edited_user="otheruser"),
+                    dict(pole(recent),OBJECTID=202,
+                         created_date=recent-1000,
+                         last_edited_user="otheruser"),
                     dict(pole(now_ms-8*3600000),OBJECTID=203),
                 ],FIELDS,{},None,None)}
             with patch("meter_photo_qa.surveyor_notifications.record_findings",
