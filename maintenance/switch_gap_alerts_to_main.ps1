@@ -76,8 +76,27 @@ try {
     $branch = (& git -C $repo branch --show-current).Trim()
     if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') { throw 'Git checkout must be main.' }
     $dirty = @(& git -C $repo status --porcelain --untracked-files=no)
-    if ($LASTEXITCODE -ne 0 -or ($dirty | Where-Object { $_ })) {
-        throw 'Tracked Git files are modified; resolve them before switching.'
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot check Git working tree status.' }
+    # ArcGIS Pro rewrites the tracked companion .pyt.xml toolbox metadata
+    # (often a single XML property) during ordinary map/toolbox use.
+    # This file is not executable Python, nor watcher configuration.
+    # Preserve it IN PLACE rather than stashing, restoring or resetting it.
+    # Do not generalize this exception to other XML, Python or task files.
+    $metadata = 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt.xml'
+    $otherChanges = @($dirty | Where-Object {
+        if ([string]::IsNullOrWhiteSpace($_)) { return $false }
+        if ($_.Length -lt 4) { return $true }
+        $state = $_.Substring(0,2)
+        $name = $_.Substring(3).Replace('\\','/')
+        return -not ($state -ceq ' M' -and $name -ceq $metadata)
+    })
+    if ($otherChanges.Count -gt 0) {
+        throw ('Tracked executable/config/other changes detected; no switch. ' +
+               'Only the known locally modified ArcGIS toolbox .pyt.xml is permitted: ' +
+               ($otherChanges -join '; '))
+    }
+    if ($dirty.Count -gt 0) {
+        Write-Host 'Preserving ArcGIS toolbox metadata change in place; it is NOT part of the watcher.'
     }
     $head = (& git -C $repo rev-parse HEAD).Trim()
     $origin = (& git -C $repo rev-parse refs/remotes/origin/main).Trim()
