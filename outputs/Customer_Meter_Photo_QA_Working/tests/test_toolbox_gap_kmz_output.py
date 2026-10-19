@@ -23,11 +23,11 @@ def method_in_class(cls, name):
 class DerivedKMZOutputTests(TestCase):
     def test_pole_and_transformer_derive_kmz_without_changing_inputs(self):
         parameter_list = method_in_class("_AssetQualityTool", "getParameterInfo")
-        last = next(x.value for x in ast.walk(parameter_list)
-                    if isinstance(x, ast.Return))
-        self.assertIsInstance(last, ast.List)
-        self.assertEqual(len(last.elts), 12)
-        self.assertEqual(last.elts[-1].id, "gap_kmz")
+        returns = [x.value for x in ast.walk(parameter_list)
+                   if isinstance(x, ast.Return)]
+        self.assertEqual(len(returns), 1)
+        self.assertIsInstance(returns[0], ast.Name)
+        self.assertEqual(returns[0].id, "result")
         parameters = [x for x in ast.walk(parameter_list)
                       if isinstance(x, ast.Call)
                       and isinstance(x.func, ast.Attribute)
@@ -98,10 +98,14 @@ class DerivedKMZOutputTests(TestCase):
             with self.subTest(asset=asset):
                 params=self._open_tool_with_realistic_derived_file_filter(
                     "_AssetQualityTool",asset)
-                self.assertEqual(len(params),12)
-                self.assertEqual(params[-1].name,"output_gap_kmz")
-                self.assertEqual(params[-1].datatype,"DEFile")
-                self.assertIsNone(params[-1].filter)
+                self.assertEqual(len(params),13 if asset=="pole" else 12)
+                self.assertEqual(params[11].name,"output_gap_kmz")
+                self.assertEqual(params[11].datatype,"DEFile")
+                self.assertIsNone(params[11].filter)
+                if asset=="pole":
+                    self.assertEqual(params[12].name,"include_pole_manufacturer")
+                    self.assertEqual(params[12].datatype,"GPBoolean")
+                    self.assertIs(params[12].value,False)
                 self.assertEqual(params[0].filter.list,["xlsx"])
         line=self._open_tool_with_realistic_derived_file_filter(
             "WatchLVLineDataQuality","line")
@@ -129,7 +133,7 @@ class DerivedKMZOutputTests(TestCase):
         }
         result = {"output_kmz": "C:/Reports/poles_Gaps.kmz"}
         parameters = [SimpleNamespace(valueAsText="", value=None)
-                      for _ in range(12)]
+                      for _ in range(13)]
         names = {
             "arcpy": gp,
             "json": json,
@@ -144,6 +148,16 @@ class DerivedKMZOutputTests(TestCase):
         gp.SetParameterAsText.assert_any_call(0, "C:/Reports/poles.xlsx")
         gp.SetParameterAsText.assert_any_call(11, "C:/Reports/poles_Gaps.kmz")
         self.assertEqual(names["_export_companion_kmz"].call_count, 1)
+        self.assertFalse(
+            names["run_asset_quality"].call_args.kwargs["include_pole_manufacturer"]
+        )
+        parameters[12].valueAsText="true"
+        names["execute"](tool, parameters, None)
+        self.assertTrue(
+            names["run_asset_quality"].call_args.kwargs["include_pole_manufacturer"]
+        )
+        parameters[12].valueAsText=""
+
         # If source geometry is incomplete, Excel output remains valid, but
         # no KMZ derived path must be advertised as a successful output.
         gp.reset_mock()

@@ -1124,8 +1124,17 @@ class _AssetQualityTool:
         # ArcGIS Pro returns filter=None for a Derived DEFile output.
         # Its output path is already produced as *_Gaps.kmz by export_gap_kmz;
         # accessing filter.list here crashes getParameterInfo for all QA tools.
-        return [output, start, end, district, sectors, cells,
-                custom, users, service, boundaries, version, gap_kmz]
+        result = [output, start, end, district, sectors, cells,
+                  custom, users, service, boundaries, version, gap_kmz]
+        if self.asset == "pole":
+            manufacturer_check = arcpy.Parameter(
+                displayName="Include Pole Manufacturer in Gap Checks (optional)",
+                name="include_pole_manufacturer", datatype="GPBoolean",
+                parameterType="Optional", direction="Input",
+            )
+            manufacturer_check.value = False
+            result.append(manufacturer_check)
+        return result
 
     def updateParameters(self, parameters):
         _apply_boundary_filters(parameters, 3, 4, 5)
@@ -1153,6 +1162,10 @@ class _AssetQualityTool:
             service_url=parameters[8].valueAsText or None,
             boundary_service_url=parameters[9].valueAsText or None,
             version=parameters[10].valueAsText or "sde.DEFAULT",
+            include_pole_manufacturer=(
+                str(parameters[12].valueAsText or "").casefold() == "true"
+                if self.asset == "pole" else False
+            ),
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
         kmz = _export_companion_kmz(

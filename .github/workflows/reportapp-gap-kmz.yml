@@ -41,6 +41,7 @@ jobs:
           PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
         run: |
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_combined_qa_report.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_asset_quality.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_asset_quality_workflow.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_toolbox_gap_kmz_output.py -v
           # ArcGIS Pro toolbox UI tests require arcpy on a licensed Windows

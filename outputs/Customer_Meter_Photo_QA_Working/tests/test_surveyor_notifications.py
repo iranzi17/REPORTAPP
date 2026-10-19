@@ -15,6 +15,7 @@ from meter_photo_qa.surveyor_notifications import (
 from meter_photo_qa.notification_setup import (
     configure_monitoring,chosen_usernames,_powershell,_standalone_python,
     update_monitored_surveyors,update_monitored_assets,
+    set_pole_manufacturer_gap_check,
 )
 
 
@@ -219,8 +220,59 @@ class NotificationTests(unittest.TestCase):
                 issues=ready_alerts(
                     [entry],"pole",FIELDS,{},CONFIG,1400000,state
                 )[0]["issues"]
+                self.assertEqual(len(issues),4)
+                self.assertFalse(any("Manufacturer missing" in x for x in issues))
+                opt_in=dict(CONFIG,pole_manufacturer_gap_enabled=True)
+                issues=ready_alerts(
+                    [entry],"pole",FIELDS,{},opt_in,1400000,state
+                )[0]["issues"]
                 self.assertEqual(len(issues),5)
                 self.assertIn("Manufacturer missing and Notes empty",issues)
+            finally:
+                state.close()
+
+    def test_optional_manufacturer_config_toggle_preserves_user_and_history(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cfg=Path(folder)/"monitor_config.json"
+            setup=dict(CONFIG,pole_manufacturer_gap_enabled=False)
+            cfg.write_text(json.dumps(setup),encoding="utf-8")
+            sent=cfg.with_suffix(".sqlite3")
+            sent.write_bytes(b"EXISTING SQLITE BYTES UNTOUCHED")
+            before=sent.read_bytes()
+            out=set_pole_manufacturer_gap_check(cfg,True)
+            self.assertEqual(out["status"],"UPDATED")
+            self.assertTrue(Path(out["backup"]).is_file())
+            saved=json.loads(cfg.read_text(encoding="utf-8"))
+            self.assertTrue(saved["pole_manufacturer_gap_enabled"])
+            self.assertEqual(saved["usernames"],CONFIG["usernames"])
+            self.assertEqual(saved["enabled_at_utc_ms"],CONFIG["enabled_at_utc_ms"])
+            self.assertEqual(sent.read_bytes(),before)
+            unchanged=set_pole_manufacturer_gap_check(cfg,True)
+            self.assertEqual(unchanged["status"],"UNCHANGED")
+            set_pole_manufacturer_gap_check(cfg,False)
+            self.assertFalse(json.loads(cfg.read_text())["pole_manufacturer_gap_enabled"])
+            with self.assertRaises(ValueError):
+                set_pole_manufacturer_gap_check(cfg,"true")
+
+    def test_missing_manufacturer_alone_never_triggers_default_live_alert(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=State(Path(folder)/"manufacturer.sqlite3")
+            try:
+                only_missing=pole(
+                    1100000,notes="",append="No",height=10,manufacturer=None
+                )
+                alerts=ready_alerts(
+                    [only_missing],"pole",FIELDS,{},CONFIG,1400000,state
+                )
+                self.assertEqual(alerts,[])
+                alerts=ready_alerts(
+                    [only_missing],"pole",FIELDS,{},
+                    dict(CONFIG,pole_manufacturer_gap_enabled=True),1400000,state
+                )
+                self.assertEqual(len(alerts),1)
+                self.assertEqual(
+                    alerts[0]["issues"],["Manufacturer missing and Notes empty"]
+                )
             finally:
                 state.close()
 
@@ -245,7 +297,7 @@ class NotificationTests(unittest.TestCase):
                 sample["PoleStructure"]=5
                 issues=ready_alerts(
                     [sample],"pole",FIELDS,{"PoleStructure":{4:"Substandard",5:"Standard"}},
-                    CONFIG,1400000,state,
+                    dict(CONFIG,pole_manufacturer_gap_enabled=True),1400000,state,
                 )
                 self.assertEqual(len(issues),1)
                 self.assertTrue(any("Manufacturer missing" in issue

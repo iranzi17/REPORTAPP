@@ -65,7 +65,7 @@ def _filters_for_area(boundary_features, custom_boundary_geometry):
     return result
 
 
-def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_areas, start, end, selected_users):
+def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_areas, start, end, selected_users, include_pole_manufacturer=False):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -103,6 +103,9 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
         ("Additional copies beyond one per GlobalID", "extra_records_with_reused_globalids"),
     ]:
         overview.append([label, summary[key]])
+    if asset == "pole":
+        overview.append(["Include Manufacturer in gap checks",
+                         "YES (optional opt-in)" if include_pole_manufacturer else "NO (default)"])
     overview.append(["Source", "REGUN FeatureServer (read-only)"])
     overview.append(["Interpretation", "Missing template fields are NOT checked; see Schema Verification."])
     if asset == "pole":
@@ -280,7 +283,8 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
             "; ".join(candidates),
         ])
     schema.append(["NOTE", "", "Branch is never scored or required." if asset == "transformer"
-                   else "Manufacturer is flagged only if the manufacturer AND Notes are empty.", ""])
+                   else ("Manufacturer gap checking enabled by choice." if include_pole_manufacturer
+                         else "Manufacturer is optional: displayed for reference, not scored as a gap."), ""])
     schema.append(["NOTE", "", "Review unrecognized live schema fields before judging results.", ""])
     schema.append(["Live Feature Service Field", "Alias", "Type", ""])
     for field in fields:
@@ -293,9 +297,12 @@ def _report_xlsx(output_path, asset, rows, mapping, fields, summary, selected_ar
     rules_sheet.append(["Transformer", "Supplementary fields", "Manufacturer, Serial and Rated kVA are displayed where available but NOT scored in the original correction register."])
     rules_sheet.append(["Transformer", "Branch", "Explicitly excluded from mandatory checking."])
     rules_sheet.append([
-        "LV Pole", "Manufacturer", "Flag only when Manufacturer is missing, Notes is empty, "
-        "and PoleStructure is NOT Substandard. The Substandard option exempts this "
-        "manufacturer check even with blank Notes. All other pole rules still apply."
+        "LV Pole", "Manufacturer (optional)",
+        ("Opt-in ENABLED: flag only when Manufacturer is missing, Notes empty, "
+         "and PoleStructure is not Substandard. "
+         if include_pole_manufacturer else
+         "Opt-in DISABLED: not a gap even if Manufacturer and Notes are empty. ")
+        + "The value and evidence status are always shown for review."
     ])
     rules_sheet.append([
         "LV Pole", "Nameplate evidence", "An explicit no-nameplate statement is marked "
@@ -380,6 +387,7 @@ def run_asset_quality(
     boundary_service_url: str | None = None,
     version: str = "sde.DEFAULT",
     gis: Any | None = None,
+    include_pole_manufacturer: bool = False,
 ) -> dict[str, Any]:
     """Run one strict asset-class audit against live REGUN metadata."""
     if asset not in ASSETS:
@@ -438,7 +446,10 @@ def run_asset_quality(
     )
     domains = domain_map(layer.properties, ASSETS[asset]["asset_group"])
     results = [
-        evaluate_asset(item, asset, mapping, domains)
+        evaluate_asset(
+            item, asset, mapping, domains,
+            include_pole_manufacturer=include_pole_manufacturer if asset == "pole" else False,
+        )
         for item in attributes
     ]
     duplicate_groups = annotate_duplicate_asset_globalids(results)
@@ -462,9 +473,10 @@ def run_asset_quality(
     selected_users = sorted({str(user).strip() for user in (usernames or [])
                              if str(user).strip()}, key=str.casefold)
     _report_xlsx(output, asset, results, mapping, fields, counts, selected, start, end,
-                 selected_users)
+                 selected_users, include_pole_manufacturer=include_pole_manufacturer)
     return {
         "read_only": True, "asset": asset, "output_xlsx": str(output),
+        "include_pole_manufacturer": bool(include_pole_manufacturer) if asset == "pole" else False,
         "districts": selected, "date_start": start.isoformat(),
         "date_end": end.isoformat(), **counts,
         "surveyor_filter": selected_users,

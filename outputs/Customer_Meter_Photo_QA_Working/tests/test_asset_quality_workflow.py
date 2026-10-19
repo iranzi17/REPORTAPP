@@ -74,7 +74,7 @@ def pole(gid, oid, note="", manufacturer=None, atype=1,
 
 
 class AssetWorkflowTests(unittest.TestCase):
-    def run_fake(self, asset, records):
+    def run_fake(self, asset, records, *, include_pole_manufacturer=True):
         layer = FakeLayer(records)
         module_arcgis = types.ModuleType("arcgis")
         module_features = types.ModuleType("arcgis.features")
@@ -92,6 +92,7 @@ class AssetWorkflowTests(unittest.TestCase):
                     asset, Path(folder)/"asset_qc.xlsx",
                     "2026-10-01", "2026-10-13",
                     service_url=DEFAULT_LINE_SERVICE_URL, gis=object(),
+                    include_pole_manufacturer=include_pole_manufacturer,
                 )
                 wb = load_workbook(output["output_xlsx"], read_only=True)
                 snapshot = {
@@ -133,6 +134,25 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertTrue(any(x[0] == "name" and x[1] == "Transfomer_name_"
                             for x in sheets["Schema Verification"]))
 
+    def test_default_pole_report_excludes_manufacturer_without_losing_evidence(self):
+        entry=pole("{OPTIONAL}",123,"",manufacturer=None)
+        report,sheets,_=self.run_fake(
+            "pole",[entry],include_pole_manufacturer=False
+        )
+        self.assertEqual(report["with_gaps"],0)
+        self.assertEqual(report["no_gaps_found"],1)
+        self.assertFalse(report["include_pole_manufacturer"])
+        summary=dict(row[:2] for row in sheets["Summary"] if row[0])
+        self.assertEqual(summary["Include Manufacturer in gap checks"],"NO (default)")
+        detail=sheets["Asset Details"][1]
+        self.assertEqual(detail[0],"NO_GAPS_FOUND")
+        self.assertEqual(detail[21],"MISSING_MANUFACTURER_NOTES")
+        rule=[row for row in sheets["Rules"] if row[1]=="Manufacturer (optional)"]
+        self.assertEqual(len(rule),1)
+        self.assertIn("Opt-in DISABLED",rule[0][2])
+        enabled,_,_=self.run_fake("pole",[entry],include_pole_manufacturer=True)
+        self.assertEqual(enabled["with_gaps"],1)
+
     def test_poles_documented_absent_nameplate(self):
         report, sheets, requests = self.run_fake(
             "pole", [pole("{P1}", 1, "No name plate"),
@@ -171,7 +191,7 @@ class AssetWorkflowTests(unittest.TestCase):
         self.assertIn("Manufacturer missing and Notes empty",lines[502][8])
         self.assertEqual(lines[502][0],"GAP")
         self.assertTrue(any(
-            row[1]=="Manufacturer" and "Substandard" in str(row[2])
+            row[1]=="Manufacturer (optional)" and "Substandard" in str(row[2])
             for row in sheets["Rules"][1:]
         ))
 
