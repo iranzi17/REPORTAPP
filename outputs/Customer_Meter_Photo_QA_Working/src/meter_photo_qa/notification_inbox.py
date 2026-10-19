@@ -255,6 +255,72 @@ def fresh_sent_alerts(conn, after_id, limit=25):
     return [dict(row) for row in records]
 
 
+
+def fallback_delivery_snapshot(conn):
+    """Atomically baseline dispatched alerts and preserve still-undelivered IDs.
+
+    A PENDING record may turn SENT after a newer ID has already been sent.
+    Capture these pending IDs so an ID high-water mark cannot hide its popup.
+    No database records or notification statuses are changed.
+    """
+    conn.execute("BEGIN")
+    try:
+        cursor = int(conn.execute(
+            "SELECT COALESCE(MAX(id),0) FROM alert_inbox"
+        ).fetchone()[0])
+        pending = {
+            int(row[0]) for row in conn.execute(
+                """SELECT id FROM alert_inbox WHERE origin='LIVE'
+                   AND delivery_status!='SENT'"""
+            )
+        }
+    finally:
+        conn.rollback()
+    return cursor, pending
+
+
+def poll_sent_alerts(conn, after_id, pending_ids, *, limit=100):
+    """Read newly SENT live gaps, including delayed out-of-order dispatches.
+
+    Visit new IDs in ascending batches (no skipped backlog), retaining every
+    unsent LIVE ID for later rechecking. Existing SENT rows before launch are
+    excluded by the caller's baseline. This is read-only SQLite access.
+    """
+    if not 1 <= int(limit) <= 500:
+        raise ValueError("Popup polling batch limit must be 1..500")
+    pending = {int(value) for value in pending_ids}
+    cursor = int(after_id)
+    rows = conn.execute(
+        "SELECT * FROM alert_inbox WHERE id>? ORDER BY id ASC LIMIT ?",
+        (cursor, int(limit)),
+    ).fetchall()
+    new_sent = {}
+    for row in rows:
+        row_id = int(row["id"])
+        cursor = max(cursor, row_id)
+        if row["origin"] != "LIVE":
+            continue
+        if row["delivery_status"] == "SENT":
+            new_sent[row_id] = dict(row)
+            pending.discard(row_id)
+        else:
+            pending.add(row_id)
+
+    # SQLite limits SQL parameters. Pending records are checked in chunks,
+    # including records whose IDs fall below the latest dispatched ID.
+    for offset in range(0, len(pending), 400):
+        chunk = sorted(pending)[offset:offset + 400]
+        placeholders = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+            "SELECT * FROM alert_inbox WHERE delivery_status='SENT' "
+            f"AND origin='LIVE' AND id IN ({placeholders})", chunk
+        ):
+            row_id = int(row["id"])
+            new_sent[row_id] = dict(row)
+    pending.difference_update(new_sent)
+    return sorted(new_sent.values(), key=lambda item: item["id"]), cursor, pending
+
+
 def resend_saved_alert(config_path, row_id, *, source_verifier=None, sender=None):
     """Operator-only recovery of a missed Windows banner, without a new scan.
 
@@ -1283,7 +1349,8 @@ def launch_gui(config_path):
     active_popup=[None]
     popup_alert_id=[None]
     popup_label=[None]
-    last_delivered_id=[0]
+    scan_cursor=[0]
+    pending_delivery_ids=[set()]
 
     def dismiss_gap_popup():
         window=active_popup[0]
@@ -1372,36 +1439,29 @@ def launch_gui(config_path):
         try:
             db=connect_inbox(config)
             try:
-                delivered=fresh_sent_alerts(db,last_delivered_id[0])
-                if delivered:
-                    count=db.execute(
-                        """SELECT COUNT(*) FROM alert_inbox WHERE id>?
-                           AND origin='LIVE' AND delivery_status='SENT'""",
-                        (last_delivered_id[0],),
-                    ).fetchone()[0]
+                delivered,new_cursor,pending=poll_sent_alerts(
+                    db,scan_cursor[0],pending_delivery_ids[0],
+                )
             finally:
                 db.close()
-            if delivered:
-                last_delivered_id[0]=max(int(r["id"]) for r in delivered)
-                if in_app_popups.get():
-                    show_new_gap_popup(delivered[0],count)
-            elif not in_app_popups.get():
+            scan_cursor[0]=new_cursor
+            pending_delivery_ids[0]=pending
+            if not in_app_popups.get():
                 dismiss_gap_popup()
+            elif delivered:
+                show_new_gap_popup(delivered[-1],len(delivered))
         except Exception:
-            # Leave the Inbox usable during a transient SQLite contention.
-            # Do not acknowledge unread events or change watcher state.
+            # Do not advance the cursor on SQLite failures; retry next poll.
+            # Neither the monitored accounts nor notification history change.
             pass
         root.after(10000,poll_new_gap_alerts)
 
     refresh()
-    # Ignore preexisting delivered records on GUI launch. Only alerts newly
-    # delivered while the Inbox is open produce an in-app popup.
+    # Existing SENT history is not replayed. Pending records at launch stay
+    # eligible if their Windows dispatch completes after the GUI opens.
     db=connect_inbox(config)
     try:
-        last_delivered_id[0]=int(db.execute(
-            """SELECT COALESCE(MAX(id),0) FROM alert_inbox
-               WHERE origin='LIVE' AND delivery_status='SENT'"""
-        ).fetchone()[0])
+        scan_cursor[0],pending_delivery_ids[0]=fallback_delivery_snapshot(db)
     finally:
         db.close()
     root.after(15000,auto_refresh)

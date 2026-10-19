@@ -13,6 +13,7 @@ import unittest
 from meter_photo_qa.notification_inbox import (
     connect_inbox, record_alert, mark_delivery, import_legacy_events,
     get_alert, queue_inbox_row_zoom, row_zoom_action, fresh_sent_alerts,
+    fallback_delivery_snapshot, poll_sent_alerts,
 )
 
 EVENT_MS=1792404000000
@@ -129,6 +130,62 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fresh_sent_alerts(db,0,limit=0)
         finally:db.close()
+
+    def test_out_of_order_sent_status_still_generates_fallback(self):
+        db=connect_inbox(self.cfg)
+        try:
+            old=record_alert(db,item(500001),EVENT_MS+1000)
+            newer=record_alert(db,item(500002),EVENT_MS+2000)
+            cursor,pending=fallback_delivery_snapshot(db)
+            self.assertEqual(pending,{old,newer})
+            mark_delivery(db,newer,"SENT")
+            events,cursor,pending=poll_sent_alerts(db,cursor,pending)
+            self.assertEqual([row["id"] for row in events],[newer])
+            self.assertIn(old,pending)
+            mark_delivery(db,old,"SENT")
+            events,cursor,pending=poll_sent_alerts(db,cursor,pending)
+            self.assertEqual([row["id"] for row in events],[old])
+            self.assertNotIn(old,pending)
+            self.assertEqual(poll_sent_alerts(db,cursor,pending)[0],[])
+        finally:
+            db.close()
+
+    def test_many_new_sent_rows_are_paged_without_skipping(self):
+        db=connect_inbox(self.cfg)
+        try:
+            historical=record_alert(db,item(510001),EVENT_MS)
+            mark_delivery(db,historical,"SENT")
+            cursor,pending=fallback_delivery_snapshot(db)
+            new_ids=[]
+            for idx in range(6):
+                row_id=record_alert(db,item(510010+idx),EVENT_MS+idx+100)
+                mark_delivery(db,row_id,"SENT")
+                new_ids.append(row_id)
+            found=[]
+            for _ in range(4):
+                rows,cursor,pending=poll_sent_alerts(db,cursor,pending,limit=2)
+                found.extend(row["id"] for row in rows)
+            self.assertEqual(found,new_ids)
+            self.assertNotIn(historical,found)
+            self.assertFalse(pending)
+        finally:
+            db.close()
+
+    def test_pending_new_record_after_higher_sent_id_is_not_skipped(self):
+        db=connect_inbox(self.cfg)
+        try:
+            cursor,pending=fallback_delivery_snapshot(db)
+            slow=record_alert(db,item(520001),EVENT_MS+1000)
+            fast=record_alert(db,item(520002),EVENT_MS+2000)
+            mark_delivery(db,fast,"SENT")
+            rows,cursor,pending=poll_sent_alerts(db,cursor,pending)
+            self.assertEqual([row["id"] for row in rows],[fast])
+            self.assertIn(slow,pending)
+            mark_delivery(db,slow,"SENT")
+            rows,cursor,pending=poll_sent_alerts(db,cursor,pending)
+            self.assertEqual([row["id"] for row in rows],[slow])
+        finally:
+            db.close()
 
     def test_inbox_popups_never_automatically_zoom_or_replay_old_history(self):
         path=Path(__file__).resolve().parents[1]/(
