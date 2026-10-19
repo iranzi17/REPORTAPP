@@ -57,7 +57,8 @@ ASSETS = {
             "number_of_circuit": ["Number_Circuit", "NumberOfCircuit",
                                   "Number_of_Circuit", "Number of Circuit"],
         },
-        "priority": ("manufacturer", "notes", "append_cable",
+        # Manufacturer remains reported as evidence, not a compulsory gap.
+        "priority": ("notes", "append_cable",
                      "service_pole", "structure", "insulator_type", "number_of_circuit"),
     },
 }
@@ -228,7 +229,7 @@ def domain_map(layer_properties, group_code):
     return output
 
 
-def evaluate_asset(attributes, asset, mapping, domains=None):
+def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_manufacturer=False):
     """One record. MISSING_SCHEMA and data GAP are kept distinct."""
     spec = ASSETS[asset]
     if str(attributes.get("ASSETGROUP")) != str(spec["asset_group"]):
@@ -364,7 +365,8 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
                 values["manufacturer_status"] = "SUBSTANDARD_EXEMPT"
             elif not note:
                 values["manufacturer_status"] = "MISSING_MANUFACTURER_NOTES"
-                issues.append("Manufacturer missing and Notes empty")
+                if include_pole_manufacturer:
+                    issues.append("Manufacturer missing and Notes empty")
             elif has_explicit_no_nameplate_note(note):
                 values["manufacturer_status"] = "DOCUMENTED_NO_NAMEPLATE"
             else:
