@@ -1001,7 +1001,7 @@ def launch_gui(config_path):
                 ))
             scan_status.set(
                 f"Complete | {result['lookback_hours']}h | "
-                f"{result['surveyrs_checked'] if 'surveyrs_checked' in result else result['surveyors_checked']} surveyors | "
+                f"{result['surveyors_checked']} surveyors | "
                 f"Records checked: {result['records_scanned']} | "
                 f"{result['gap_assets']} assets with gaps | "
                 "No Windows alerts or Inbox writes."
@@ -1057,12 +1057,13 @@ def launch_gui(config_path):
             win.after(200,poll)
 
         check_button.configure(command=run_check)
-        win.protocol(
-            "WM_DELETE_WINDOW",
-            lambda: (setattr(manual_window,"unused",None) if False else
-                     (win.destroy(),manual_window.__setitem__(0,None))),
-        )
-        # Opening this window does not call REG. First scan requires Run gap check.
+        def close_window():
+            win.destroy()
+            manual_window[0]=None
+
+        win.protocol("WM_DELETE_WINDOW",close_window)
+        # One click on Check Surveyor Gaps Now starts one finite manual scan.
+        run_check()
 
     def manage_surveyors():
         """Local add/remove actions preserve existing selected-account timing."""
