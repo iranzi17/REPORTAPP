@@ -96,7 +96,8 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
         req=json.loads(Path(result["request_file"]).read_text(encoding="utf-8"))
         self.assertEqual(req["origin"],"REPORTAPP_MANUAL_FIND")
         self.assertEqual(req["objectid"],4550150)
-        self.assertEqual(req["expected_event_utc_ms"],0)
+        self.assertNotIn("expected_event_utc_ms",req)
+        self.assertNotIn("expected_globalid",req)
 
     def test_bad_event_or_unknown_id_queues_nothing(self):
         db=connect_inbox(self.cfg)
