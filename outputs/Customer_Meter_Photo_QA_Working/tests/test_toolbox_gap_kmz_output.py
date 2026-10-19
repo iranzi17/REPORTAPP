@@ -1,6 +1,8 @@
 """Make the KMZ genuinely visible as a geoprocessing output (no ArcGIS login)."""
 from __future__ import annotations
 import ast
+import copy
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
@@ -51,6 +53,62 @@ class DerivedKMZOutputTests(TestCase):
         self.assertIsInstance(outputs[0], ast.List)
         self.assertEqual(len(outputs[0].elts), 17)
         self.assertEqual(outputs[0].elts[-1].id, "gap_kmz")
+
+    @staticmethod
+    def _open_tool_with_realistic_derived_file_filter(cls, asset):
+        # ArcGIS Pro returns filter=None for the Derived DEFile output. It
+        # gives an ordinary filter object to the user-input parameters.
+        # Executing the actual getParameterInfo AST reproduces the office
+        # crash instead of merely checking that the KMZ param exists.
+        def new_parameter(**kwargs):
+            filt = None if kwargs.get("name") == "output_gap_kmz" else SimpleNamespace(
+                list=[], type=None)
+            return SimpleNamespace(**kwargs, filter=filt, value=None, category=None)
+        arcpy = SimpleNamespace(
+            Parameter=new_parameter,
+            mp=SimpleNamespace(
+                ArcGISProject=lambda _: SimpleNamespace(defaultGeodatabase="/tmp/test.gdb")),
+            env=SimpleNamespace(scratchGDB="/tmp/test.gdb"),
+        )
+        function=copy.deepcopy(method_in_class(cls, "getParameterInfo"))
+        function.decorator_list=[]
+        snippet=ast.fix_missing_locations(ast.Module(body=[function],type_ignores=[]))
+        names={
+            "arcpy": arcpy,
+            "datetime": datetime, "timedelta": timedelta, "Path": Path,
+            "ROOT": Path("/tmp/REPORTAPP"),
+            "CUSTOM_BOUNDARY_TEMPLATE": Path("/tmp/boundary"),
+            "_boundary_index": lambda: {"Gicumbi": {}, "Burera": {}},
+            "_mapped_usernames": lambda *args: ["surveyora"],
+            "_quality_watcher": SimpleNamespace(
+                load_quality_rules=lambda *args: {"minimum_completion_percent":80}),
+            "DEFAULT_LINE_SERVICE_URL": "https://example.invalid/FeatureServer",
+            "DEFAULT_BOUNDARY_SERVICE_URL": "https://example.invalid/FeatureServer",
+            "DEFAULT_USER_NAME_MAP_PATH": Path("/tmp/names.json"),
+            "DEFAULT_QUALITY_RULES_PATH": Path("/tmp/rules.json"),
+        }
+        exec(compile(snippet,str(TOOLBOX),"exec"),names)
+        return names["getParameterInfo"](
+            SimpleNamespace(asset=asset, _loaded_default_threshold=None))
+
+    def test_pole_transformer_and_line_tools_open_when_derived_filter_is_none(self):
+        # Regression for the real office traceback:
+        # AttributeError: 'NoneType' object has no attribute 'list'
+        for asset in ("pole","transformer"):
+            with self.subTest(asset=asset):
+                params=self._open_tool_with_realistic_derived_file_filter(
+                    "_AssetQualityTool",asset)
+                self.assertEqual(len(params),12)
+                self.assertEqual(params[-1].name,"output_gap_kmz")
+                self.assertEqual(params[-1].datatype,"DEFile")
+                self.assertIsNone(params[-1].filter)
+                self.assertEqual(params[0].filter.list,["xlsx"])
+        line=self._open_tool_with_realistic_derived_file_filter(
+            "WatchLVLineDataQuality","line")
+        self.assertEqual(len(line),17)
+        self.assertEqual(line[-1].name,"output_gap_kmz")
+        self.assertIsNone(line[-1].filter)
+        self.assertEqual(line[0].filter.list,["xlsx"])
 
     def test_pole_tool_exposes_path_only_after_successful_kmz_export(self):
         # Extract only the real execute() body without importing arcpy or
