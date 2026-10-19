@@ -673,7 +673,12 @@ def launch_gui(config_path):
     tree_frame=ttk.Frame(root,padding=(12,0,12,0))
     tree_frame.pack(fill="both",expand=True)
     names=("ID","Received","Surveyor","Asset","OBJECTID","Issues","Review","Delivery","Zoom")
-    tree=ttk.Treeview(tree_frame,columns=names,show="headings",height=11)
+    # Leave enough height for the Windows-themed row buttons to be visible.
+    ttk.Style(root).configure("ReportappZoom.Treeview",rowheight=30)
+    tree=ttk.Treeview(
+        tree_frame,columns=names,show="headings",height=11,
+        style="ReportappZoom.Treeview",
+    )
     widths=(65,175,135,85,95,55,85,85,160)
     for col,width in zip(names,widths):
         tree.heading(col,text=col)
