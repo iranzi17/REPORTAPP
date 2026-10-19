@@ -116,5 +116,44 @@ jobs:
               throw "Unsafe tracked worktree change incorrectly allowed: $bad"
             }
           }
+          # Reproduce actual office PowerShell 5.1 failure: old function used
+          # the reserved automatic variable $args for -Argument. Exercise
+          # the exact NewAction function with a mocked ScheduledTasks cmdlet.
+          # No task is created, started, stopped or modified in this test.
+          $actionFunction = $tree.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq 'NewAction'
+          }, $true)
+          if (-not $actionFunction) { throw "Missing task action helper" }
+          function New-ScheduledTaskAction {
+            param(
+              [string]$Execute,
+              [string]$Argument,
+              [string]$WorkingDirectory
+            )
+            return [pscustomobject]@{
+              Execute=$Execute
+              Arguments=$Argument
+              WorkingDirectory=$WorkingDirectory
+            }
+          }
+          Invoke-Expression $actionFunction.Extent.Text
+          $exe = 'C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\pythonw.exe'
+          $cmdline = '-m meter_photo_qa.surveyor_notifications --config "C:\Users\Office Staff\monitor_config.json"'
+          $cwd = 'C:\Users\Office Staff\Desktop\REPORTAPP\outputs\Customer_Meter_Photo_QA_Working\src'
+          $action = NewAction $exe $cmdline $cwd
+          if ($action.Execute -cne $exe -or
+              $action.Arguments -cne $cmdline -or
+              $action.WorkingDirectory -cne $cwd -or
+              $action.Arguments -isnot [string]) {
+            throw "Scheduled Task action string argument was lost or mutated"
+          }
+          $restore = NewAction $exe '"C:\Stable V3\run_v3_once.py" --config "C:\Office\monitor_config.json"' $cwd
+          if ($restore.Arguments -isnot [string] -or
+              $restore.Arguments -notmatch 'run_v3_once.py') {
+            throw "Original V3 task action restore argument lost"
+          }
+          Write-Host "Mocked live/restore task actions retain exact string arguments."
           Write-Host "Exact .pyt.xml exception safe; all executable/config changes rejected."
           Write-Host "PowerShell parsed; no Windows Scheduled Tasks were modified."
