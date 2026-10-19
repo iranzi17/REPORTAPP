@@ -7,6 +7,7 @@ multiple selected sector polygons; it is counted exactly once.
 from __future__ import annotations
 
 from typing import Any, Callable, Iterable
+import time
 
 
 def _objectids_from_query(response: Any, area: str) -> list[int] | None:
@@ -71,6 +72,44 @@ def _confirm_empty_id_response(layer, query_fn, options, area):
     return []
 
 
+
+def _query_with_default_version_recheck(
+    layer: Any,
+    query_fn: Callable[..., Any],
+    *,
+    attempts: int,
+    area: str,
+    progress: Callable[[str], None] | None,
+    **query_options: Any,
+) -> Any:
+    """One delayed recheck for a transient failure resolving sde.DEFAULT.
+
+    ArcGIS Server can intermittently fail to resolve its default version on
+    particular instances. Preserve the explicitly selected gdb_version and
+    all original query arguments, including polygon, WHERE, and ObjectIDs.
+    Do not silently query the published map version; it may differ.
+    """
+    try:
+        return query_fn(layer, attempts=attempts, **query_options)
+    except Exception as exc:
+        detail = str(exc).casefold()
+        if (
+            str(query_options.get("gdb_version") or "").casefold() != "sde.default"
+            or "failed to find version" not in detail
+            or "sde.default" not in detail
+        ):
+            raise
+        if progress:
+            progress(
+                f"{area}: REG service could not resolve sde.DEFAULT; "
+                "waiting 8 seconds for one final read-only retry "
+                "(source version unchanged)."
+            )
+        time.sleep(8)
+        # One additional request only. If the version is still unavailable,
+        # propagate the original fail-closed reporting logic.
+        return query_fn(layer, attempts=1, **query_options)
+
 def query_attributes_in_batches(
     layer: Any,
     where: str,
@@ -95,6 +134,16 @@ def query_attributes_in_batches(
     spatial_filters = list(geometry_filters)
     if not spatial_filters:
         raise ValueError("No boundary polygons were provided for the selected area.")
+    def safe_query(target: Any, *, attempts: int = 2, **options: Any) -> Any:
+        return _query_with_default_version_recheck(
+            target,
+            query_fn,
+            attempts=attempts,
+            area=asset_label,
+            progress=progress,
+            **options,
+        )
+
     unique_ids: set[int] = set()
     for index, (area, spatial_filter) in enumerate(spatial_filters, 1):
         opts = {
@@ -106,11 +155,11 @@ def query_attributes_in_batches(
         if spatial_filter is not None:
             opts["geometry_filter"] = spatial_filter
         try:
-            response = query_fn(layer, attempts=2, **opts)
+            response = safe_query(layer, attempts=2, **opts)
             ids = _objectids_from_query(response, area)
             if ids is None:
                 ids = _confirm_empty_id_response(
-                    layer, query_fn, opts, area,
+                    layer, safe_query, opts, area,
                 )
                 if progress:
                     progress(
@@ -149,7 +198,7 @@ def query_attributes_in_batches(
     for offset in range(0, len(sorted_ids), safe_batch_size):
         batch = sorted_ids[offset: offset + safe_batch_size]
         try:
-            feature_set = query_fn(
+            feature_set = safe_query(
                 layer,
                 attempts=2,
                 where="1=1",
