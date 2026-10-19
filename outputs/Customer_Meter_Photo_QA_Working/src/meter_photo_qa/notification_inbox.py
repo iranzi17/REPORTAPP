@@ -247,7 +247,7 @@ def queue_inbox_current_asset(config_path, row_id, *, folder=None):
     This is not a verified historical source event. Exact stored asset type
     and OBJECTID determine the manual request; no surveyor-based search or
     silent fallback can substitute a different asset. The UI must explain
-    the difference and obtain a separate click/confirmation.
+    the difference through its explicitly labelled button. No modal confirmation.
     """
     config_path=Path(config_path).expanduser().resolve()
     db=connect_inbox(config_path)
@@ -1371,7 +1371,10 @@ def launch_gui(config_path):
             root.after(1000,lambda:show_bridge_result(result,attempt+1))
             return
         if receipt["status"]=="DONE":
-            find_status.set(label+"ArcGIS Pro Bridge reports successful selection.")
+            explanation=("Current asset selected; original alert edit not reverified."
+                         if result.get("mode")=="FIND_CURRENT_ASSET_NOT_HISTORICAL_EVENT"
+                         else "ArcGIS Pro Bridge reports successful selection.")
+            find_status.set(label+explanation)
         elif receipt["status"]=="FAILED":
             reason=receipt["detail"] or "Bridge rejected the request; see bridge-errors.log."
             if "DIFFERENT edit time/editor" in reason:
@@ -1418,27 +1421,13 @@ def launch_gui(config_path):
             messagebox.showerror("Alert edit zoom not queued",str(exc),parent=root)
 
     def find_current_row(row_id):
+        """Single operator click: inspect the current asset without a dialog.
+
+        The request still carries the exact Inbox row's asset type and
+        OBJECTID; the read-only ArcGIS Pro Bridge validates source/version.
+        It never claims the stored historical editor/time were reverified.
+        """
         if not select_inbox_row(row_id):
-            return
-        db=connect_inbox(config)
-        try:
-            record=get_alert(db,row_id)
-        finally:
-            db.close()
-        if record is None:
-            messagebox.showerror("Find current asset","Alert record no longer exists.",parent=root)
-            return
-        if not messagebox.askyesno(
-            "Inspect current REG asset",
-            f"Find CURRENT {record['asset'].upper()} OBJECTID {record['objectid']} "
-            "in ArcGIS Pro?\n\n"
-            "This action uses the exact asset type and OBJECTID from this "
-            "Inbox row. It does NOT verify the original alert edit time, "
-            "surveyor or GlobalID. The ArcGIS Pro Bridge still checks "
-            "the REG source layer and sde.DEFAULT.\n\n"
-            "No GIS feature or Inbox history will be changed.",
-            parent=root,
-        ):
             return
         try:
             track_zoom_request(queue_inbox_current_asset(config,row_id))
@@ -1448,15 +1437,13 @@ def launch_gui(config_path):
     def create_row_zoom_button(iid, command):
         action=tree.set(iid,"Zoom")
         frame=ttk.Frame(tree)
-        if action=="Find current asset":
-            ttk.Button(frame,text="Current asset",
-                       command=lambda row=int(iid):find_current_row(row)
-                       ).pack(fill="both",expand=True)
-        else:
-            ttk.Button(frame,text="Alert edit",command=command
-                       ).pack(side="left",fill="both",expand=True)
-            ttk.Button(frame,text="Current",
-                       command=lambda row=int(iid):find_current_row(row)
+        # Normal supervision = one-click Zoom to the current exact asset.
+        # Verify edit is an optional separate check of the original alert.
+        ttk.Button(frame,text="Zoom",
+                   command=lambda row=int(iid):find_current_row(row)
+                   ).pack(side="left",fill="both",expand=True)
+        if action!="Find current asset":
+            ttk.Button(frame,text="Verify edit",command=command
                        ).pack(side="left",fill="both",expand=True,padx=(3,0))
         return frame
 
@@ -1481,10 +1468,12 @@ def launch_gui(config_path):
     tree.bind("<KeyRelease>",lambda _event:schedule_zoom_buttons(),add="+")
     tree.bind("<ButtonRelease-1>",lambda _event:schedule_zoom_buttons(),add="+")
 
-    ttk.Button(buttons,text="Zoom in ArcGIS Pro",command=zoom_selected).pack(side="left",padx=9)
-    ttk.Button(buttons,text="Find selected current asset",
-               command=lambda:find_current_row(selected_id[0])
-               if selected_id[0] is not None else None).pack(side="left",padx=5)
+    ttk.Button(
+        buttons,text="Zoom selected asset",
+        command=lambda:find_current_row(selected_id[0])
+        if selected_id[0] is not None else None
+    ).pack(side="left",padx=9)
+    ttk.Button(buttons,text="Verify original edit",command=zoom_selected).pack(side="left",padx=5)
     ttk.Button(buttons,text="Resend Windows Popup",command=resend_selected_popup).pack(side="left",padx=5)
     ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
     ttk.Button(buttons,text="Mark Reviewed",command=lambda:update("REVIEWED")).pack(side="left",padx=9)
@@ -1532,7 +1521,8 @@ def launch_gui(config_path):
         if row_id is None:
             return
         try:
-            track_zoom_request(queue_inbox_row_zoom(config,row_id))
+            # Same one-click current-asset inspection as the Inbox row.
+            track_zoom_request(queue_inbox_current_asset(config,row_id))
             dismiss_gap_popup()
         except Exception as exc:
             messagebox.showerror("Popup Zoom",str(exc),parent=active_popup[0] or root)
@@ -1570,7 +1560,7 @@ def launch_gui(config_path):
         popup_label[0].pack(anchor="w")
         actions=ttk.Frame(surface)
         actions.pack(fill="x",pady=(13,0))
-        ttk.Button(actions,text="Zoom in ArcGIS Pro",
+        ttk.Button(actions,text="Zoom to current asset",
                    command=zoom_from_gap_popup).pack(side="left")
         def locate_in_inbox():
             row_id=popup_alert_id[0]

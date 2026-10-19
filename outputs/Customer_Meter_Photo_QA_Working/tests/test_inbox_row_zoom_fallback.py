@@ -287,6 +287,29 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
         overlay.layout()
         self.assertEqual([iid for iid,_ in created],["1"])
 
+    def test_current_asset_button_is_one_click_and_never_asks_confirmation(self):
+        """Direct queue, no modal confirmation; historical verification remains optional."""
+        source=(Path(__file__).resolve().parents[1]/
+                "src/meter_photo_qa/notification_inbox.py").read_text(encoding="utf-8")
+        module=ast.parse(source)
+        gui=next(node for node in module.body
+                 if isinstance(node,ast.FunctionDef) and node.name=="launch_gui")
+        handler=next(node for node in gui.body
+                     if isinstance(node,ast.FunctionDef) and node.name=="find_current_row")
+        calls=[node for node in ast.walk(handler) if isinstance(node,ast.Call)]
+        called={node.func.attr for node in calls if isinstance(node.func,ast.Attribute)}
+        self.assertNotIn("askyesno",called)
+        self.assertNotIn("showinfo",called)
+        self.assertIn("queue_inbox_current_asset",{
+            node.func.id for node in calls if isinstance(node.func,ast.Name)
+        })
+        self.assertIn('text="Zoom"',source)
+        self.assertIn('text="Verify edit"',source)
+        self.assertIn('text="Zoom selected asset"',source)
+        self.assertIn('text="Zoom to current asset"',source)
+        self.assertIn('track_zoom_request(queue_inbox_current_asset(config,row_id))',source)
+        self.assertIn('track_zoom_request(queue_inbox_row_zoom(config,row_id))',source)
+
     def test_inbox_popups_never_automatically_zoom_or_replay_old_history(self):
         path=Path(__file__).resolve().parents[1]/(
             "src/meter_photo_qa/notification_inbox.py")
@@ -294,11 +317,11 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
         self.assertIn('names=("ID","Received","Surveyor","Asset"',source)
         self.assertIn('"Delivery","Zoom")',source)
         self.assertIn('zoom_buttons=InboxZoomButtonOverlay(',source)
-        self.assertIn('ttk.Button(frame,text="Alert edit",command=command',source)
+        self.assertIn('ttk.Button(frame,text="Verify edit",command=command',source)
+        self.assertIn('ttk.Button(frame,text="Zoom",',source)
         self.assertIn('command=lambda row=int(iid):find_current_row(row)',source)
+        self.assertIn('queue_inbox_current_asset(config,row_id)',source)
         self.assertIn('navigation_receipt(path)',source)
-        self.assertIn('ttk.Button(frame,text="Alert edit",command=command',source)
-        self.assertIn('ttk.Button(frame,text="Current asset",',source)
         self.assertIn('command=lambda *args: (tree.yview(*args),schedule_zoom_buttons())',source)
         self.assertNotIn('tree.identify_column(event.x)',source)
         self.assertIn('text="In-app gap popups"',source)
