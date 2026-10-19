@@ -219,8 +219,36 @@ class NotificationTests(unittest.TestCase):
                 issues=ready_alerts(
                     [entry],"pole",FIELDS,{},CONFIG,1400000,state
                 )[0]["issues"]
+                self.assertEqual(len(issues),4)
+                self.assertFalse(any("Manufacturer missing" in x for x in issues))
+                opt_in=dict(CONFIG,pole_manufacturer_gap_enabled=True)
+                issues=ready_alerts(
+                    [entry],"pole",FIELDS,{},opt_in,1400000,state
+                )[0]["issues"]
                 self.assertEqual(len(issues),5)
                 self.assertIn("Manufacturer missing and Notes empty",issues)
+            finally:
+                state.close()
+
+    def test_missing_manufacturer_alone_never_triggers_default_live_alert(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=State(Path(folder)/"manufacturer.sqlite3")
+            try:
+                only_missing=pole(
+                    1100000,notes="",append="No",height=10,manufacturer=None
+                )
+                alerts=ready_alerts(
+                    [only_missing],"pole",FIELDS,{},CONFIG,1400000,state
+                )
+                self.assertEqual(alerts,[])
+                alerts=ready_alerts(
+                    [only_missing],"pole",FIELDS,{},
+                    dict(CONFIG,pole_manufacturer_gap_enabled=True),1400000,state
+                )
+                self.assertEqual(len(alerts),1)
+                self.assertEqual(
+                    alerts[0]["issues"],["Manufacturer missing and Notes empty"]
+                )
             finally:
                 state.close()
 
@@ -245,7 +273,7 @@ class NotificationTests(unittest.TestCase):
                 sample["PoleStructure"]=5
                 issues=ready_alerts(
                     [sample],"pole",FIELDS,{"PoleStructure":{4:"Substandard",5:"Standard"}},
-                    CONFIG,1400000,state,
+                    dict(CONFIG,pole_manufacturer_gap_enabled=True),1400000,state,
                 )
                 self.assertEqual(len(issues),1)
                 self.assertTrue(any("Manufacturer missing" in issue
