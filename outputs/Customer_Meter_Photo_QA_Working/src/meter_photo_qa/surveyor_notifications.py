@@ -60,7 +60,8 @@ def submission_actor(attrs):
     return str(attrs.get("created_user") or "").strip(),"CREATE"
 
 
-def record_findings(asset, attrs, fields,domains, line_rules=None,phase_expectations=None):
+def record_findings(asset, attrs, fields,domains, line_rules=None,phase_expectations=None,
+                    *, include_pole_manufacturer=False):
     """Existing QA gaps only, including pole height and Appendix Cable.
 
     No notifications for unresolved live schema fields: run logs warnings and
@@ -68,7 +69,10 @@ def record_findings(asset, attrs, fields,domains, line_rules=None,phase_expectat
     """
     if asset in ("pole","transformer"):
         mapping=resolve_fields(fields,asset)
-        result=evaluate_asset(attrs,asset,mapping,domains)
+        result=evaluate_asset(
+            attrs, asset, mapping, domains,
+            include_pole_manufacturer=include_pole_manufacturer if asset == "pole" else False,
+        )
         return sorted(set(result["issues"])),list(result["unverified_checks"])
     if asset!="line":
         raise ValueError("Only LV Lines, LV Poles and Distribution Transformers supported.")
@@ -150,7 +154,10 @@ def ready_alerts(records,asset,fields,domains,config,now_ms,state,line_rules=Non
         if submitted<cutoff or submitted>now_ms-MIN_AGE_SECONDS*1000:
             continue
         issues,unverified=record_findings(
-            asset,a,fields,domains,line_rules,phase_expectations
+            asset,a,fields,domains,line_rules,phase_expectations,
+            include_pole_manufacturer=(
+                config.get("pole_manufacturer_gap_enabled", False) is True
+            ),
         )
         if unverified:
             raise RuntimeError(
