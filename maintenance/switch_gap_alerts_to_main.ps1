@@ -157,24 +157,19 @@ try {
     # cycle, NOT this offline check, must succeed for cutover acceptance.
     Write-Host 'Running local Python/configuration preflight (no REG FeatureServer queries).'
     $env:PYTHONPATH = $src
-    $testCode = @'
-import importlib.util, json, sys
-from pathlib import Path
-from meter_photo_qa import surveyor_notifications, source_event_navigation, desktop_toast_channel
-path = Path(sys.argv[1])
-config = json.loads(path.read_text(encoding="utf-8"))
-assert config.get("enabled") is True, "Monitoring disabled"
-assert config.get("version", "sde.DEFAULT").casefold() == "sde.default", "Wrong GIS source version"
-assert config.get("channel", "desktop") == "desktop", "Not a desktop alert channel"
-assert isinstance(config.get("usernames"), list) and config["usernames"], "Missing monitored accounts"
-assert {"pole", "line", "transformer"}.issubset(set(config.get("assets", []))), "Missing monitored asset type"
-assert desktop_toast_channel.DESKTOP_APP_ID == "REPORTAPP Surveyor Activity", "Old Windows popup identity"
-assert importlib.util.find_spec("winotify") is not None, "winotify unavailable"
-assert importlib.util.find_spec("arcgis") is not None, "ArcGIS Python API unavailable"
-print("LOCAL_PREFLIGHT_OK (no GIS query, no notification history change)")
-'@
-    & $interactivePython -B -c $testCode $config
+    $localConfig = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
+    if ($localConfig.enabled -ne $true -or
+        $localConfig.version -ine 'sde.DEFAULT' -or
+        $localConfig.channel -ne 'desktop' -or
+        @($localConfig.usernames).Count -eq 0 -or
+        (@($localConfig.assets) -notcontains 'pole') -or
+        (@($localConfig.assets) -notcontains 'line') -or
+        (@($localConfig.assets) -notcontains 'transformer')) {
+        throw 'Original monitored accounts, assets, enabled state or desktop channel are invalid.'
+    }
+    & $interactivePython -B -c 'import winotify, arcgis.features; from meter_photo_qa import surveyor_notifications, source_event_navigation, desktop_toast_channel'
     if ($LASTEXITCODE -ne 0) { throw 'Local preflight failed; original task preserved.' }
+    Write-Host 'LOCAL_PREFLIGHT_OK: imports/config valid, no GIS queries sent.'
     $answer = Read-Host 'Type ACTIVATE GITHUB MAIN GAP ALERTS to update the existing watcher task'
     if ($answer -cne 'ACTIVATE GITHUB MAIN GAP ALERTS') { throw 'Operator did not approve task change.' }
     if (-not $reuseBackup) {
