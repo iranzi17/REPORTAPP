@@ -189,6 +189,72 @@ def get_alert(conn,row_id):
     row=conn.execute("SELECT * FROM alert_inbox WHERE id=?",(int(row_id),)).fetchone()
     return dict(row) if row else None
 
+def row_zoom_action(record):
+    """Show the explicit action available for this individual Inbox row.
+
+    Old JSONL alerts have no immutable source-edit identity. They may only
+    offer a clearly labeled *current asset* find, never a verified edit link.
+    """
+    if (record.get("origin") == "LIVE" and
+            record.get("event_time_utc_ms") is not None and
+            record.get("globalid") and record.get("username")):
+        return "Zoom in ArcGIS Pro"
+    return "Find current asset"
+
+
+def queue_inbox_row_zoom(config_path, row_id, *, folder=None):
+    """Explicit user click: enqueue only the selected row, never auto zoom.
+
+    Original LIVE alerts use their full immutable source edit identity and
+    must pass ArcGIS Pro Bridge's final current-source check. A historical
+    record is distinguished as manual *find current asset*, not the original
+    historical edit. Neither operation mutates REG or review/alert history.
+    """
+    config_path = Path(config_path).expanduser().resolve()
+    db = connect_inbox(config_path)
+    try:
+        row = get_alert(db, row_id)
+    finally:
+        db.close()
+    if not row:
+        raise ValueError("The chosen Inbox alert no longer exists.")
+    conf = json.loads(config_path.read_text(encoding="utf-8"))
+    from .alert_navigation import enqueue, zoom_uri
+    if row_zoom_action(row) == "Zoom in ArcGIS Pro":
+        uri = zoom_uri(
+            row["asset"], row["objectid"], globalid=row["globalid"],
+            event_time_utc_ms=row["event_time_utc_ms"], actor=row["username"],
+            gdb_version=conf.get("version", "sde.DEFAULT"),
+        )
+        mode = "VERIFIED_SOURCE_EVENT"
+    else:
+        uri = zoom_uri(row["asset"], row["objectid"], manual=True)
+        mode = "FIND_CURRENT_ASSET_NOT_HISTORICAL_EVENT"
+    request = enqueue(uri, folder=folder)
+    return {
+        "alert_id": int(row["id"]), "asset": row["asset"],
+        "objectid": int(row["objectid"]), "mode": mode,
+        "request_file": request["queue_file"],
+        "bridge_result": "QUEUED_NOT_YET_VERIFIED",
+    }
+
+
+def fresh_sent_alerts(conn, after_id, limit=25):
+    """Only new successfully dispatched LIVE gap events since Inbox opened.
+
+    Database is never mutated. A successful .show() is not proof Windows
+    displayed its banner; this feed supports an interactive Inbox fallback.
+    """
+    if not 1 <= int(limit) <= 100:
+        raise ValueError("Gap popup batch limit must be 1..100")
+    records = conn.execute(
+        """SELECT * FROM alert_inbox WHERE id>? AND origin='LIVE'
+           AND delivery_status='SENT' ORDER BY id DESC LIMIT ?""",
+        (int(after_id), int(limit)),
+    ).fetchall()
+    return [dict(row) for row in records]
+
+
 def resend_saved_alert(config_path, row_id, *, source_verifier=None, sender=None):
     """Operator-only recovery of a missed Windows banner, without a new scan.
 
@@ -554,9 +620,9 @@ def launch_gui(config_path):
 
     tree_frame=ttk.Frame(root,padding=(12,0,12,0))
     tree_frame.pack(fill="both",expand=True)
-    names=("ID","Received","Surveyor","Asset","OBJECTID","Issues","Review","Delivery")
+    names=("ID","Received","Surveyor","Asset","OBJECTID","Issues","Review","Delivery","Zoom")
     tree=ttk.Treeview(tree_frame,columns=names,show="headings",height=11)
-    widths=(65,175,135,100,115,65,100,110)
+    widths=(65,175,135,85,95,55,85,85,160)
     for col,width in zip(names,widths):
         tree.heading(col,text=col)
         tree.column(col,width=width,stretch=col in ("Surveyor","Received"))
@@ -627,7 +693,7 @@ def launch_gui(config_path):
                     item["id"],format_time(item["received_utc_ms"]),
                     item["username"],item["asset"].upper(),item["objectid"],
                     len(json.loads(item["issues_json"])),item["review_status"],
-                    item["delivery_status"],
+                    item["delivery_status"],row_zoom_action(item),
                 ))
             counter.configure(text=f"Open: {count_open} | All: {count_total}")
             if previous is not None and tree.exists(str(previous)):
@@ -1123,36 +1189,14 @@ def launch_gui(config_path):
     ).pack(side="left",padx=(8,0))
 
     def zoom_selected():
-        from .alert_navigation import enqueue, zoom_uri
         if selected_id[0] is None:
             return
-        conn,_=open_db()
         try:
-            rec=get_alert(conn,selected_id[0])
-        finally:
-            conn.close()
-        if rec is None:
-            return
-        try:
-            if rec["event_time_utc_ms"] is None or rec["origin"]!="LIVE":
-                raise ValueError(
-                    "This is a historical alert without verified source edit "
-                    "details. Use the explicit Find Asset control to locate "
-                    "an OBJECTID without claiming that edit was verified."
-                )
-            cfg=json.loads(Path(config).read_text(encoding="utf-8"))
-            link=zoom_uri(
-                rec["asset"],rec["objectid"],
-                globalid=rec["globalid"],
-                event_time_utc_ms=rec["event_time_utc_ms"],
-                actor=rec["username"],
-                gdb_version=cfg.get("version","sde.DEFAULT"),
+            result=queue_inbox_row_zoom(config,selected_id[0])
+            find_status.set(
+                f"Inbox alert {result['alert_id']}: OBJECTID {result['objectid']} "
+                "queued. ArcGIS Pro must verify the current source before selecting."
             )
-            enqueue(link)
-            messagebox.showinfo("REPORTAPP navigation",
-                "Navigation queued. Open ArcGIS Pro with the REPORTAPP add-in and a map. "
-                "If navigation fails, inspect Navigation/bridge-errors.log under LOCALAPPDATA.",
-                parent=root)
         except Exception as exc:
             messagebox.showerror("REPORTAPP navigation",str(exc),parent=root)
 
@@ -1178,6 +1222,30 @@ def launch_gui(config_path):
         except Exception as exc:
             messagebox.showerror("Popup cannot be resent safely",str(exc),parent=root)
 
+    # The same safe navigation is available on EACH record, not just a
+    # bottom-of-window selected-row control. A Treeview cell is a click target.
+    def click_row_zoom(event):
+        if tree.identify_region(event.x,event.y)!="cell" or (
+                tree.identify_column(event.x)!="#9"):
+            return
+        row=tree.identify_row(event.y)
+        if not row:
+            return
+        tree.selection_set(row)
+        selected_id[0]=int(row)
+        detail()
+        try:
+            record_result=queue_inbox_row_zoom(config,int(row))
+            find_status.set(
+                f"Inbox alert {row} — {record_result['asset'].upper()} "
+                f"OBJECTID {record_result['objectid']} queued; "
+                "ArcGIS Pro will check the exact source before zooming."
+            )
+        except Exception as exc:
+            messagebox.showerror("Row zoom not queued",str(exc),parent=root)
+        return "break"
+
+    tree.bind("<ButtonRelease-1>",click_row_zoom,add="+")
     ttk.Button(buttons,text="Zoom in ArcGIS Pro",command=zoom_selected).pack(side="left",padx=9)
     ttk.Button(buttons,text="Resend Windows Popup",command=resend_selected_popup).pack(side="left",padx=5)
     ttk.Button(buttons,text="Save Notes",command=lambda:update()).pack(side="left",padx=(0,9))
