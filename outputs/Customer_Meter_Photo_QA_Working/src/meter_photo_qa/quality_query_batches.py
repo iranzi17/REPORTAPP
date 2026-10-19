@@ -121,6 +121,8 @@ def query_attributes_in_batches(
     progress: Callable[[str], None] | None = None,
     asset_label: str = "LV line",
     duplicate_globalid_policy: str = "error",
+    max_matching_ids: int | None = None,
+    query_attempts: int = 2,
 ) -> list[dict[str, Any]]:
     """Retrieve all matches or fail; never issue partial 'clean' reports.
 
@@ -129,6 +131,10 @@ def query_attributes_in_batches(
     """
     if batch_size < 1:
         raise ValueError("Batch size must be positive.")
+    if max_matching_ids is not None and max_matching_ids < 1:
+        raise ValueError("max_matching_ids must be positive.")
+    if query_attempts < 1 or query_attempts > 2:
+        raise ValueError("query_attempts must be 1 or 2.")
     if duplicate_globalid_policy not in ("error", "report"):
         raise ValueError("duplicate_globalid_policy must be error or report.")
     spatial_filters = list(geometry_filters)
@@ -138,7 +144,7 @@ def query_attributes_in_batches(
         return _query_with_default_version_recheck(
             target,
             query_fn,
-            attempts=attempts,
+            attempts=min(attempts,query_attempts),
             area=asset_label,
             progress=progress,
             **options,
@@ -174,6 +180,12 @@ def query_attributes_in_batches(
                 f"ArcGIS Server error: {exc}"
             ) from exc
         unique_ids.update(ids)
+        if max_matching_ids is not None and len(unique_ids)>max_matching_ids:
+            raise RuntimeError(
+                f"{asset_label}: {len(unique_ids)} records matched, above the "
+                f"manual scan safety cap of {max_matching_ids}. "
+                "Choose a shorter time window; no attribute batches were sent."
+            )
         if progress and (index == 1 or index == len(spatial_filters) or index % 10 == 0):
             progress(
                 f"{asset_label} boundary {index}/{len(spatial_filters)}: "
