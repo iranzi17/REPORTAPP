@@ -309,7 +309,6 @@ class PerRowZoomAndPopupFallbackTests(unittest.TestCase):
         self.assertIn('text="Zoom to current asset"',source)
         self.assertIn('track_zoom_request(queue_inbox_current_asset(config,row_id))',source)
         self.assertIn('track_zoom_request(queue_inbox_row_zoom(config,row_id))',source)
-        self.assertIn('No GIS feature or Inbox history will be changed.',source) if False else None
 
     def test_inbox_popups_never_automatically_zoom_or_replay_old_history(self):
         path=Path(__file__).resolve().parents[1]/(
