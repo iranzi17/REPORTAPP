@@ -910,7 +910,9 @@ class WatchLVLineDataQuality:
             name="output_gap_kmz", datatype="DEFile",
             parameterType="Derived", direction="Output",
         )
-        gap_kmz.filter.list = ["kmz"]
+        # ArcGIS Pro returns filter=None for a Derived DEFile output.
+        # Its output path is already produced as *_Gaps.kmz by export_gap_kmz;
+        # accessing filter.list here crashes getParameterInfo for all QA tools.
 
         return [
             output, flagged_fc, start, end, district, sectors, cells,
@@ -1119,7 +1121,9 @@ class _AssetQualityTool:
             name="output_gap_kmz", datatype="DEFile",
             parameterType="Derived", direction="Output",
         )
-        gap_kmz.filter.list = ["kmz"]
+        # ArcGIS Pro returns filter=None for a Derived DEFile output.
+        # Its output path is already produced as *_Gaps.kmz by export_gap_kmz;
+        # accessing filter.list here crashes getParameterInfo for all QA tools.
         return [output, start, end, district, sectors, cells,
                 custom, users, service, boundaries, version, gap_kmz]
 
