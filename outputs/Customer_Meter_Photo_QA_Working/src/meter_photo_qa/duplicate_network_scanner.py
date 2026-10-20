@@ -143,14 +143,15 @@ def _all_ids(layers, version, scope, page_size=500, pause_seconds=0.15,
                 f"({expected:,} to {ending:,}); no report was published."
             )
         count_changes[kind] = {
-            "initial": expected, "final": ending, "added_during_scan": delta,
+            "initial": expected, "final": ending, "net_count_increase": delta,
             "live_window_not_snapshot": bool(delta),
         }
         if delta:
             report(
-                f"WARNING: {label} grew by {delta:,} record(s) during the scan. "
-                f"All {ending:,} returned IDs match the final count, but this "
-                "is a live-window audit, not a frozen snapshot."
+                f"WARNING: {label} final count increased by {delta:,}. "
+                f"All {ending:,} returned IDs match the final count, but "
+                "additions or a changing count result are possible. "
+                "This is a live-window audit, not a frozen snapshot."
             )
         counts[kind] = scanned
         invalid[kind] = skipped
@@ -281,7 +282,7 @@ def _report_excel(path, duplicates, originals, areas, scanned, invalid,
     notes = wb.create_sheet("Method and Warnings")
     affected = sum(len(members) for members in duplicates.values())
     count_changes = count_changes or {}
-    changed_total = sum(info.get("added_during_scan", 0)
+    changed_total = sum(info.get("net_count_increase", 0)
                         for info in count_changes.values())
     for row in [
         ("Measure", "Value"), ("Scope", "All Electric Lines + LV Poles + Distribution Transformers"
@@ -291,7 +292,7 @@ def _report_excel(path, duplicates, originals, areas, scanned, invalid,
         ("Line records scanned", scanned["line"]), ("Pole records scanned", scanned["pole"]),
         ("Transformer records scanned", scanned["transformer"]),
         ("Total records scanned", sum(scanned.values())),
-        ("Records added while scanning", changed_total),
+        ("Net increase in reported record count", changed_total),
         ("Snapshot type", "LIVE WINDOW - NOT FROZEN" if changed_total
          else "No record-count changes observed (edits still possible)"),
         ("Duplicate GlobalID groups", len(duplicates)),
@@ -370,6 +371,7 @@ def _report_excel(path, duplicates, originals, areas, scanned, invalid,
         ("Concurrent insert handling",
          "A small count increase is accepted ONLY when scanned rows match the final count, "
          "strict ascending OBJECTIDs are verified and growth is within 0.5% or 25 records. "
+         "The increase may reflect live additions or a changing count response. "
          "Does not establish a transactionally consistent snapshot."),
         ("Administrative lookup", "Spatial intersection; a feature can intersect multiple cells."),
         ("Projection", "KMZ reads duplicate geometries separately with out_sr=4326, verifies spatial reference."),
