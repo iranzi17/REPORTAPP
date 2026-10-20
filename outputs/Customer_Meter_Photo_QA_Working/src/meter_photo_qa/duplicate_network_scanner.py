@@ -132,7 +132,9 @@ def _fetch_selected(layers, groups, version, progress=None):
                 subset[gid] = relevant
         if not subset:
             continue
-        raw = fetch_duplicate_features(layers[kind], subset, version, progress=report)
+        raw = fetch_duplicate_features(
+            layers[kind], subset, version, progress=report, pause_seconds=0.1,
+        )
         for oid, item in raw.items():
             key = (kind, oid)
             if key in result:
@@ -208,6 +210,7 @@ def _fetch_wgs84(layers, groups, originals, version):
             for oid in chunk:
                 if (kind, oid) not in result:
                     raise RuntimeError(f"{kind}/{oid}: KMZ source geometry missing.")
+            time.sleep(0.1)
     return result
 
 
@@ -218,7 +221,9 @@ def _area_index(cells, duplicates, original_features, progress=None):
                   if asset == kind}
         if not subset:
             continue
-        identified = assign_admin_areas(cells, subset, progress=progress)
+        identified = assign_admin_areas(
+            cells, subset, progress=progress, pause_seconds=0.1,
+        )
         for oid, area in identified.items():
             result[(kind, oid)] = area
     if len(result) != len(original_features):
