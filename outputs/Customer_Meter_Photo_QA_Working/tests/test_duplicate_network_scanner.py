@@ -258,6 +258,107 @@ class FullNetworkDuplicateTests(unittest.TestCase):
         code=ast.get_source_segment(path.read_text(encoding="utf-8"),action)
         self.assertIn('arcpy.SetParameterAsText(5, summary["output_kmz"])',code)
 
+    def test_live_additions_are_bounded_and_reported_not_a_false_snapshot(self):
+        # The office scan initially counted 92,340 rows, then saw additional
+        # records near the end. Adding one record during keyset paging must
+        # not waste the completed scan or hide the live-change warning.
+        original=self.line.query
+        inserted=[False]
+        def adding_during_scan(**kwargs):
+            result=original(**kwargs)
+            if (kwargs.get("result_record_count") and
+                not inserted[0]):
+                inserted[0]=True
+                self.line.features.append(
+                    sample(10,GUID4,"line",9,30.11,-1.95)
+                )
+                self.line.features.sort(
+                    key=lambda f:f.attributes["OBJECTID"]
+                )
+            return result
+        self.line.query=adding_during_scan
+        with tempfile.TemporaryDirectory() as folder:
+            progress=[]
+            result=self.run_scan(Path(folder)/"live.xlsx",progress=progress.append)
+            self.assertEqual(result["scanned_by_asset"]["line"],4)
+            self.assertEqual(result["source_count_changes"]["line"],{
+                "initial":3,"final":4,"added_during_scan":1,
+                "live_window_not_snapshot":True,
+            })
+            self.assertTrue(result["not_a_frozen_snapshot"])
+            self.assertEqual(result["duplicate_globalid_groups"],3)
+            self.assertTrue(any("grew by 1" in note for note in progress))
+            book=load_workbook(result["output_xlsx"],read_only=True)
+            try:
+                sheet=dict(list(book["Summary"].values))
+                self.assertEqual(sheet["Records added while scanning"],1)
+                self.assertEqual(sheet["Snapshot type"],"LIVE WINDOW - NOT FROZEN")
+            finally:
+                book.close()
+            self.assertTrue(Path(result["output_kmz"]).exists())
+
+    def test_live_insert_behind_cursor_causes_safe_rejection(self):
+        original=self.line.query
+        inserted=[False]
+        def insert_behind(**kwargs):
+            result=original(**kwargs)
+            if (kwargs.get("result_record_count") and
+                not inserted[0]):
+                inserted[0]=True
+                self.line.features.insert(
+                    0,sample(0,GUID3,"line",9,30.04,-1.92))
+            return result
+        self.line.query=insert_behind
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(RuntimeError,"count changed/incomplete"):
+                self.run_scan(Path(folder)/"behind.xlsx")
+            self.assertEqual(list(Path(folder).glob("*")),[])
+
+    def test_live_deletion_fails_instead_of_reporting_clean_network(self):
+        original=self.line.query
+        dropped=[False]
+        def delete_a_record(**kwargs):
+            result=original(**kwargs)
+            if kwargs.get("result_record_count") and not dropped[0]:
+                dropped[0]=True
+                self.line.features=self.line.features[:-1]
+            return result
+        self.line.query=delete_a_record
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(RuntimeError,"count changed/incomplete"):
+                self.run_scan(Path(folder)/"deleted.xlsx")
+            self.assertEqual(list(Path(folder).glob("*")),[])
+
+    def test_growth_budget_still_aborts_runaway_insertions(self):
+        original=self.line.query
+        inserted=[False]
+        def flood(**kwargs):
+            result=original(**kwargs)
+            if kwargs.get("result_record_count") and not inserted[0]:
+                inserted[0]=True
+                self.line.features.extend(
+                    sample(100+i,GUID3,"line",9,30.04,-1.92)
+                    for i in range(30)
+                )
+                self.line.features.sort(
+                    key=lambda feature:feature.attributes["OBJECTID"])
+            return result
+        self.line.query=flood
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(RuntimeError,"excessive changes during scan"):
+                self.run_scan(Path(folder)/"flood.xlsx")
+            self.assertEqual(list(Path(folder).glob("*")),[])
+
+    def test_lv_progress_label_identifies_lv_only_scope(self):
+        with tempfile.TemporaryDirectory() as folder:
+            messages=[]
+            self.run_scan(Path(folder)/"label.xlsx",classes="lv",
+                          progress=messages.append)
+            self.assertTrue(any(note.startswith("LV Electric Lines: scanned")
+                                for note in messages))
+            self.assertFalse(any(note.startswith("Electric Lines (LV, MV, HV)")
+                                 for note in messages))
+
     def test_changed_count_rejects_all_outputs(self):
         self.pole.count_change=1
         with tempfile.TemporaryDirectory() as folder:
