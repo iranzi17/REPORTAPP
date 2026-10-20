@@ -262,7 +262,7 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *,
         missing_checks.append("height_conditional_check")
     if strict_highlighted:
         extra = (
-            ("phases", "manufacturer") if asset=="transformer" else
+            ("phases",) if asset=="transformer" else
             ("transformer_name", "manufacturer")
         )
         missing_checks.extend(key for key in extra if not mapping.get(key))
@@ -308,13 +308,11 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *,
             if missing_value(attributes.get(field), (domains or {}).get(field)):
                 issues.append(label)
         if strict_highlighted:
-            for key, label in (
-                ("phases", "Phases missing/unknown (mandatory transformer field)"),
-                ("manufacturer", "Manufacturer missing/unknown (mandatory transformer field)"),
+            phase_field=mapping.get("phases")
+            if phase_field and missing_value(
+                attributes.get(phase_field),(domains or {}).get(phase_field)
             ):
-                field=mapping.get(key)
-                if field and missing_value(attributes.get(field),(domains or {}).get(field)):
-                    issues.append(label)
+                issues.append("Phases missing/unknown (mandatory transformer field)")
         # A positive feeder count is normal for commissioned distribution
         # installations, but 0 can be an intentional future/unused asset.
         # Never infer missing from numerical zero without an agreed business rule.
