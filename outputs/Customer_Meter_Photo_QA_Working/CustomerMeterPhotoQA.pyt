@@ -1932,6 +1932,7 @@ class ScanAllElectricLineDuplicates:
             service_url=parameters[2].valueAsText or None,
             boundary_service_url=parameters[3].valueAsText or None,
             version=parameters[4].valueAsText or "sde.DEFAULT",
+            progress=arcpy.AddMessage,
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
         arcpy.SetParameterAsText(5, summary["output_kmz"])
