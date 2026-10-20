@@ -8,6 +8,7 @@ No feature or topology edits are performed.
 from __future__ import annotations
 
 import os
+import time
 from collections import defaultdict, Counter
 from datetime import datetime
 from pathlib import Path
@@ -114,7 +115,8 @@ def collect_duplicate_ids(layer, version, where="1=1", page_size=500, progress=N
     return duplicates, {"scanned": scanned, "invalid_or_missing_globalids": skipped}
 
 
-def fetch_duplicate_features(layer, groups, version, batch_size=120, progress=None):
+def fetch_duplicate_features(layer, groups, version, batch_size=120, progress=None,
+                             pause_seconds=0):
     """Fetch full source attributes/geometry only for duplicate OBJECTIDs."""
     ids = sorted({oid for group in groups.values() for oid in group})
     output = {}
@@ -146,6 +148,8 @@ def fetch_duplicate_features(layer, groups, version, batch_size=120, progress=No
             raise RuntimeError(f"Could not fetch {len(missing)} duplicate Electric Line geometries.")
         if offset == 0 or offset + batch_size >= len(ids) or (offset//batch_size+1)%20 == 0:
             report(f"Loaded detailed geometries for {len(output):,}/{len(ids):,} duplicate features.")
+        if pause_seconds:
+            time.sleep(pause_seconds)
     for gid, objects in groups.items():
         for oid in objects:
             actual = canonical_globalid(output[oid]["attributes"].get("GLOBALID"))
@@ -154,7 +158,8 @@ def fetch_duplicate_features(layer, groups, version, batch_size=120, progress=No
     return output
 
 
-def assign_admin_areas(cell_layer, duplicate_features, progress=None):
+def assign_admin_areas(cell_layer, duplicate_features, progress=None,
+                       pause_seconds=0):
     """One true geometry-intersection lookup per distinct polyline geometry."""
     from arcgis.geometry.filters import intersects
 
@@ -163,7 +168,13 @@ def assign_admin_areas(cell_layer, duplicate_features, progress=None):
     by_oid = {}
     for ix, (oid, record) in enumerate(duplicate_features.items(), 1):
         geom = record["geometry"]
-        signature = _canonical_paths(geom)
+        if "x" in geom and "y" in geom:
+            # Also support Structure Junction / Transformer points without
+            # confusing their point signatures with polyline paths.
+            signature=("POINT",float(geom["x"]),float(geom["y"]))
+        else:
+            paths=_canonical_paths(geom)
+            signature=("LINE",paths) if paths is not None else None
         sr = geom.get("spatialReference") or {}
         key = (signature, repr(sorted(sr.items()))) if signature is not None else ("missing", oid)
         if key in cache:
@@ -181,8 +192,10 @@ def assign_admin_areas(cell_layer, duplicate_features, progress=None):
             )
             if not hasattr(response, "features") or getattr(response, "exceeded_transfer_limit", False):
                 raise RuntimeError(
-                    f"Administrative boundary lookup incomplete for Electric Line {oid}."
+                    f"Administrative boundary lookup incomplete for feature {oid}."
                 )
+            if pause_seconds:
+                time.sleep(pause_seconds)
             unique = set()
             for feature in response.features:
                 attrs = dict(feature.attributes)
