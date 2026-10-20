@@ -33,6 +33,125 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
 
 
 class AssetQualityTests(unittest.TestCase):
+    def test_strict_manual_pole_append_cable_yes_requires_type(self):
+        names=[
+            "Transformer_Name","Append_Cable","Append_Cable_Type",
+            "Manufacturers","Pole_Height","Service_Pole","PoleStructure",
+            "InsulatorTypes","Number_Circuit",
+        ]
+        mapping=resolve_fields([{"name":name} for name in names],"pole")
+        good={
+            "GLOBALID":"{P1}","OBJECTID":1,"ASSETGROUP":7,"ASSETTYPE":2,
+            "Transformer_Name":"DT-12","Append_Cable":1,
+            "Append_Cable_Type":"Fiber","Manufacturers":"ABC",
+            "Pole_Height":10,"Service_Pole":"No","PoleStructure":2,
+            "InsulatorTypes":"Suspension","Number_Circuit":1,
+        }
+        domains={"Append_Cable":{0:"No",1:"Yes"}}
+        result=evaluate_asset_raw(good,"pole",mapping,domains,strict_highlighted=True)
+        self.assertEqual(result["issues"],[])
+        self.assertEqual(result["unverified_checks"],[])
+        self.assertEqual(result["status"],"NO_GAPS_FOUND")
+        empty=evaluate_asset_raw(
+            dict(good,Append_Cable_Type=None),"pole",mapping,domains,
+            strict_highlighted=True,
+        )
+        self.assertIn("Appended Cable Type missing when Append Cable is Yes",
+                      empty["issues"])
+        no_schema=dict(mapping,append_cable_type=None)
+        unresolved=evaluate_asset_raw(
+            good,"pole",no_schema,domains,strict_highlighted=True,
+        )
+        self.assertTrue(any("append_cable_type" in k
+                            for k in unresolved["unverified_checks"]))
+
+    def test_strict_manual_explicit_no_and_zero_do_not_require_append_type(self):
+        from meter_photo_qa.asset_quality import append_cable_answer
+        mapping={
+            "transformer_name":"Transformer_Name",
+            "manufacturer":"Manufacturers","append_cable":"Append_Cable",
+            "append_cable_type":None,"height":"Pole_Height",
+            **EXTRA_POLE_FIELDS,
+        }
+        base={
+            "ASSETGROUP":7,"ASSETTYPE":1,"OBJECTID":2,
+            "GLOBALID":"{P2}","Transformer_Name":"DT-1",
+            "Manufacturers":"Maker","Pole_Height":10,
+            **EXTRA_POLE_VALUES,
+        }
+        for answer in (0,"0","No"," no "):
+            with self.subTest(answer=answer):
+                record=dict(base,Append_Cable=answer)
+                result=evaluate_asset_raw(
+                    record,"pole",mapping,strict_highlighted=True,
+                )
+                self.assertEqual(result["issues"],[])
+                self.assertNotIn("append_cable_type",result["unverified_checks"])
+                self.assertEqual(result["values"]["append_cable_type_status"],
+                                 "NOT_REQUIRED_APPEND_CABLE_NO")
+        self.assertEqual(append_cable_answer("0",{0:"No",1:"Yes"}),"no")
+        self.assertEqual(append_cable_answer(0,{0:"Unknown",1:"Yes"}),"missing")
+        self.assertEqual(append_cable_answer("2",{0:"No",1:"Yes"}),"invalid")
+
+    def test_strict_manual_pole_required_highlighted_fields_and_optional_notes(self):
+        mapping={
+            "transformer_name":"Transformer_Name",
+            "append_cable":"Append_Cable","append_cable_type":None,
+            "height":"Pole_Height","manufacturer":"Manufacturers",
+            "notes":None,**EXTRA_POLE_FIELDS,
+        }
+        sample={
+            "ASSETGROUP":7,"ASSETTYPE":1,"OBJECTID":3,"GLOBALID":"{P3}",
+            "Transformer_Name":None,"Append_Cable":"No",
+            "Pole_Height":None,"Manufacturers":None,
+            "Service_Pole":"No","PoleStructure":"Substandard",
+            "InsulatorTypes":"Tension","Number_Circuit":1,
+        }
+        result=evaluate_asset_raw(sample,"pole",mapping,
+                                  strict_highlighted=True)
+        self.assertIn("Transformer Name missing (mandatory LV pole field)",
+                      result["issues"])
+        self.assertIn("Pole Height (m) missing (mandatory LV pole field)",
+                      result["issues"])
+        self.assertIn("Manufacturer missing (mandatory LV pole field)",
+                      result["issues"])
+        self.assertNotIn("notes",result["unverified_checks"])
+        self.assertEqual(len(result["issues"]),3)
+        legacy=evaluate_asset_raw(sample,"pole",mapping)
+        self.assertNotIn("Manufacturer missing (mandatory LV pole field)",
+                         legacy["issues"])
+
+    def test_strict_manual_transformer_template_phases_not_phase_normal(self):
+        names=[
+            "Transfomer_name_","Owner_Name","Type_of_Installation",
+            "Phase_Normal","Phases","Transformer_Protection_Switch",
+            "Transformer_mounting_support","Number_of_Low_Voltage_feeders",
+        ]
+        mapping=resolve_fields([{"name":n} for n in names],"transformer")
+        self.assertEqual(mapping["phases"],"Phases")
+        record={
+            "ASSETGROUP":12,"ASSETTYPE":4,"OBJECTID":4,"GLOBALID":"{DT4}",
+            "Transfomer_name_":"DT4","Owner_Name":"REG",
+            "Type_of_Installation":"Outdoor","Phase_Normal":3,"Phases":None,
+            "Transformer_Protection_Switch":"Drop Out",
+            "Transformer_mounting_support":"Steel",
+            "Number_of_Low_Voltage_feeders":2,
+        }
+        result=evaluate_asset_raw(record,"transformer",mapping,
+                                  strict_highlighted=True)
+        self.assertIn("Phases missing/unknown (mandatory transformer field)",
+                      result["issues"])
+        record["Phases"]=3
+        result=evaluate_asset_raw(record,"transformer",mapping,
+                                  strict_highlighted=True)
+        self.assertEqual(result["issues"],[])
+        self.assertNotIn("manufacturer",result["unverified_checks"])
+        unresolved=evaluate_asset_raw(
+            record,"transformer",dict(mapping,phases=None),
+            strict_highlighted=True,
+        )
+        self.assertIn("phases",unresolved["unverified_checks"])
+
     def test_asset_sources_exclude_other_device_types(self):
         self.assertEqual(ASSETS["transformer"]["layer_id"], 7)
         self.assertEqual(ASSETS["transformer"]["asset_group"], 12)
@@ -190,6 +309,7 @@ class AssetQualityTests(unittest.TestCase):
         ]
         mapping = resolve_fields(fields, "pole")
         self.assertEqual(mapping, {
+            "transformer_name":None, "append_cable_type":None,
             "manufacturer": "Manufacturers",
             "notes": "Notes",
             "append_cable": "Append_Cable", "height":"Pole_Height",
