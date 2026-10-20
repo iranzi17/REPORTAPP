@@ -38,7 +38,11 @@ def _all_ids(layers, version, scope, page_size=500, pause_seconds=0.15,
     """Collect normalized IDs across all three layers with bounded keyset pages.
 
     Includes cross-layer repeated GUIDs; OBJECTIDs remain namespaced by asset.
-    Aborts if any layer's initial/final count differs or paging is incomplete.
+    Stops on missing pages, nonmonotonic OBJECTIDs or incompatible final
+    counts. Accepts *small, verified additions* during long-running scans
+    rather than restarting a full country-wide scan for one newly added row.
+    These results are explicitly labelled a live-window audit, not a
+    transactionally consistent point-in-time snapshot.
     """
     if scope not in SCOPES:
         raise ValueError("Scope must be 'all' or 'lv'.")
@@ -51,7 +55,9 @@ def _all_ids(layers, version, scope, page_size=500, pause_seconds=0.15,
     dup = {}
     counts = {}
     invalid = {}
+    count_changes = {}
     for kind, _id, default_where, label in SOURCES:
+        label = "LV Electric Lines" if kind == "line" and scope == "lv" else label
         layer = layers[kind]
         where = ("ASSETGROUP IN (9,10)" if kind == "line" and scope == "lv"
                  else default_where)
@@ -64,6 +70,10 @@ def _all_ids(layers, version, scope, page_size=500, pause_seconds=0.15,
         last = -1
         scanned = 0
         skipped = 0
+        # A few new rows are expected during a country-wide read. Never
+        # silently accept unbounded growth or paging inconsistencies.
+        growth_limit = max(25, int(expected * 0.005))
+        initial_count_exceeded = False
         while True:
             response = _query_with_retry(
                 layer, where=f"({where}) AND OBJECTID > {last}",
@@ -100,8 +110,18 @@ def _all_ids(layers, version, scope, page_size=500, pause_seconds=0.15,
                     seen[gid] = identity
             scanned += len(response.features)
             last = high
-            if scanned > expected:
-                raise RuntimeError(f"{label}: row count increased mid-scan; retry later.")
+            if scanned > expected and not initial_count_exceeded:
+                report(
+                    f"{label}: read count exceeded initial {expected:,}; "
+                    "continuing a bounded read and verifying final server count."
+                )
+                initial_count_exceeded = True
+            if scanned - expected > growth_limit:
+                raise RuntimeError(
+                    f"{label}: excessive changes during scan ({scanned:,} rows "
+                    f"vs initial {expected:,}; permitted growth {growth_limit:,}). "
+                    "No partial Excel/KMZ was published. Retry when source edits slow."
+                )
             if scanned == len(response.features) or scanned % 10000 < len(response.features):
                 report(f"{label}: scanned {scanned:,}/{expected:,} identity records.")
             if pause_seconds:
@@ -110,14 +130,31 @@ def _all_ids(layers, version, scope, page_size=500, pause_seconds=0.15,
             layer, where=where, return_count_only=True,
             gdb_version=version, attempts=2,
         ))
-        if scanned != expected or ending != expected:
+        if scanned != ending or ending < expected:
             raise RuntimeError(
                 f"{label}: count changed/incomplete ({expected} initial, "
-                f"{scanned} read, {ending} final); no report is published."
+                f"{scanned} read, {ending} final). Keyset pages may have missed "
+                "a concurrent insert/deletion; no report was published."
+            )
+        delta = ending - expected
+        if delta > growth_limit:
+            raise RuntimeError(
+                f"{label}: growth exceeded allowed live-change budget "
+                f"({expected:,} to {ending:,}); no report was published."
+            )
+        count_changes[kind] = {
+            "initial": expected, "final": ending, "added_during_scan": delta,
+            "live_window_not_snapshot": bool(delta),
+        }
+        if delta:
+            report(
+                f"WARNING: {label} grew by {delta:,} record(s) during the scan. "
+                f"All {ending:,} returned IDs match the final count, but this "
+                "is a live-window audit, not a frozen snapshot."
             )
         counts[kind] = scanned
         invalid[kind] = skipped
-    return dup, counts, invalid
+    return dup, counts, invalid, count_changes
 
 
 def _fetch_selected(layers, groups, version, progress=None):
@@ -232,7 +269,7 @@ def _area_index(cells, duplicates, original_features, progress=None):
 
 
 def _report_excel(path, duplicates, originals, areas, scanned, invalid,
-                  service, boundary, version, scope):
+                  service, boundary, version, scope, count_changes=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     wb = Workbook()
@@ -243,6 +280,9 @@ def _report_excel(path, duplicates, originals, areas, scanned, invalid,
     locations = wb.create_sheet("By District Sector Cell")
     notes = wb.create_sheet("Method and Warnings")
     affected = sum(len(members) for members in duplicates.values())
+    count_changes = count_changes or {}
+    changed_total = sum(info.get("added_during_scan", 0)
+                        for info in count_changes.values())
     for row in [
         ("Measure", "Value"), ("Scope", "All Electric Lines + LV Poles + Distribution Transformers"
          if scope == "all" else "LV Lines + LV Poles + Distribution Transformers"),
@@ -251,6 +291,9 @@ def _report_excel(path, duplicates, originals, areas, scanned, invalid,
         ("Line records scanned", scanned["line"]), ("Pole records scanned", scanned["pole"]),
         ("Transformer records scanned", scanned["transformer"]),
         ("Total records scanned", sum(scanned.values())),
+        ("Records added while scanning", changed_total),
+        ("Snapshot type", "LIVE WINDOW - NOT FROZEN" if changed_total
+         else "No record-count changes observed (edits still possible)"),
         ("Duplicate GlobalID groups", len(duplicates)),
         ("Affected records", affected), ("Extra copies", affected-len(duplicates)),
         ("Invalid or missing GUIDs (lines)", invalid["line"]),
@@ -324,6 +367,10 @@ def _report_excel(path, duplicates, originals, areas, scanned, invalid,
         ("Not geometry duplicate search", "Different GUIDs with identical/nearby geometry are not detected."),
         ("Completeness", "Every included layer uses an initial and final count with full OBJECTID paging."),
         ("Live editing", "Counts could remain stable while source records change; treat results as a review snapshot."),
+        ("Concurrent insert handling",
+         "A small count increase is accepted ONLY when scanned rows match the final count, "
+         "strict ascending OBJECTIDs are verified and growth is within 0.5% or 25 records. "
+         "Does not establish a transactionally consistent snapshot."),
         ("Administrative lookup", "Spatial intersection; a feature can intersect multiple cells."),
         ("Projection", "KMZ reads duplicate geometries separately with out_sr=4326, verifies spatial reference."),
         ("Safety", "No source edits, repairs or duplicate deletion performed."),
@@ -429,7 +476,7 @@ def scan_network_duplicate_globalids(
     layers={asset:layer_factory(_layer_url(base,layerid))
             for asset,layerid,_,_ in SOURCES}
     cells=layer_factory(_layer_url(boundary,CELL_LAYER_ID))
-    groups,counts,invalid=_all_ids(
+    groups,counts,invalid,count_changes=_all_ids(
         layers,version,classes,page_size,pause_seconds,progress=report,
     )
     originals=_fetch_selected(layers,groups,version,progress=report)
@@ -441,7 +488,7 @@ def scan_network_duplicate_globalids(
     try:
         _report_excel(
             staged_excel,groups,originals,areas,counts,invalid,
-            base,boundary,version,classes,
+            base,boundary,version,classes,count_changes,
         )
         xml=_render_duplicate_kml(groups,wgs84)
         with ZipFile(staged_kmz,"w",compression=ZIP_DEFLATED) as archive:
@@ -460,6 +507,10 @@ def scan_network_duplicate_globalids(
         "output_xlsx":str(output), "output_kmz":str(kmz),
         "read_only":True,"scope":classes,"version":version,
         "scanned_by_asset":counts,
+        "source_count_changes":count_changes,
+        "not_a_frozen_snapshot":any(
+            item["live_window_not_snapshot"] for item in count_changes.values()
+        ),
         "invalid_or_missing_globalids_by_asset":invalid,
         "duplicate_globalid_groups":len(groups),
         "duplicate_feature_records":sum(len(group) for group in groups.values()),
