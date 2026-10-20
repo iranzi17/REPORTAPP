@@ -226,6 +226,38 @@ class FullNetworkDuplicateTests(unittest.TestCase):
                 self.run_scan(Path(folder)/"invalid.xlsx")
             self.assertEqual(list(Path(folder).iterdir()),[])
 
+    def test_changed_asset_group_fails_before_publishing_kmz(self):
+        original_query=self.pole.query
+        def changed_when_projected(**kwargs):
+            result=original_query(**kwargs)
+            if kwargs.get("out_sr")==4326 and kwargs.get("object_ids"):
+                for feature in result.features:
+                    feature.attributes=dict(feature.attributes,ASSETGROUP=8)
+            return result
+        self.pole.query=changed_when_projected
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(RuntimeError,"asset group changed"):
+                self.run_scan(Path(folder)/"asset_group_changed.xlsx")
+            self.assertEqual(list(Path(folder).iterdir()),[])
+
+    def test_arcgis_tool_has_derived_kmz_without_a_filter(self):
+        import ast
+        path=Path(__file__).resolve().parents[1]/"CustomerMeterPhotoQA.pyt"
+        tree=ast.parse(path.read_text(encoding="utf-8"))
+        tool=next(node for node in tree.body if isinstance(node,ast.ClassDef)
+                  and node.name=="ScanAllElectricLineDuplicates")
+        params=next(node for node in tool.body if isinstance(node,ast.FunctionDef)
+                    and node.name=="getParameterInfo")
+        source=ast.get_source_segment(path.read_text(encoding="utf-8"),params)
+        self.assertIn('name="output_duplicates_kmz"',source)
+        self.assertIn('parameterType="Derived"',source)
+        self.assertIn('return [output, types, service, boundary, version, kmz]',source)
+        self.assertNotIn("kmz.filter",source)
+        action=next(node for node in tool.body if isinstance(node,ast.FunctionDef)
+                    and node.name=="execute")
+        code=ast.get_source_segment(path.read_text(encoding="utf-8"),action)
+        self.assertIn('arcpy.SetParameterAsText(5, summary["output_kmz"])',code)
+
     def test_changed_count_rejects_all_outputs(self):
         self.pole.count_change=1
         with tempfile.TemporaryDirectory() as folder:
