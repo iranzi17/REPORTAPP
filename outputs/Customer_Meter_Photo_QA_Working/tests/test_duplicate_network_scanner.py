@@ -159,7 +159,8 @@ class FullNetworkDuplicateTests(unittest.TestCase):
             self.assertTrue(Path(result["output_kmz"]).exists())
             self.assertEqual(Path(result["output_xlsx"]).with_suffix(".kmz"),
                              Path(result["output_kmz"]))
-            with load_workbook(result["output_xlsx"],read_only=True) as book:
+            book=load_workbook(result["output_xlsx"],read_only=True)
+            try:
                 self.assertIn("By District Sector Cell",book.sheetnames)
                 grouped=list(book["Duplicate GlobalIDs"].values)
                 self.assertEqual(len(grouped),3)
@@ -173,6 +174,8 @@ class FullNetworkDuplicateTests(unittest.TestCase):
                     ("LV Poles",40),("Distribution Transformers",50),
                 })
                 self.assertEqual(detailed[1][7],"Gasabo")
+            finally:
+                book.close()
             with ZipFile(result["output_kmz"]) as z:
                 self.assertEqual(z.namelist(),["doc.kml"])
                 xml=ET.fromstring(z.read("doc.kml"))
