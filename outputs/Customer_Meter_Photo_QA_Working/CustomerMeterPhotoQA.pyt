@@ -55,6 +55,7 @@ try:
     from meter_photo_qa import transformer_line_audit as _transformer_line_audit
     from meter_photo_qa import duplicate_line_inspector as _duplicate_line_inspector
     from meter_photo_qa import duplicate_line_scanner as _duplicate_line_scanner
+    from meter_photo_qa import duplicate_network_scanner as _duplicate_network_scanner
     from meter_photo_qa import gicumbi_pamela_profile as _gicumbi_pamela_profile
     from meter_photo_qa import smart_query as _smart_query
     from meter_photo_qa import smart_query_runner as _smart_query_runner
@@ -76,6 +77,7 @@ try:
     _transformer_line_audit = importlib.reload(_transformer_line_audit)
     _duplicate_line_inspector = importlib.reload(_duplicate_line_inspector)
     _duplicate_line_scanner = importlib.reload(_duplicate_line_scanner)
+    _duplicate_network_scanner = importlib.reload(_duplicate_network_scanner)
     _gicumbi_pamela_profile = importlib.reload(_gicumbi_pamela_profile)
     _smart_query = importlib.reload(_smart_query)
     _smart_query_runner = importlib.reload(_smart_query_runner)
@@ -110,6 +112,7 @@ run_asset_quality = _asset_quality_runner.run_asset_quality
 run_transformer_line_name_audit = _transformer_line_audit.run_transformer_line_name_audit
 inspect_duplicate_line_globalid = _duplicate_line_inspector.inspect_duplicate_line_globalid
 scan_electric_line_duplicate_globalids = _duplicate_line_scanner.scan_electric_line_duplicate_globalids
+scan_network_duplicate_globalids = _duplicate_network_scanner.scan_network_duplicate_globalids
 run_gicumbi_pamela_profile = _gicumbi_pamela_profile.run_gicumbi_pamela_profile
 run_smart_query = _smart_query_runner.run_smart_query
 run_lv_feeder_report = _lv_feeder_report.run_lv_feeder_report
@@ -1859,37 +1862,39 @@ class ReviewGicumbiPamelaTeam:
 
 
 class ScanAllElectricLineDuplicates:
-    """Full-network read-only duplicate GlobalID Excel register with location."""
-    label = "Scan All Electric Line Duplicate GlobalIDs"
+    """Manual, read-only GlobalID duplicate scan across three REG assets."""
+    label = "Scan All Network Duplicate GlobalIDs (Lines, Poles, Transformers)"
     description = (
-        "Read-only country-wide scan for repeated Electric Line GlobalIDs. "
-        "Exports one row per duplicate source feature with its OBJECTID, "
-        "GlobalID, District, Sector and Cell derived by spatial intersection. "
-        "No dates or surveyor restrictions. Do not delete Electric Lines "
-        "from this tool."
+        "One manual scan across Electric Lines, LV Poles and Distribution "
+        "Transformers. Finds repeated valid GlobalIDs within and across layers. "
+        "Produces an Excel register and matching Google Earth KMZ together. "
+        "Identity-only pages are used first; geometries are requested only "
+        "for duplicate records. Country-wide scans can still take time and "
+        "use server resources. No source attributes or geometry are edited. "
+        "This is a GlobalID duplicate audit, NOT a geometry-overlap audit."
     )
     canRunInBackground = False
 
     def getParameterInfo(self):
         output = arcpy.Parameter(
-            displayName="Output Excel duplicate register",
+            displayName="Output Excel duplicate register (KMZ generated beside it)",
             name="output_xlsx", datatype="DEFile",
             parameterType="Required", direction="Output",
         )
         output.filter.list = ["xlsx"]
         output.value = str(
             ROOT / "outputs" /
-            f"all_electric_line_duplicate_globalids_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+            f"network_duplicate_globalids_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
         )
         types = arcpy.Parameter(
-            displayName="Electric Line assets to scan",
+            displayName="Network duplicate scan scope",
             name="asset_scope", datatype="GPString",
             parameterType="Required", direction="Input",
         )
         types.filter.type = "ValueList"
         types.filter.list = [
-            "All Electric Lines (LV, MV and HV)",
-            "LV Electric Lines only",
+            "All Electric Lines (LV, MV, HV) + LV Poles + Transformers",
+            "LV Lines + LV Poles + Transformers",
         ]
         types.value = types.filter.list[0]
         service = arcpy.Parameter(
@@ -1910,29 +1915,41 @@ class ScanAllElectricLineDuplicates:
             parameterType="Optional", direction="Input",
         )
         version.value = "sde.DEFAULT"
-        return [output, types, service, boundary, version]
+        kmz = arcpy.Parameter(
+            displayName="Matching Google Earth KMZ (all duplicated features)",
+            name="output_duplicates_kmz", datatype="DEFile",
+            parameterType="Derived", direction="Output",
+        )
+        # ArcGIS Pro's Derived DEFile filter can be None. Do not assign it.
+        return [output, types, service, boundary, version, kmz]
 
     def execute(self, parameters, messages):
-        selected = parameters[1].valueAsText
-        summary = scan_electric_line_duplicate_globalids(
+        selected=parameters[1].valueAsText
+        scope = "lv" if selected == "LV Lines + LV Poles + Transformers" else "all"
+        summary = scan_network_duplicate_globalids(
             output_xlsx=parameters[0].valueAsText,
-            classes="lv" if selected == "LV Electric Lines only" else "all",
+            classes=scope,
             service_url=parameters[2].valueAsText or None,
             boundary_service_url=parameters[3].valueAsText or None,
             version=parameters[4].valueAsText or "sde.DEFAULT",
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
+        arcpy.SetParameterAsText(5, summary["output_kmz"])
+        arcpy.AddMessage("Excel duplicate register: " + summary["output_xlsx"])
+        arcpy.AddMessage("Matching Google Earth KMZ: " + summary["output_kmz"])
         arcpy.AddMessage(json.dumps(summary, indent=2, default=str))
         if summary["duplicate_globalid_groups"]:
             arcpy.AddWarning(
-                f"Found {summary['duplicate_globalid_groups']} duplicate GlobalID "
-                f"groups in {summary['duplicate_feature_records']} Electric Line "
-                "records. Review Excel before any authorized edits."
+                f"{summary['duplicate_globalid_groups']} duplicate GlobalID "
+                f"groups across {summary['duplicate_feature_records']} features, "
+                f"including {summary['cross_layer_duplicate_groups']} cross-layer groups. "
+                "Review Excel and KMZ; never auto-delete or auto-repair."
             )
         if summary["records_without_admin_location"]:
             arcpy.AddWarning(
-                f"{summary['records_without_admin_location']} duplicate line records "
-                "had no verified district/sector/cell. See Admin Status in Excel."
+                f"{summary['records_without_admin_location']} duplicate records "
+                "could not be located in verified districts/sectors/cells. "
+                "Check the Excel administrative status."
             )
 
 class InspectElectricLineGlobalID:
