@@ -163,7 +163,13 @@ def assign_admin_areas(cell_layer, duplicate_features, progress=None):
     by_oid = {}
     for ix, (oid, record) in enumerate(duplicate_features.items(), 1):
         geom = record["geometry"]
-        signature = _canonical_paths(geom)
+        if "x" in geom and "y" in geom:
+            # Also support Structure Junction / Transformer points without
+            # confusing their point signatures with polyline paths.
+            signature=("POINT",float(geom["x"]),float(geom["y"]))
+        else:
+            paths=_canonical_paths(geom)
+            signature=("LINE",paths) if paths is not None else None
         sr = geom.get("spatialReference") or {}
         key = (signature, repr(sorted(sr.items()))) if signature is not None else ("missing", oid)
         if key in cache:
@@ -181,7 +187,7 @@ def assign_admin_areas(cell_layer, duplicate_features, progress=None):
             )
             if not hasattr(response, "features") or getattr(response, "exceeded_transfer_limit", False):
                 raise RuntimeError(
-                    f"Administrative boundary lookup incomplete for Electric Line {oid}."
+                    f"Administrative boundary lookup incomplete for feature {oid}."
                 )
             unique = set()
             for feature in response.features:
