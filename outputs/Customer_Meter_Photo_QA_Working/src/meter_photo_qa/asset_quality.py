@@ -21,6 +21,10 @@ ASSETS = {
             "installation_type": ["Type_of_Installation", "Type_of_installation",
                                   "TypeInstallation", "Installation_Type"],
             "phase_normal": ["Phase_Normal", "PhaseNormal", "Phase_Norm", "Phase Normal"],
+            # The highlighted template's "Phases" must NOT be silently
+            # substituted with Phase_Normal: resolve it independently.
+            "phases": ["Phases", "Phase", "Transformer_Phases", "TransformerPhases",
+                       "Number_of_Phases", "NumberOfPhases"],
             "protection_switch": ["Transformer_Protection_Switch", "TransformerProtectionSwitch",
                                   "Protection_Switch", "Transformer_protection_switch"],
             "mounting_support": ["Transformer_mounting_support", "TransformerMountingSupport",
@@ -43,6 +47,15 @@ ASSETS = {
         "layer_id": 12, "asset_group": 7,
         "types": {1:"Wooden", 2:"Concrete", 3:"Steel Pole"},
         "checks": {
+            "transformer_name": ["Transformer_Name", "TransformerName",
+                                 "Transfomer_name_", "Transformer_name",
+                                 "DT_Name", "DTName", "Distribution_Transformer_Name"],
+            "append_cable_type": ["Append_Cable_Type", "AppendCableType",
+                                  "Appended_Cable_Type", "AppendedCableType",
+                                  "AppendCable_Type", "Append_Cable_Types",
+                                  "Appended Cable Type (If Yes)",
+                                  "Append Cable Type (If Yes)",
+                                  "Appended_Cable_Type_If_Yes"],
             "manufacturer": ["Manufacturers", "Manufacturer", "Pole_Manufacturer", "Manufacturer_Name", "ManufacturerName", "Make"],
             "notes": ["Notes", "Remarks", "Pole_Notes"],
             "append_cable": ["Append_Cable", "AppendCable", "Append Cable",
@@ -191,6 +204,38 @@ def missing_pole_field_value(raw, domain=None):
     return missing_value(raw, domain)
 
 
+
+def append_cable_answer(raw, domain=None):
+    """Return yes/no/missing/invalid without guessing unsupported coded values.
+
+    Zero (integer or text) is No in the approved LV pole template, except
+    when a live coded domain explicitly contradicts that interpretation.
+    Codes are resolved against the service's verified domain first.
+    """
+    if raw is None or not str(raw).strip():
+        return "missing"
+    domain=domain or {}
+    coded = next(
+        (label for code,label in domain.items() if raw==code or
+         str(raw).strip()==str(code).strip()),
+        None,
+    )
+    if coded is not None:
+        text=str(coded).strip().casefold()
+    else:
+        if domain and isinstance(raw,(int,float)) and not isinstance(raw,bool):
+            return "invalid"
+        text=str(raw).strip().casefold()
+    if text in ("yes","true","1"):
+        return "yes"
+    if text in ("no","false","0"):
+        return "no"
+    if text in UNKNOWN:
+        return "missing"
+    return "invalid"
+
+
+
 def is_substandard_pole_structure(raw, domain=None):
     """Honor the verified PoleStructure 'Substandard' option, including codes.
 
@@ -229,7 +274,8 @@ def domain_map(layer_properties, group_code):
     return output
 
 
-def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_manufacturer=False):
+def evaluate_asset(attributes, asset, mapping, domains=None, *,
+                   include_pole_manufacturer=False, strict_highlighted=False):
     """One record. MISSING_SCHEMA and data GAP are kept distinct."""
     spec = ASSETS[asset]
     if str(attributes.get("ASSETGROUP")) != str(spec["asset_group"]):
@@ -240,9 +286,21 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_man
     issues = []
     notes_field = mapping.get("notes")
     note = str(attributes.get(notes_field) or "").strip() if notes_field else ""
-    missing_checks = sorted(key for key in spec["priority"] if not mapping.get(key))
+    # The strict highlighted-field policy is enabled by the MANUAL checker
+    # only. Existing historical QA reports and paused watcher rules remain
+    # unchanged until separately approved.
+    missing_checks = sorted(
+        key for key in spec["priority"]
+        if not mapping.get(key) and not (strict_highlighted and key == "notes")
+    )
     if asset=="pole" and not mapping.get("height"):
         missing_checks.append("height_conditional_check")
+    if strict_highlighted:
+        extra = (
+            ("phases",) if asset=="transformer" else
+            ("transformer_name", "manufacturer")
+        )
+        missing_checks.extend(key for key in extra if not mapping.get(key))
     if not gid.strip():
         issues.append("GlobalID missing")
     try:
@@ -284,6 +342,12 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_man
                 continue
             if missing_value(attributes.get(field), (domains or {}).get(field)):
                 issues.append(label)
+        if strict_highlighted:
+            phase_field=mapping.get("phases")
+            if phase_field and missing_value(
+                attributes.get(phase_field),(domains or {}).get(phase_field)
+            ):
+                issues.append("Phases missing/unknown (mandatory transformer field)")
         # A positive feeder count is normal for commissioned distribution
         # installations, but 0 can be an intentional future/unused asset.
         # Never infer missing from numerical zero without an agreed business rule.
@@ -292,6 +356,8 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_man
         if height_field:
             height_status,height_issue=assess_pole_height(attributes.get(height_field),note)
             values["height_status"]=height_status
+            if height_status=="UNRECORDED" and strict_highlighted:
+                issues.append("Pole Height (m) missing (mandatory LV pole field)")
             if height_status=="INVALID_NUMERIC":
                 issues.append("Pole height has an invalid nonnumeric value")
             if height_issue:
@@ -300,28 +366,57 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_man
             values["height_status"]="NOT_VERIFIED_FIELD"
         append_field = mapping.get("append_cable")
         if not append_field:
-            values["append_cable_status"] = "NOT_VERIFIED_FIELD"
+            values["append_cable_status"]="NOT_VERIFIED_FIELD"
         else:
-            raw = attributes.get(append_field)
-            coded_domain = (domains or {}).get(append_field, {})
-            # ArcGIS may return a coded zero either as integer 0 or as
-            # the text "0". A coded "No" is an explicit response, not
-            # an incomplete value. An unmapped text zero is not assumed
-            # to mean No.
-            if isinstance(raw, str) and raw.strip() == "0":
-                domain_value = next((label for code, label in coded_domain.items()
-                                     if str(code).strip() == "0"), None)
-                if domain_value is not None:
-                    values["append_cable"] = str(domain_value)
-                missing_append = (not domain_value or
-                                  str(domain_value).strip().casefold() in UNKNOWN)
+            raw=attributes.get(append_field)
+            coded_domain=(domains or {}).get(append_field,{})
+            if strict_highlighted:
+                # Explicit No/0 is complete and EXEMPTS the type field.
+                answer=append_cable_answer(raw,coded_domain)
+                if answer=="missing":
+                    values["append_cable_status"]="MISSING_OR_UNKNOWN"
+                    issues.append("Append Cable missing/unknown (mandatory LV pole field)")
+                elif answer=="invalid":
+                    values["append_cable_status"]="INVALID_YES_NO"
+                    issues.append("Append Cable must be Yes or No (0 means No)")
+                else:
+                    values["append_cable_status"]="RECORDED"
+                    if answer=="yes":
+                        type_field=mapping.get("append_cable_type")
+                        if not type_field:
+                            missing_checks.append(
+                                "append_cable_type (required when Append Cable is Yes)"
+                            )
+                            values["append_cable_type_status"]="NOT_VERIFIED_FIELD"
+                        elif missing_pole_field_value(
+                            attributes.get(type_field),(domains or {}).get(type_field)
+                        ):
+                            values["append_cable_type_status"]="MISSING_OR_UNKNOWN"
+                            issues.append("Appended Cable Type missing when Append Cable is Yes")
+                        else:
+                            values["append_cable_type_status"]="RECORDED"
+                    else:
+                        values["append_cable_type_status"]="NOT_REQUIRED_APPEND_CABLE_NO"
             else:
-                missing_append = missing_value(raw, coded_domain)
-            if missing_append:
-                values["append_cable_status"] = "MISSING_OR_UNKNOWN"
-                issues.append("Append Cable missing/unknown (mandatory LV pole field)")
-            else:
-                values["append_cable_status"] = "RECORDED"
+                # Preserve existing watcher behavior and explicit coded No.
+                if isinstance(raw,str) and raw.strip()=="0":
+                    domain_value=next(
+                        (label for code,label in coded_domain.items()
+                         if str(code).strip()=="0"),None,
+                    )
+                    if domain_value is not None:
+                        values["append_cable"]=str(domain_value)
+                    missing_append=(
+                        not domain_value or
+                        str(domain_value).strip().casefold() in UNKNOWN
+                    )
+                else:
+                    missing_append=missing_value(raw,coded_domain)
+                if missing_append:
+                    values["append_cable_status"]="MISSING_OR_UNKNOWN"
+                    issues.append("Append Cable missing/unknown (mandatory LV pole field)")
+                else:
+                    values["append_cable_status"]="RECORDED"
         # Additional mandatory template fields for LV poles.
         for key, label in (
             ("service_pole", "Service Pole"),
@@ -351,6 +446,12 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_man
                     values[key + "_status"] = "RECORDED"
             else:
                 values[key + "_status"] = "RECORDED"
+        if strict_highlighted:
+            name_field=mapping.get("transformer_name")
+            if name_field and missing_value(
+                attributes.get(name_field),(domains or {}).get(name_field)
+            ):
+                issues.append("Transformer Name missing (mandatory LV pole field)")
         field = mapping.get("manufacturer")
         structure_field = mapping.get("structure")
         is_substandard = (
@@ -360,7 +461,14 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *, include_pole_man
                 (domains or {}).get(structure_field),
             )
         )
-        if field and missing_value(attributes.get(field), (domains or {}).get(field)):
+        if strict_highlighted and field and missing_value(
+            attributes.get(field),(domains or {}).get(field)
+        ):
+            # In this strict manual template audit, Manufacturer is compulsory.
+            # Notes and Substandard structure are NOT blanket substitutes.
+            values["manufacturer_status"]="MISSING_MANDATORY"
+            issues.append("Manufacturer missing (mandatory LV pole field)")
+        elif field and missing_value(attributes.get(field), (domains or {}).get(field)):
             if is_substandard:
                 values["manufacturer_status"] = "SUBSTANDARD_EXEMPT"
             elif not note:

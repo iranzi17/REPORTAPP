@@ -110,6 +110,80 @@ class NotificationTests(unittest.TestCase):
                         },
                     )
 
+    def test_manual_scan_enforces_template_highlights_without_watcher_alerts(self):
+        from meter_photo_qa.surveyor_notifications import manual_gap_scan,record_findings
+        now_ms=1792404000000
+        stamp=now_ms-60*60*1000
+        schema=[{"name":name} for name in (
+            "Transformer_Name","Append_Cable","Appended_Cable_Type",
+            "Manufacturers","Pole_Height","Service_Pole","PoleStructure",
+            "InsulatorTypes","Number_Circuit",
+        )]
+        record={
+            "OBJECTID":2026,"GLOBALID":"{TESTPOLE}",
+            "ASSETGROUP":7,"ASSETTYPE":2,
+            "created_user":"ninamenye9683","created_date":stamp,
+            "last_edited_user":"ninamenye9683","last_edited_date":stamp,
+            "Transformer_Name":"","Append_Cable":1,
+            "Appended_Cable_Type":None,"Manufacturers":None,
+            "Pole_Height":None,"Service_Pole":"No",
+            "PoleStructure":2,"InsulatorTypes":"Suspension",
+            "Number_Circuit":1,
+        }
+        domain={"Append_Cable":{0:"No",1:"Yes"}}
+        with tempfile.TemporaryDirectory() as td:
+            cfg=Path(td)/"monitor_config.json"
+            cfg.write_text(json.dumps(dict(CONFIG,version="sde.DEFAULT")),
+                           encoding="utf-8")
+            result=manual_gap_scan(
+                cfg,now_ms=now_ms,
+                collector=lambda *_args,**_kwargs:{
+                    "pole":([record],schema,domain,None,None),
+                },
+            )
+            self.assertEqual(result["gap_assets"],1)
+            issues=result["gaps"][0]["issues"]
+            self.assertTrue(any("Transformer Name missing" in x for x in issues))
+            self.assertTrue(any("Appended Cable Type missing" in x for x in issues))
+            self.assertTrue(any("Manufacturer missing" in x for x in issues))
+            self.assertTrue(any("Pole Height" in x for x in issues))
+            self.assertFalse(any("Notes missing" in x for x in issues))
+            self.assertEqual(result["notifications_sent"],0)
+            self.assertFalse(cfg.with_suffix(".sqlite3").exists())
+            # The scheduled watcher path does NOT enable the new manual policy.
+            legacy,_=record_findings("pole",record,schema,domain)
+            self.assertFalse(any("Appended Cable Type" in x for x in legacy))
+            self.assertFalse(any("Manufacturer missing" in x for x in legacy))
+
+    def test_manual_scan_fails_closed_on_missing_highlighted_schema(self):
+        from meter_photo_qa.surveyor_notifications import manual_gap_scan
+        now_ms=1792404000000
+        stamp=now_ms-20*60*1000
+        schema=[{"name":name} for name in (
+            "Append_Cable","Manufacturers","Pole_Height",
+            "Service_Pole","PoleStructure","InsulatorTypes","Number_Circuit",
+        )]
+        record={
+            "OBJECTID":9,"GLOBALID":"{POLE9}","ASSETGROUP":7,
+            "ASSETTYPE":1,"created_user":"ninamenye9683",
+            "created_date":stamp,"last_edited_date":stamp,
+            "last_edited_user":"ninamenye9683","Append_Cable":"No",
+            "Manufacturers":"ABC","Pole_Height":9,
+            "Service_Pole":"No","PoleStructure":1,
+            "InsulatorTypes":"Tension","Number_Circuit":1,
+        }
+        with tempfile.TemporaryDirectory() as td:
+            cfg=Path(td)/"monitor_config.json"
+            cfg.write_text(json.dumps(dict(CONFIG,version="sde.DEFAULT")),
+                           encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError,"transformer_name"):
+                manual_gap_scan(
+                    cfg,now_ms=now_ms,
+                    collector=lambda *_args,**_kwargs:{
+                        "pole":([record],schema,{},None,None),
+                    },
+                )
+
     def test_naive_arcgis_editor_time_is_utc_not_office_local_time(self):
         from meter_photo_qa.surveyor_notifications import timestamp_ms, submission_actor
         source=std_datetime.datetime(2026,10,16,16,46,0)
