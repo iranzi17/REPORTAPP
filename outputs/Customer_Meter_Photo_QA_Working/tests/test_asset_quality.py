@@ -33,6 +33,19 @@ def evaluate_asset(attributes, asset, mapping, domains=None):
 
 
 class AssetQualityTests(unittest.TestCase):
+    def test_highlighted_appended_type_if_yes_alias_resolves_unambiguously(self):
+        fields=[
+            {"name":"MeasuredAppendType","alias":"Appended Cable Type (If Yes)"},
+            {"name":"Transformer_Name","alias":"Transformer Name"},
+        ]
+        mapped=resolve_fields(fields,"pole")
+        self.assertEqual(mapped["append_cable_type"],"MeasuredAppendType")
+        self.assertEqual(mapped["transformer_name"],"Transformer_Name")
+        fields.append({
+            "name":"AnotherAppendType","alias":"Appended Cable Type (If Yes)",
+        })
+        self.assertIsNone(resolve_fields(fields,"pole")["append_cable_type"])
+
     def test_strict_manual_pole_append_cable_yes_requires_type(self):
         names=[
             "Transformer_Name","Append_Cable","Append_Cable_Type",
