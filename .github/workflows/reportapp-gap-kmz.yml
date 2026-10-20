@@ -8,6 +8,10 @@ on:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/combined_qa_report.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_gap_kmz.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/duplicate_network_scanner.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/duplicate_line_scanner.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_duplicate_network_scanner.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_duplicate_line_scanner.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_toolbox_gap_kmz_output.py'
       - '.github/workflows/reportapp-gap-kmz.yml'
   pull_request:
@@ -30,6 +34,8 @@ jobs:
       - name: Compile KMZ generator and toolbox
         run: |
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/gap_kmz.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/duplicate_network_scanner.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/duplicate_line_scanner.py
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/combined_qa_report.py
       - name: Test KMZ against exact QA Excel records
@@ -40,6 +46,9 @@ jobs:
         env:
           PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
         run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_duplicate_network_scanner.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_duplicate_line_scanner.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_duplicate_line_inspector.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_combined_qa_report.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_asset_quality.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_asset_quality_workflow.py -v
