@@ -149,7 +149,7 @@ def _geometry_signature(kind, geometry):
     return (float(geometry["x"]), float(geometry["y"]))
 
 
-def _fetch_wgs84(layers, groups, version):
+def _fetch_wgs84(layers, groups, originals, version):
     """Request WGS84 geometries only for duplicates; verify source ID and CRS.
 
     This separate bounded duplicate-only fetch is required because the
@@ -185,18 +185,16 @@ def _fetch_wgs84(layers, groups, version):
                     raise RuntimeError(f"{kind}: unexpected/duplicate KMZ OBJECTID {oid}.")
                 if canonical_globalid(attrs.get("GLOBALID")) != expected[oid]:
                     raise RuntimeError(f"{kind}/{oid}: GlobalID changed during KMZ fetch.")
-                if kind == "pole" and int(attrs.get("ASSETGROUP") or -1) != 7:
-                    raise RuntimeError(f"{kind}/{oid}: asset group changed.")
-                if kind == "transformer" and int(attrs.get("ASSETGROUP") or -1) != 12:
-                    raise RuntimeError(f"{kind}/{oid}: asset group changed.")
-                if kind == "line" and int(attrs.get("ASSETGROUP") or -1) not in (
-                    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-                ):
-                    # Line layer groups vary by installed Utility Network,
-                    # so only prevent absent/non-numeric group; do not impose
-                    # an arbitrary subtype restriction for the all-lines scan.
-                    if attrs.get("ASSETGROUP") is None:
-                        raise RuntimeError(f"{kind}/{oid}: asset group missing.")
+                source_group=originals[key]["attributes"].get("ASSETGROUP")
+                if (source_group is None or attrs.get("ASSETGROUP") is None or
+                    int(attrs["ASSETGROUP"]) != int(source_group)):
+                    raise RuntimeError(
+                        f"{kind}/{oid}: asset group changed during duplicate review."
+                    )
+                if kind == "pole" and int(source_group) != 7:
+                    raise RuntimeError(f"{kind}/{oid}: not a low-voltage pole.")
+                if kind == "transformer" and int(source_group) != 12:
+                    raise RuntimeError(f"{kind}/{oid}: not a distribution transformer.")
                 geometry = dict(feature.geometry or {})
                 sr = geometry.get("spatialReference") or shared_sr
                 code = int(sr.get("latestWkid") or sr.get("wkid") or 0)
@@ -431,7 +429,7 @@ def scan_network_duplicate_globalids(
     )
     originals=_fetch_selected(layers,groups,version,progress=report)
     areas=_area_index(cells,groups,originals,progress=report)
-    wgs84=_fetch_wgs84(layers,groups,version)
+    wgs84=_fetch_wgs84(layers,groups,originals,version)
     output.parent.mkdir(parents=True,exist_ok=True)
     staged_excel=output.with_name(output.name+".pending")
     staged_kmz=kmz.with_name(kmz.name+".pending")
