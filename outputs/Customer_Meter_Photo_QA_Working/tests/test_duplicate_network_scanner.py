@@ -282,16 +282,16 @@ class FullNetworkDuplicateTests(unittest.TestCase):
             result=self.run_scan(Path(folder)/"live.xlsx",progress=progress.append)
             self.assertEqual(result["scanned_by_asset"]["line"],4)
             self.assertEqual(result["source_count_changes"]["line"],{
-                "initial":3,"final":4,"added_during_scan":1,
+                "initial":3,"final":4,"net_count_increase":1,
                 "live_window_not_snapshot":True,
             })
             self.assertTrue(result["not_a_frozen_snapshot"])
             self.assertEqual(result["duplicate_globalid_groups"],3)
-            self.assertTrue(any("grew by 1" in note for note in progress))
+            self.assertTrue(any("count increased by 1" in note for note in progress))
             book=load_workbook(result["output_xlsx"],read_only=True)
             try:
                 sheet=dict(list(book["Summary"].values))
-                self.assertEqual(sheet["Records added while scanning"],1)
+                self.assertEqual(sheet["Net increase in reported record count"],1)
                 self.assertEqual(sheet["Snapshot type"],"LIVE WINDOW - NOT FROZEN")
             finally:
                 book.close()
