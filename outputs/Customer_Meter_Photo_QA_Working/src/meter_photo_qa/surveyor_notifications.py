@@ -61,7 +61,7 @@ def submission_actor(attrs):
 
 
 def record_findings(asset, attrs, fields,domains, line_rules=None,phase_expectations=None,
-                    *, include_pole_manufacturer=False):
+                    *, include_pole_manufacturer=False,strict_highlighted=False):
     """Existing QA gaps only, including pole height and Appendix Cable.
 
     No notifications for unresolved live schema fields: run logs warnings and
@@ -72,6 +72,7 @@ def record_findings(asset, attrs, fields,domains, line_rules=None,phase_expectat
         result=evaluate_asset(
             attrs, asset, mapping, domains,
             include_pole_manufacturer=include_pole_manufacturer if asset == "pole" else False,
+            strict_highlighted=strict_highlighted,
         )
         return sorted(set(result["issues"])),list(result["unverified_checks"])
     if asset!="line":
@@ -382,9 +383,9 @@ def manual_gap_scan(config_path, *, hours=6, now_ms=None, collector=None):
                 continue
             issues,unverified=record_findings(
                 asset,row,fields,domains,rules,phase_expectations,
-                include_pole_manufacturer=(
-                    config.get("pole_manufacturer_gap_enabled",False) is True
-                ),
+                # Strict highlighted-template requirements are manual-only.
+                # The paused one-minute watcher keeps its historical rules.
+                strict_highlighted=True,
             )
             if unverified:
                 raise RuntimeError(
