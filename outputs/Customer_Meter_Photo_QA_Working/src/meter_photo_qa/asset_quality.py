@@ -201,6 +201,38 @@ def missing_pole_field_value(raw, domain=None):
     return missing_value(raw, domain)
 
 
+
+def append_cable_answer(raw, domain=None):
+    """Return yes/no/missing/invalid without guessing unsupported coded values.
+
+    Zero (integer or text) is No in the approved LV pole template, except
+    when a live coded domain explicitly contradicts that interpretation.
+    Codes are resolved against the service's verified domain first.
+    """
+    if raw is None or not str(raw).strip():
+        return "missing"
+    domain=domain or {}
+    coded = next(
+        (label for code,label in domain.items() if raw==code or
+         str(raw).strip()==str(code).strip()),
+        None,
+    )
+    if coded is not None:
+        text=str(coded).strip().casefold()
+    else:
+        if domain and isinstance(raw,(int,float)) and not isinstance(raw,bool):
+            return "invalid"
+        text=str(raw).strip().casefold()
+    if text in ("yes","true","1"):
+        return "yes"
+    if text in ("no","false","0"):
+        return "no"
+    if text in UNKNOWN:
+        return "missing"
+    return "invalid"
+
+
+
 def is_substandard_pole_structure(raw, domain=None):
     """Honor the verified PoleStructure 'Substandard' option, including codes.
 
@@ -331,52 +363,57 @@ def evaluate_asset(attributes, asset, mapping, domains=None, *,
             values["height_status"]="NOT_VERIFIED_FIELD"
         append_field = mapping.get("append_cable")
         if not append_field:
-            values["append_cable_status"] = "NOT_VERIFIED_FIELD"
+            values["append_cable_status"]="NOT_VERIFIED_FIELD"
         else:
-            raw = attributes.get(append_field)
-            coded_domain = (domains or {}).get(append_field, {})
-            # ArcGIS may return a coded zero either as integer 0 or as
-            # the text "0". A coded "No" is an explicit response, not
-            # an incomplete value. An unmapped text zero is not assumed
-            # to mean No.
-            if isinstance(raw, str) and raw.strip() == "0":
-                domain_value = next((label for code, label in coded_domain.items()
-                                     if str(code).strip() == "0"), None)
-                if domain_value is not None:
-                    values["append_cable"] = str(domain_value)
-                missing_append = (not domain_value or
-                                  str(domain_value).strip().casefold() in UNKNOWN)
-            else:
-                missing_append = missing_value(raw, coded_domain)
-            if missing_append:
-                values["append_cable_status"] = "MISSING_OR_UNKNOWN"
-                issues.append("Append Cable missing/unknown (mandatory LV pole field)")
-            else:
-                values["append_cable_status"] = "RECORDED"
+            raw=attributes.get(append_field)
+            coded_domain=(domains or {}).get(append_field,{})
             if strict_highlighted:
-                # A coded zero means No per the agreed LV pole survey template.
-                # Never confuse a blank answer with an explicit No/0.
-                answer = str(coded_domain.get(raw, raw) or "").strip().casefold()
-                if raw in (0,"0") and (not coded_domain or
-                    str(coded_domain.get(raw,"no")).strip().casefold() in ("no","0")):
-                    answer="no"
-                if answer in ("yes","1","true"):
-                    type_field=mapping.get("append_cable_type")
-                    if not type_field:
-                        missing_checks.append("append_cable_type (required when Append Cable is Yes)")
-                        values["append_cable_type_status"]="NOT_VERIFIED_FIELD"
-                    elif missing_pole_field_value(
-                        attributes.get(type_field),(domains or {}).get(type_field)
-                    ):
-                        values["append_cable_type_status"]="MISSING_OR_UNKNOWN"
-                        issues.append("Appended Cable Type missing when Append Cable is Yes")
+                # Explicit No/0 is complete and EXEMPTS the type field.
+                answer=append_cable_answer(raw,coded_domain)
+                if answer=="missing":
+                    values["append_cable_status"]="MISSING_OR_UNKNOWN"
+                    issues.append("Append Cable missing/unknown (mandatory LV pole field)")
+                elif answer=="invalid":
+                    values["append_cable_status"]="INVALID_YES_NO"
+                    issues.append("Append Cable must be Yes or No (0 means No)")
+                else:
+                    values["append_cable_status"]="RECORDED"
+                    if answer=="yes":
+                        type_field=mapping.get("append_cable_type")
+                        if not type_field:
+                            missing_checks.append(
+                                "append_cable_type (required when Append Cable is Yes)"
+                            )
+                            values["append_cable_type_status"]="NOT_VERIFIED_FIELD"
+                        elif missing_pole_field_value(
+                            attributes.get(type_field),(domains or {}).get(type_field)
+                        ):
+                            values["append_cable_type_status"]="MISSING_OR_UNKNOWN"
+                            issues.append("Appended Cable Type missing when Append Cable is Yes")
+                        else:
+                            values["append_cable_type_status"]="RECORDED"
                     else:
-                        values["append_cable_type_status"]="RECORDED"
-                elif answer in ("no","0","false"):
-                    values["append_cable_type_status"]="NOT_REQUIRED_APPEND_CABLE_NO"
-                elif not missing_append:
-                    issues.append("Append Cable has an unrecognized Yes/No value")
-                    values["append_cable_type_status"]="APPEND_CABLE_RESPONSE_INVALID"
+                        values["append_cable_type_status"]="NOT_REQUIRED_APPEND_CABLE_NO"
+            else:
+                # Preserve existing watcher behavior and explicit coded No.
+                if isinstance(raw,str) and raw.strip()=="0":
+                    domain_value=next(
+                        (label for code,label in coded_domain.items()
+                         if str(code).strip()=="0"),None,
+                    )
+                    if domain_value is not None:
+                        values["append_cable"]=str(domain_value)
+                    missing_append=(
+                        not domain_value or
+                        str(domain_value).strip().casefold() in UNKNOWN
+                    )
+                else:
+                    missing_append=missing_value(raw,coded_domain)
+                if missing_append:
+                    values["append_cable_status"]="MISSING_OR_UNKNOWN"
+                    issues.append("Append Cable missing/unknown (mandatory LV pole field)")
+                else:
+                    values["append_cable_status"]="RECORDED"
         # Additional mandatory template fields for LV poles.
         for key, label in (
             ("service_pole", "Service Pole"),
