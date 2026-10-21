@@ -7,6 +7,7 @@ switching/direction need a separate operational network model.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from math import isfinite
 from typing import Any, Mapping, Sequence
 
 
@@ -16,6 +17,7 @@ def assess_source_feeder_inventory(
     line_areas: Mapping[int, Mapping[str, list[str]]],
     origin_district: str,
     period_record_ids: set[int] | None = None,
+    selected_origin_sectors: Sequence[str] | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
     """Every distinct line OBJECTID appears once; ambiguous sources never counted twice."""
     if not origin_district:
@@ -49,6 +51,11 @@ def assess_source_feeder_inventory(
             f"and unexpected {len(unexpected)} line ObjectIDs."
         )
     included = period_record_ids or set()
+    selected_sector_set = {
+        str(value).strip().casefold()
+        for value in (selected_origin_sectors or [])
+        if str(value).strip()
+    }
     rows: list[dict] = []
     for oid, attributes in sorted(lines.items()):
         source_keys = ids_from_trace[oid]
@@ -77,9 +84,30 @@ def assess_source_feeder_inventory(
         gid = str(attributes.get("GLOBALID") or "").strip()
         peers = sorted(gid_groups.get(gid.strip("{}").casefold(),set())-{oid}) if gid else []
         length = attributes.get("Shape__Length",attributes.get("SHAPE__Length",0))
-        length_m = float(length or 0.0)
-        if length_m < 0:
-            raise RuntimeError(f"Negative line length for OBJECTID {oid}.")
+        if length is None or str(length).strip() == "":
+            raise RuntimeError(
+                f"Missing Shape__Length for LV line {oid}; cannot publish "
+                "a reliable transformer-origin kilometre total."
+            )
+        length_m = float(length)
+        if not isfinite(length_m) or length_m < 0:
+            raise RuntimeError(
+                f"Non-finite or negative line length for OBJECTID {oid}."
+            )
+        line_sectors = {
+            str(v).strip().casefold() for v in areas.get("sector", [])
+            if str(v).strip()
+        }
+        if not line_sectors:
+            sector_status = "LOCATION_UNVERIFIED"
+        elif selected_sector_set and line_sectors - selected_sector_set:
+            sector_status = "TOUCHES_OTHER_SECTOR"
+        elif len(line_sectors) > 1:
+            sector_status = "TOUCHES_MULTIPLE_SECTORS"
+        elif selected_sector_set:
+            sector_status = "WITHIN_SELECTED_START_SECTORS"
+        else:
+            sector_status = "SECTOR_RECORDED_ORIGIN_NOT_RESOLVED"
         line_name = str(attributes.get("Transformer_Name") or "").strip()
         source_name = str(origin.get("transformer_name") or "").strip() if origin else ""
         name_check = (
@@ -101,6 +129,7 @@ def assess_source_feeder_inventory(
             "sectors":"; ".join(sorted(set(areas.get("sector",[])),key=str.casefold)),
             "cells":"; ".join(sorted(set(areas.get("cell",[])),key=str.casefold)),
             "boundary_status":area_status,
+            "sector_continuation_status":sector_status,
             "length_km":length_m/1000,
             "created_user":str(attributes.get("created_user") or "").strip(),
             "recorded_transformer_name":line_name,
@@ -137,8 +166,44 @@ def assess_source_feeder_inventory(
         })
     statuses=Counter(r["source_status"] for r in rows)
     border=Counter(r["boundary_status"] for r in rows)
+    continued = {
+        "TOUCHES_OTHER_SECTOR", "TOUCHES_MULTIPLE_SECTORS"
+    }
+    assured = [
+        row for row in rows
+        if row["source_status"] == "VERIFIED_UNIQUE_CONNECTED_SOURCE"
+    ]
+    unresolved = [
+        row for row in rows
+        if row["source_status"] != "VERIFIED_UNIQUE_CONNECTED_SOURCE"
+    ]
+    total_km = sum(row["length_km"] for row in rows)
+    assured_km = sum(row["length_km"] for row in assured)
+    unresolved_km = sum(row["length_km"] for row in unresolved)
+    if abs(total_km - assured_km - unresolved_km) > 1e-8:
+        raise RuntimeError("Transformer-origin kilometre reconciliation failed.")
     issues={
         "all_trace_connected_line_records":len(rows),
+        "all_trace_connected_length_km":total_km,
+        "unique_connected_source_length_km":assured_km,
+        "ambiguous_or_unverified_source_length_km":unresolved_km,
+        "sector_continuation_segment_records":sum(
+            row["sector_continuation_status"] in continued for row in rows
+        ),
+        "full_length_of_sector_continuation_segments_km":sum(
+            row["length_km"] for row in rows
+            if row["sector_continuation_status"] in continued
+        ),
+        "duplicate_globalid_review_length_km":sum(
+            row["length_km"] for row in rows
+            if row["duplicate_globalid_peer_objectids"]
+        ),
+        "selected_origin_sectors":"; ".join(sorted(selected_sector_set)),
+        "scope_warning":(
+            "Complete feature length for each traced LV OBJECTID. "
+            "Cross-sector line kilometres are NOT split by polygon. "
+            "Connected trace does NOT prove energized supply."
+        ),
         "verified_unique_source_segments":statuses["VERIFIED_UNIQUE_CONNECTED_SOURCE"],
         "ambiguous_or_unverified_source_segments":len(rows)-statuses["VERIFIED_UNIQUE_CONNECTED_SOURCE"],
         "outside_source_district_segments":border["OUTSIDE_SOURCE_DISTRICT"],
@@ -160,14 +225,53 @@ def add_feeder_inventory_sheets(
     """Append separated cross-border inventory; never overwrite field-progress sheet."""
     from openpyxl.styles import Font, PatternFill, Alignment
 
+    primary=workbook.create_sheet("Transformer-Origin Overview",0)
     overview=workbook.create_sheet("Feeder Coverage Summary")
     details=workbook.create_sheet("Full Feeder Segments")
     caveats=workbook.create_sheet("Feeder Evidence Notes")
+    primary.append(["TRANSFORMER-ORIGIN LV CONNECTED COVERAGE", "Result / explanation"])
+    for key, value in [
+        ("Report priority", "Origin-transformer coverage; not geographic sector km"),
+        ("Starting transformer district", scope.get("district","")),
+        ("Selected starting sector(s)", scope.get("selected_origin_sectors") or
+         "All selected source points; individual origin sectors not verified"),
+        ("Traced LV line OBJECTIDs", scope.get("all_trace_connected_line_records",0)),
+        ("All traced LV length (km)", scope.get("all_trace_connected_length_km",0)),
+        ("Unique connected-source length (km)",
+         scope.get("unique_connected_source_length_km",0)),
+        ("Unassigned/multiple-source length (km)",
+         scope.get("ambiguous_or_unverified_source_length_km",0)),
+        ("Lines reaching/touching multiple or other sectors",
+         scope.get("sector_continuation_segment_records",0)),
+        ("Full length of those lines (km; NOT length inside other sectors)",
+         scope.get("full_length_of_sector_continuation_segments_km",0)),
+        ("Duplicate-GlobalID review length (km; included in above totals)",
+         scope.get("duplicate_globalid_review_length_km",0)),
+        ("Surveyor/date matching", "Shown separately in Sheet2 and Full Feeder Segments"),
+        ("Coverage measurement", scope.get("scope_warning","")),
+        ("Electrical evidence", scope.get("trace_mode","")),
+        ("Source version", scope.get("version","")),
+    ]:
+        primary.append([key,value])
+    primary.freeze_panes="B2"
+    primary.sheet_view.showGridLines=False
+    primary.column_dimensions["A"].width=64
+    primary.column_dimensions["B"].width=92
+    for cell in primary[1]:
+        cell.fill=PatternFill("solid",fgColor="17365D")
+        cell.font=Font(bold=True,color="FFFFFF")
+    for row in primary.iter_rows(min_row=2):
+        label, value = row[:2]
+        label.font=Font(bold=True,color="17365D")
+        if isinstance(value.value,(int,float)):
+            value.number_format="0.000" if "km" in str(label.value).lower() else "#,##0"
+        value.alignment=Alignment(wrap_text=True,vertical="top")
+        primary.row_dimensions[row[0].row].height=29 if len(str(value.value or ""))>100 else 20
     overview_headers=[
         "Source Transformer No", "Transformer OBJECTID", "Source Transformer Name",
         "Trace Evidence", "All traced ObjectIDs", "Uniquely assigned segments",
         "Uniquely assigned length (km)", "Crossing/outside segments",
-        "Crossing/outside length (km)", "Surveyor/date-matched segments",
+        "Full length of crossing/outside features (km)", "Surveyor/date-matched segments",
     ]
     overview.append(overview_headers)
     for item in summaries:
@@ -183,8 +287,8 @@ def add_feeder_inventory_sheets(
         "LV Line OBJECTID","LV Line GlobalID","Source Transformer OBJECTID",
         "Source Transformer Name","Candidate Transformer OBJECTIDs",
         "Trace Source Status","District(s) Intersected","Sector(s) Intersected",
-        "Cell(s) Intersected","Boundary Status","Line Length (km)",
-        "Created User","Recorded Line Transformer Name",
+        "Cell(s) Intersected","Boundary Status","Sector Continuation Status",
+        "Line Length (km)", "Created User","Recorded Line Transformer Name",
         "Recorded Name Check","Matches Requested Surveyor AND Dates",
         "Other OBJECTIDs Sharing Line GlobalID",
     ]
@@ -195,7 +299,8 @@ def add_feeder_inventory_sheets(
             row["source_transformer_objectid"],row["source_transformer_name"],
             row["candidate_source_objectids"],row["source_status"],
             row["districts"],row["sectors"],row["cells"],
-            row["boundary_status"],row["length_km"],row["created_user"],
+            row["boundary_status"],row["sector_continuation_status"],
+            row["length_km"],row["created_user"],
             row["recorded_transformer_name"],row["name_status"],
             "YES" if row["in_requested_surveyor_period"] else "NO",
             row["duplicate_globalid_peer_objectids"],
@@ -203,7 +308,10 @@ def add_feeder_inventory_sheets(
     for name,value in [
         ("Origin district",scope.get("district","")),
         ("Source rule","Distribution transformers geographically inside requested district/sector."),
-        ("Feeder extent","ALL utility-network trace-connected LV lines, including beyond district."),
+        ("Feeder extent","ALL utility-network trace-connected LV lines, including beyond originating sector/district."),
+        ("Sector continuation","Sector labels are obtained by spatial intersection; boundary touches can be listed. A line's ENTIRE length appears in the origin-transformer total. It is NOT a geographic allocation."),
+        ("Source attribution","'Unique' means the only transformer in connected topology, with no warnings; not a verified energized source."),
+        ("Duplicate GlobalIDs","Duplicate GUID records are marked for review; topology uses OBJECTIDs. Physical length may be overstated if records represent the same conductor."),
         ("Surveyor/date filter","APPLIES ONLY to the original Sheet2 progress and indicated YES/NO column, not to the full feeder inventory."),
         ("Network evidence","Connected topology; does not determine energized source, switch state or feeder direction."),
         ("Ambiguity","Multi-transformer components and warning-bearing traces are not assigned to one source."),
