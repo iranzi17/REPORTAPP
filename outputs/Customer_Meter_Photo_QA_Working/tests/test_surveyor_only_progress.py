@@ -117,7 +117,7 @@ class SurveyorOnlyProgressTests(unittest.TestCase):
                 self.assertEqual(notes["Network trace requests"],0)
                 self.assertIn("NOT VERIFIED",notes["Transformer feeder attribution"])
                 self.assertIn("NOT EVALUATED",notes["Cross-sector continuation"])
-                self.assertIn("not",notes["Area rule"].lower())
+                self.assertIn("no spatial clipping",notes["Area rule"].lower())
                 entries=list(book["Selected Source LV Lines"].values)
                 self.assertEqual(len(entries),4)
                 self.assertEqual([x[0] for x in entries[1:]],[10,11,12])
@@ -162,7 +162,6 @@ class SurveyorOnlyProgressTests(unittest.TestCase):
         self.assertIn('report_mode=("transformer_origin" if origin_enabled else "surveyor_only")',source)
         self.assertIn("SURVEYOR SOURCE-RECORD REPORT ONLY",source)
         self.assertIn("origin.value = True",source)
-        self.assertIn("Uncheck",source.capitalize()) if False else None
         self.assertNotIn("schtasks",source)
 
 
