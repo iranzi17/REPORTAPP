@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .connectivity_trace import trace_connected_lv_lines
+from .connectivity_trace import TopologyDirtyAreaError, trace_connected_lv_lines
 from .area_selection import district_filters, selected_districts
 
 
@@ -1284,6 +1284,112 @@ def _create_workbook(
     workbook.calculation.calcMode = "auto"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
+
+
+def write_topology_blocker_diagnostic(
+    requested_output: str | Path,
+    error: TopologyDirtyAreaError,
+    *,
+    start_date: Any,
+    end_date: Any,
+    districts: Sequence[str],
+    sectors: Sequence[str],
+    cells: Sequence[str],
+    usernames: Sequence[str],
+) -> Path:
+    """Write an unmistakably non-production Excel diagnostic, without GIS calls.
+
+    The blocked progress XLSX is NEVER written or overwritten. This companion
+    identifies the first failed topology trace and ALL ElectricLine GUIDs
+    returned by REG for that trace. Previous successful traces are not
+    treated as complete production totals. A later transformer may also be
+    dirty; the operator must validate and rerun the entire report.
+    """
+    from uuid import uuid4
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    requested = Path(requested_output).expanduser().resolve()
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    diagnostic = requested.with_name(
+        requested.stem + "_TRACE_BLOCKED_" + stamp + "_" + uuid4().hex[:8] + ".xlsx"
+    )
+    if diagnostic.exists():
+        raise FileExistsError("Refusing to overwrite an existing trace diagnostic.")
+
+    def safe_text(value: Any) -> str:
+        text = str(value if value is not None else "")
+        return "'" + text if text.startswith(("=", "+", "-", "@")) else text
+
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "TRACE BLOCKED"
+    summary.append(["STATUS: TRACE BLOCKED — NOT A PROGRESS REPORT", "Value"])
+    entries = [
+        ("Report generated", "NO — do not use this workbook for progress totals"),
+        ("Requested report filename", requested.name),
+        ("Original report untouched", "YES"),
+        ("Starting district(s)", "; ".join(map(str, districts))),
+        ("Starting sector(s)", "; ".join(map(str, sectors)) or "(not restricted)"),
+        ("Starting cell(s)", "; ".join(map(str, cells)) or "(not restricted)"),
+        ("From date", start_date),
+        ("To date", end_date),
+        ("Selected surveyor usernames", "; ".join(map(str, usernames))),
+        ("REG source version", error.version),
+        ("Failed transformer OBJECTID", error.transformer_objectid),
+        ("Failed transformer GlobalID", error.transformer_globalid),
+        ("Trace position", f"{error.trace_position} of {error.trace_total}"),
+        ("Earlier traces", f"{error.trace_position - 1} returned but NOT published"),
+        ("Remaining transformers", max(0, error.trace_total-error.trace_position)),
+        ("Dirty ElectricLine GlobalIDs returned", len(error.dirty_line_globalids)),
+        ("Next step", "Ask an authorized REG Utility Network editor to inspect the listed dirty features, "
+                      "validate the affected topology and rerun the whole report."),
+        ("Safety", "No REG edits made. validateConsistency remains TRUE. No partial kilometres."),
+        ("Additional server message", error.original_error[:15000]),
+    ]
+    for key, value in entries:
+        summary.append([safe_text(key),safe_text(value)])
+    lines = workbook.create_sheet("Dirty Electric Lines")
+    lines.append(["#", "Dirty ElectricLine GlobalID", "Reported at transformer OBJECTID",
+                  "Topology version", "Action"])
+    for index,guid in enumerate(error.dirty_line_globalids,1):
+        lines.append([
+            index, safe_text(guid), error.transformer_objectid, error.version,
+            "Locate by GlobalID; inspect Dirty Areas; validate affected extent if authorized",
+        ])
+    if not error.dirty_line_globalids:
+        lines.append([1, "REG returned no extractable ElectricLine GUID",
+                      error.transformer_objectid,error.version,
+                      "Inspect the original service error on TRACE BLOCKED"])
+    notes = workbook.create_sheet("What this means")
+    for row in [
+        ["CHECK", "INTERPRETATION"],
+        ["Trace consistency", "Dirty topology blocked connected trace. Do not switch validateConsistency off."],
+        ["Feeder coverage", "No credible full transformer-origin kilometres can be published from this attempt."],
+        ["Scope", "Only the first blocked trace is shown. Other transformers may have additional dirty areas."],
+        ["Unrelated error", "'Class not registered' may require separate REG/ArcGIS Server investigation "
+                            "if it persists after topology validation."],
+        ["What to do", "Coordinate with the REG Utility Network administrator; validation may affect other editors."],
+        ["Rerun", "After topology validation, run the same manual report again with unchanged parameters."],
+    ]:
+        notes.append([safe_text(value) for value in row])
+    for sheet in workbook:
+        sheet.freeze_panes = "A2"
+        sheet.sheet_view.showGridLines = False
+        for cell in sheet[1]:
+            cell.fill = PatternFill("solid", fgColor="7F1D1D")
+            cell.font = Font(bold=True, color="FFFFFF")
+        sheet.column_dimensions["A"].width = 45 if sheet is summary else 30
+        sheet.column_dimensions["B"].width = 100 if sheet is summary else 68
+        if sheet is lines:
+            sheet.column_dimensions["E"].width=82
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment=Alignment(vertical="top",wrap_text=True)
+    diagnostic.parent.mkdir(parents=True,exist_ok=True)
+    workbook.save(diagnostic)
+    workbook.close()
+    return diagnostic
 
 
 def generate_progress_report(
