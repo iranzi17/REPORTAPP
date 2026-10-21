@@ -434,6 +434,22 @@ def _geometry_filter(
     return intersects(boundary_geometry, sr=spatial_reference)
 
 
+def _assert_complete_features(response: Any, label: str) -> list[Any]:
+    """Reject incomplete live FeatureServer responses without another request.
+
+    Silent truncation or repeated OBJECTIDs would overstate/understate surveyor
+    production. In this situation, failing without an Excel report is safer.
+    """
+    if not hasattr(response, "features") or response.features is None:
+        raise RuntimeError(f"{label}: FeatureServer response contains no feature list.")
+    if getattr(response, "exceeded_transfer_limit", False):
+        raise RuntimeError(
+            f"{label}: FeatureServer reported a transfer limit; "
+            "report is not published because records may be missing."
+        )
+    return response.features
+
+
 def _query_lines(
     line_layer: Any,
     where: str,
@@ -474,13 +490,25 @@ def _query_lines(
         spatial_reference = boundary_geometry.get("spatialReference", {})
     spatial_reference = dict(spatial_reference or {})
     records = {}
-    for feature in feature_set.features:
-        attributes = dict(feature.attributes)
-        if return_geometry and feature.geometry:
+    for feature in _assert_complete_features(feature_set, "LV line progress"):
+        attributes = dict(feature.attributes or {})
+        raw_id = attributes.get("OBJECTID")
+        if raw_id is None:
+            raise RuntimeError("LV line progress: missing source OBJECTID.")
+        objectid = int(raw_id)
+        if objectid in records:
+            raise RuntimeError(
+                f"LV line progress: OBJECTID {objectid} was returned twice. "
+                "A deduplicated report could conceal server paging errors."
+            )
+        if return_geometry:
+            if not feature.geometry:
+                raise RuntimeError(f"LV line progress: missing geometry for OBJECTID {objectid}.")
             geometry = dict(feature.geometry)
-            geometry["spatialReference"] = spatial_reference
+            if spatial_reference:
+                geometry["spatialReference"] = spatial_reference
             attributes["_geometry"] = geometry
-        records[int(attributes["OBJECTID"])] = attributes
+        records[objectid] = attributes
     return records
 
 
@@ -506,7 +534,19 @@ def _query_local_transformers(
         gdb_version=version,
         return_all_records=True,
     )
-    return [dict(feature.attributes) for feature in feature_set.features]
+    seen = set()
+    transformers = []
+    for feature in _assert_complete_features(feature_set, "Localized transformers"):
+        attributes = dict(feature.attributes or {})
+        raw_id = attributes.get("OBJECTID")
+        if raw_id is None:
+            raise RuntimeError("Localized transformers: missing source OBJECTID.")
+        oid = int(raw_id)
+        if oid in seen:
+            raise RuntimeError(f"Localized transformers: repeated OBJECTID {oid}.")
+        seen.add(oid)
+        transformers.append(attributes)
+    return transformers
 
 
 def _build_connected_transformer_groups(
@@ -559,11 +599,36 @@ def _query_line_geometries(
             gdb_version=version,
             return_all_records=True,
         )
-        spatial_reference = dict(feature_set.spatial_reference or {})
-        for feature in feature_set.features:
+        spatial_reference = dict(
+            getattr(feature_set, "spatial_reference", None) or {}
+        )
+        expected_ids = set(batch)
+        returned_ids = set()
+        for feature in _assert_complete_features(feature_set, "LV line geometry"):
+            attributes = dict(feature.attributes or {})
+            raw_id = attributes.get("OBJECTID")
+            if raw_id is None:
+                raise RuntimeError("LV line geometry: missing source OBJECTID.")
+            oid = int(raw_id)
+            if oid not in expected_ids or oid in returned_ids or oid in geometries:
+                raise RuntimeError(
+                    f"LV line geometry: unexpected or repeated OBJECTID {oid}."
+                )
+            if not feature.geometry:
+                raise RuntimeError(f"LV line geometry: missing source geometry for {oid}.")
             geometry = dict(feature.geometry)
-            geometry["spatialReference"] = spatial_reference
-            geometries[int(feature.attributes["OBJECTID"])] = geometry
+            if spatial_reference:
+                geometry["spatialReference"] = spatial_reference
+            elif not geometry.get("spatialReference"):
+                raise RuntimeError(f"LV line geometry: no verified CRS for OBJECTID {oid}.")
+            geometries[oid] = geometry
+            returned_ids.add(oid)
+        missing = expected_ids - returned_ids
+        if missing:
+            raise RuntimeError(
+                f"LV line geometry: {len(missing)} source OBJECTIDs were omitted "
+                "from a requested batch; report is not published."
+            )
     return geometries
 
 

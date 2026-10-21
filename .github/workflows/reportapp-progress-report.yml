@@ -1,0 +1,41 @@
+name: REPORTAPP Survey Progress Report Regression Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/progress_report.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_progress_report.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt'
+      - '.github/workflows/reportapp-progress-report.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/progress_report.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_progress_report.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt'
+      - '.github/workflows/reportapp-progress-report.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-progress-report-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install report-test dependency
+        run: python -m pip install openpyxl
+      - name: Compile progress engine and toolbox
+        run: |
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/progress_report.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt
+      - name: Run progress report and workbook-preservation tests (no live GIS)
+        env:
+          PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
+        run: |
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_progress_report.py -v
