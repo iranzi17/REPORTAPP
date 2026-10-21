@@ -697,7 +697,10 @@ class GenerateSurveyProgressReport:
             parameters[4].setErrorMessage(
                 "Choose at least one sector before choosing cells."
             )
-        if parameters[12].value and len(_split_multivalue(parameters[3].valueAsText)) != 1:
+        origin_enabled = str(parameters[12].valueAsText or "true").strip().casefold() in (
+            "true", "1", "yes"
+        )
+        if origin_enabled and len(_split_multivalue(parameters[3].valueAsText)) != 1:
             parameters[3].setErrorMessage(
                 "Full transformer-origin coverage currently requires exactly one "
                 "source-transformer district. Lines will still be traced beyond it."
@@ -708,6 +711,9 @@ class GenerateSurveyProgressReport:
         cells = _split_multivalue(parameters[5].valueAsText)
         custom_boundary_geometry = _drawn_boundary_geometry(parameters[6])
         usernames = _split_multivalue(parameters[7].valueAsText)
+        origin_enabled = str(parameters[12].valueAsText or "true").strip().casefold() in (
+            "true", "1", "yes"
+        )
         summary = generate_progress_report(
             output_xlsx=parameters[0].valueAsText,
             start_date=parameters[1].value,
@@ -721,9 +727,7 @@ class GenerateSurveyProgressReport:
             boundary_service_url=parameters[9].valueAsText or None,
             version=parameters[10].valueAsText or "sde.DEFAULT",
             user_name_map_path=parameters[11].valueAsText or None,
-            include_full_feeder_inventory=(
-                parameters[12].value if parameters[12].value is not None else True
-            ),
+            include_full_feeder_inventory=origin_enabled,
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
         origin_coverage=summary.get("full_feeder_inventory")
