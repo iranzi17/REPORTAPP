@@ -135,7 +135,7 @@ class TransformerOriginCoverageTests(unittest.TestCase):
         source=ast.get_source_segment(code,tool)
         self.assertIn('name="include_full_feeder_inventory"',source)
         self.assertIn('origin.value = True',source)
-        self.assertIn("include_full_feeder_inventory=(",source)
+        self.assertIn("include_full_feeder_inventory=origin_enabled",source)
         self.assertIn("Transformer-Origin Coverage",source)
         self.assertNotIn("schtasks",source)
 
