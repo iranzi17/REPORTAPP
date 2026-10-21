@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -16,6 +17,9 @@ from meter_photo_qa.progress_report import (
     _build_line_where,
     _create_workbook,
     _normalize_transformer_name,
+    _query_lines,
+    _query_local_transformers,
+    _query_line_geometries,
     build_report_title,
     generate_progress_report,
     list_cells,
@@ -174,6 +178,113 @@ class ProgressReportTests(unittest.TestCase):
         self.assertEqual([item["username"] for item in summary["users"]], ["inside.user"])
         self.assertEqual(summary["localized_transformers"], 1)
         self.assertEqual(summary["boundary_crossing_records"], 0)
+
+    def test_progress_line_query_rejects_incomplete_and_duplicate_source_records(self):
+        class FakeLine:
+            def __init__(self, response):
+                self.response=response
+                self.calls=[]
+            def query(self, **kwargs):
+                self.calls.append(kwargs)
+                return self.response
+
+        def row(oid):
+            return SimpleNamespace(attributes={
+                "OBJECTID":oid, "GLOBALID":"{SOURCE}",
+                "created_user":"operator", "Shape__Length":100,
+            },geometry=None)
+
+        for response, expected in (
+            (SimpleNamespace(features=[row(1)], exceeded_transfer_limit=True),
+             "transfer limit"),
+            (SimpleNamespace(features=[row(1),row(1)],
+                             exceeded_transfer_limit=False),
+             "returned twice"),
+            (SimpleNamespace(features=[SimpleNamespace(
+                attributes={"GLOBALID":"{SOURCE}"},geometry=None
+             )],exceeded_transfer_limit=False), "missing source OBJECTID"),
+            (SimpleNamespace(), "no feature list"),
+        ):
+            with self.subTest(error=expected):
+                layer=FakeLine(response)
+                with self.assertRaisesRegex(RuntimeError,expected):
+                    _query_lines(layer, "1=1", "sde.DEFAULT", None)
+                self.assertEqual(len(layer.calls),1)  # no extra REG requests
+                self.assertFalse(layer.calls[0]["return_geometry"])
+        layer=FakeLine(SimpleNamespace(
+            features=[row(1),row(2)],exceeded_transfer_limit=False
+        ))
+        data=_query_lines(layer, "1=1", "sde.DEFAULT", None)
+        self.assertEqual(set(data),{1,2})
+
+    def test_progress_transformer_location_query_fails_closed(self):
+        class FakeTransformer:
+            def __init__(self, rows, limited=False):
+                self.rows=rows
+                self.limited=limited
+            def query(self,**kwargs):
+                return SimpleNamespace(
+                    features=[SimpleNamespace(attributes=attrs) for attrs in self.rows],
+                    exceeded_transfer_limit=self.limited,
+                )
+        geom={"rings":[[[30,-2],[30.1,-2],[30,-1.9]]],
+              "spatialReference":{"wkid":4326}}
+        with patch(
+            "meter_photo_qa.progress_report._geometry_filter",
+            return_value=object(),
+        ):
+            with self.assertRaisesRegex(RuntimeError,"transfer limit"):
+                _query_local_transformers(
+                    FakeTransformer([{"OBJECTID":100}],True),geom,"sde.DEFAULT")
+            with self.assertRaisesRegex(RuntimeError,"repeated OBJECTID"):
+                _query_local_transformers(
+                    FakeTransformer([{"OBJECTID":100},{"OBJECTID":100}]),
+                    geom,"sde.DEFAULT")
+            found=_query_local_transformers(
+                FakeTransformer([{"OBJECTID":100},{"OBJECTID":101}]),
+                geom,"sde.DEFAULT")
+            self.assertEqual([v["OBJECTID"] for v in found],[100,101])
+
+    def test_progress_geometry_batches_must_return_all_requested_objectids(self):
+        class FakeLines:
+            def __init__(self, ids, missing_crs=False):
+                self.ids=ids
+                self.missing_crs=missing_crs
+                self.calls=[]
+            def query(self,**kwargs):
+                self.calls.append(kwargs)
+                return SimpleNamespace(
+                    features=[
+                        SimpleNamespace(
+                            attributes={"OBJECTID":oid},
+                            geometry={"paths":[[[30,-2],[30.1,-2]]],
+                                      **({} if self.missing_crs else
+                                         {"spatialReference":{"wkid":4326}})},
+                        )
+                        for oid in self.ids
+                    ],
+                    spatial_reference={} if self.missing_crs else {"wkid":4326},
+                    exceeded_transfer_limit=False,
+                )
+        scenarios=[
+            ([12], [12,13], "omitted"),
+            ([12,12], [12], "repeated"),
+            ([12,99], [12], "unexpected"),
+            ([12], [12], None),
+        ]
+        for response_ids, request_ids, error in scenarios:
+            with self.subTest(response=response_ids,required=request_ids):
+                layer=FakeLines(response_ids)
+                if error:
+                    with self.assertRaisesRegex(RuntimeError,error):
+                        _query_line_geometries(layer,request_ids,"sde.DEFAULT")
+                else:
+                    actual=_query_line_geometries(layer,request_ids,"sde.DEFAULT")
+                    self.assertEqual(list(actual),[12])
+                self.assertEqual(len(layer.calls),1)
+        with self.assertRaisesRegex(RuntimeError,"no verified CRS"):
+            _query_line_geometries(FakeLines([12],missing_crs=True),
+                                   [12],"sde.DEFAULT")
 
     def test_transformer_name_normalization_is_conservative(self):
         self.assertEqual(
