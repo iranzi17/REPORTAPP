@@ -1407,8 +1407,13 @@ def generate_progress_report(
     user_name_map_path: str | Path | None = None,
     gis: Any | None = None,
     include_full_feeder_inventory: bool = False,
+    report_mode: str = "transformer_origin",
 ) -> dict[str, Any]:
-    """Create selected-surveyor progress and optionally full trace-connected feeder evidence."""
+    """Create either validated origin-network coverage or untraced surveyor progress."""
+    if report_mode not in ("transformer_origin", "surveyor_only"):
+        raise ValueError("Unsupported progress mode.")
+    if report_mode == "surveyor_only" and include_full_feeder_inventory:
+        raise ValueError("Source-only mode cannot include validated feeder coverage.")
     start = _as_date(start_date)
     end = _as_date(end_date)
     clean_users = list(dict.fromkeys(
@@ -1418,6 +1423,21 @@ def generate_progress_report(
         raise ValueError("Select at least one surveyor.")
     if end < start:
         raise ValueError("The end date cannot be earlier than the start date.")
+    if report_mode == "surveyor_only":
+        from .surveyor_only_progress import run_surveyor_only_progress
+        return run_surveyor_only_progress(
+            output_xlsx=output_xlsx, start=start, end=end,
+            usernames=clean_users,district=district,sectors=sectors,cells=cells,
+            custom_boundary_geometry=custom_boundary_geometry,
+            service_url=service_url or os.environ.get(
+                "UN_REPORT_SERVICE_URL",DEFAULT_LINE_SERVICE_URL
+            ),
+            boundary_service_url=boundary_service_url or os.environ.get(
+                "UN_SECTOR_BOUNDARY_URL",DEFAULT_BOUNDARY_SERVICE_URL
+            ),
+            version=version,user_name_map_path=user_name_map_path,gis=gis,
+        )
+
     if include_full_feeder_inventory and len(selected_districts(district)) != 1:
         raise ValueError(
             "A full-feeder report needs exactly one source-transformer district. "
