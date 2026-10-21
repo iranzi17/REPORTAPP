@@ -7,8 +7,15 @@ import re
 from typing import Any, Sequence
 
 
-_DIRTY_LINE_PATTERN = re.compile(
-    r"ElectricLine\s*:\s*\{([0-9a-fA-F-]{36})\}", re.IGNORECASE
+_GUID_PATTERN = re.compile(
+    r"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}"
+)
+_DIRTY_LINE_GROUP_PATTERN = re.compile(
+    r"ElectricLine\s*:\s*((?:"
+    r"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}\s*,?\s*)+)",
+    re.IGNORECASE,
 )
 
 
@@ -48,10 +55,11 @@ def _trace_dirty_error(error, point, version, position, total):
     if not ("dirty area" in message.casefold() or
             "dirty areas" in message.casefold()):
         return None
-    globals_found = [
-        "{" + match.upper() + "}"
-        for match in _DIRTY_LINE_PATTERN.findall(message)
-    ]
+    globals_found = []
+    for group in _DIRTY_LINE_GROUP_PATTERN.findall(message):
+        globals_found.extend(
+            guid.upper() for guid in _GUID_PATTERN.findall(group)
+        )
     return TopologyDirtyAreaError(
         transformer_objectid=point["OBJECTID"],
         transformer_globalid=point.get("GLOBALID") or "",
