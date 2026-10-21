@@ -524,7 +524,8 @@ def _query_local_transformers(
 ) -> list[dict[str, Any]]:
     feature_set = _query_with_retry(
         transformer_layer,
-        where=f"ASSETGROUP = {DISTRIBUTION_TRANSFORMER_ASSETGROUP}",
+        where=(f"ASSETGROUP = {DISTRIBUTION_TRANSFORMER_ASSETGROUP} "
+               "AND ASSETTYPE IN (1,2,3,4,5,6)"),
         out_fields=(
             f"OBJECTID,GLOBALID,{TRANSFORMER_POINT_NAME_FIELD},ASSETGROUP,"
             "ASSETTYPE,created_user,created_date"
