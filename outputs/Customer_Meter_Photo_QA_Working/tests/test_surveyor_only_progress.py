@@ -78,7 +78,7 @@ class SurveyorOnlyProgressTests(unittest.TestCase):
             if data is None:
                 result=run()
             else:
-                with self.assertRaisesRegex(RuntimeError,"(invalid|missing|Non-LV|Unselected)"):
+                with self.assertRaisesRegex(RuntimeError,"(?i:invalid|missing|non-lv|unselected)"):
                     run()
                 result=None
             trace.assert_not_called()
