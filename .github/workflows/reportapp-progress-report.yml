@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/progress_report.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_only_progress.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_only_progress.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/connectivity_trace.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_dirty_trace_errors.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/feeder_inventory.py'
@@ -16,6 +18,8 @@ on:
     branches: [main]
     paths:
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/progress_report.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_only_progress.py'
+      - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_surveyor_only_progress.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/connectivity_trace.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/tests/test_dirty_trace_errors.py'
       - 'outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/feeder_inventory.py'
@@ -41,6 +45,7 @@ jobs:
       - name: Compile progress engine and toolbox
         run: |
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/progress_report.py
+          python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/surveyor_only_progress.py
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/connectivity_trace.py
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/src/meter_photo_qa/feeder_inventory.py
           python -m py_compile outputs/Customer_Meter_Photo_QA_Working/CustomerMeterPhotoQA.pyt
@@ -49,5 +54,6 @@ jobs:
           PYTHONPATH: outputs/Customer_Meter_Photo_QA_Working/src
         run: |
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_progress_report.py -v
+          python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_surveyor_only_progress.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_dirty_trace_errors.py -v
           python -m unittest discover -s outputs/Customer_Meter_Photo_QA_Working/tests -p test_feeder_origin_progress.py -v

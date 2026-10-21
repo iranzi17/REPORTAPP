@@ -503,7 +503,9 @@ class GenerateSurveyProgressReport:
             "ACROSS sectors/districts. Transformer-origin inventory includes the "
             "full connected LV component even outside the selected boundary. "
             "Surveyor/date production remains a separate Sheet2 view. "
-            "Connected topology is not proof of energized supply."
+            "Uncheck the transformer-origin option to generate a quick "
+            "source-record report WITHOUT any Utility Network trace, even when "
+            "topology is dirty. It cannot verify feeder origin."
         )
         self.canRunInBackground = False
 
@@ -651,7 +653,7 @@ class GenerateSurveyProgressReport:
         name_map.category = "Advanced"
 
         origin = arcpy.Parameter(
-            displayName="Include full transformer-origin LV coverage (all connected lines, including other sectors)",
+            displayName="Validated transformer-origin feeder coverage (uncheck for no-trace surveyor report)",
             name="include_full_feeder_inventory",
             datatype="GPBoolean",
             parameterType="Optional",
@@ -729,6 +731,7 @@ class GenerateSurveyProgressReport:
                 version=parameters[10].valueAsText or "sde.DEFAULT",
                 user_name_map_path=parameters[11].valueAsText or None,
                 include_full_feeder_inventory=origin_enabled,
+                report_mode=("transformer_origin" if origin_enabled else "surveyor_only"),
             )
         except _progress_report.TopologyDirtyAreaError as blocked:
             # First dirty trace is a HARD BLOCKER for all network totals.
@@ -764,6 +767,17 @@ class GenerateSurveyProgressReport:
                 )
             raise
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
+        if summary.get("no_topology_traces"):
+            arcpy.AddWarning(
+                "SURVEYOR SOURCE-RECORD REPORT ONLY: ZERO Utility Network "
+                "traces executed. Recorded Transformer_Name is unverified. "
+                "The full length of each intersecting source line is counted; "
+                "lines crossing the selected area are NOT clipped. "
+                "This is NOT transformer-origin feeder coverage."
+            )
+            arcpy.AddMessage(
+                f"Surveyor-only report saved separately at: {summary['output_xlsx']}"
+            )
         origin_coverage=summary.get("full_feeder_inventory")
         if origin_coverage is not None:
             arcpy.AddMessage(
