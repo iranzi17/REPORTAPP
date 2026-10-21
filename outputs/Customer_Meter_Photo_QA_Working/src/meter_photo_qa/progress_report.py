@@ -1673,6 +1673,9 @@ def generate_progress_report(
             full_feeder_inventory["geographic_areas"],
             selected_districts(district)[0],
             set(records),
+            selected_origin_sectors=(
+                clean_sectors if custom_boundary_geometry is None else []
+            ),
         )
         full_feeder_inventory = {
             "rows":full_rows,
