@@ -499,8 +499,11 @@ class GenerateSurveyProgressReport:
         self.description = (
             "Create a styled Excel report of surveyed LV line kilometres for one "
             "or many selected surveyors. Distribution transformers inside the selected "
-            "boundary are followed with a read-only Connected utility-network trace; "
-            "the selected dates and surveyors are applied to the connected LV lines."
+            "boundary are followed with a read-only Connected utility-network trace "
+            "ACROSS sectors/districts. Transformer-origin inventory includes the "
+            "full connected LV component even outside the selected boundary. "
+            "Surveyor/date production remains a separate Sheet2 view. "
+            "Connected topology is not proof of energized supply."
         )
         self.canRunInBackground = False
 
@@ -647,6 +650,15 @@ class GenerateSurveyProgressReport:
         name_map.value = str(DEFAULT_USER_NAME_MAP_PATH)
         name_map.category = "Advanced"
 
+        origin = arcpy.Parameter(
+            displayName="Include full transformer-origin LV coverage (all connected lines, including other sectors)",
+            name="include_full_feeder_inventory",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input",
+        )
+        origin.value = True
+        origin.category = "Transformer-Origin Coverage"
         return [
             output,
             start,
@@ -660,6 +672,7 @@ class GenerateSurveyProgressReport:
             boundaries,
             version,
             name_map,
+            origin,
         ]
 
     def updateParameters(self, parameters):
@@ -684,6 +697,11 @@ class GenerateSurveyProgressReport:
             parameters[4].setErrorMessage(
                 "Choose at least one sector before choosing cells."
             )
+        if parameters[12].value and len(_split_multivalue(parameters[3].valueAsText)) != 1:
+            parameters[3].setErrorMessage(
+                "Full transformer-origin coverage currently requires exactly one "
+                "source-transformer district. Lines will still be traced beyond it."
+            )
 
     def execute(self, parameters, messages):
         sectors = _split_multivalue(parameters[4].valueAsText)
@@ -703,11 +721,31 @@ class GenerateSurveyProgressReport:
             boundary_service_url=parameters[9].valueAsText or None,
             version=parameters[10].valueAsText or "sde.DEFAULT",
             user_name_map_path=parameters[11].valueAsText or None,
+            include_full_feeder_inventory=(
+                parameters[12].value if parameters[12].value is not None else True
+            ),
         )
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
+        origin_coverage=summary.get("full_feeder_inventory")
+        if origin_coverage is not None:
+            arcpy.AddMessage(
+                "TRANSFORMER-ORIGIN LV CONNECTED COVERAGE: "
+                f"{origin_coverage['all_trace_connected_length_km']:.3f} km "
+                "across all traced LV records, INCLUDING neighboring sectors. "
+                f"{origin_coverage['unique_connected_source_length_km']:.3f} km "
+                "belongs to unique, warning-free connected transformer components; "
+                f"{origin_coverage['ambiguous_or_unverified_source_length_km']:.3f} km "
+                "requires source review. This is not an energized feeder-flow result."
+            )
+            arcpy.AddMessage(
+                f"{origin_coverage['sector_continuation_segment_records']} traced "
+                "LV sections intersect another/multiple sectors. Their entire "
+                "feature lengths are shown, not geographic sector splits."
+            )
         arcpy.AddMessage(
-            f"Created {summary['output_xlsx']} for {len(summary['reported_users'])} "
-            f"surveyor(s), totalling {summary['total_km']:.2f} km."
+            f"Surveyor/date-matched production (separate Sheet2): "
+            f"{summary['total_km']:.2f} km across {len(summary['reported_users'])} "
+            "surveyor(s)."
         )
         if summary.get("tracking_log_sheet"):
             arcpy.AddMessage(
