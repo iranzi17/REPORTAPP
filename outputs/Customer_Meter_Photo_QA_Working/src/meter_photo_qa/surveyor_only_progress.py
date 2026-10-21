@@ -73,10 +73,11 @@ def run_surveyor_only_progress(
         datetime.now().strftime("%Y%m%d_%H%M%S_")+
         uuid4().hex[:8]+".xlsx"
     )
-    p._create_workbook(output,title,rows)
+    staged=output.with_name(output.stem+".pending.xlsx")
+    p._create_workbook(staged,title,rows)
     from openpyxl import load_workbook
     from openpyxl.styles import Font,PatternFill,Alignment
-    book=load_workbook(output)
+    book=load_workbook(staged)
     notes=book.create_sheet("Method and Warnings")
     notes.append(["SURVEYOR PROGRESS ONLY — NO NETWORK TRACE","Evidence"])
     notes_rows=[
@@ -135,8 +136,11 @@ def run_surveyor_only_progress(
                 cell.alignment=Alignment(wrap_text=True,vertical="top")
                 if isinstance(cell.value,str) and cell.value.startswith(("=","+","-","@")):
                     cell.data_type="s"
-    book.save(output)
+    book.save(staged)
     book.close()
+    if output.exists():
+        raise FileExistsError("Surveyor-only output already exists; refusing overwrite.")
+    staged.replace(output)
     return {
         "read_only":True,"report_mode":"SURVEYOR_ONLY_NO_TRACE",
         "no_topology_traces":True,"output_xlsx":str(output),
