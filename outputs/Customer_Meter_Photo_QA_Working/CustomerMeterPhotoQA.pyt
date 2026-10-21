@@ -714,21 +714,55 @@ class GenerateSurveyProgressReport:
         origin_enabled = str(parameters[12].valueAsText or "true").strip().casefold() in (
             "true", "1", "yes"
         )
-        summary = generate_progress_report(
-            output_xlsx=parameters[0].valueAsText,
-            start_date=parameters[1].value,
-            end_date=parameters[2].value,
-            usernames=usernames,
-            district=_split_multivalue(parameters[3].valueAsText),
-            sectors=sectors,
-            cells=cells,
-            custom_boundary_geometry=custom_boundary_geometry,
-            service_url=parameters[8].valueAsText or None,
-            boundary_service_url=parameters[9].valueAsText or None,
-            version=parameters[10].valueAsText or "sde.DEFAULT",
-            user_name_map_path=parameters[11].valueAsText or None,
-            include_full_feeder_inventory=origin_enabled,
-        )
+        try:
+            summary = generate_progress_report(
+                output_xlsx=parameters[0].valueAsText,
+                start_date=parameters[1].value,
+                end_date=parameters[2].value,
+                usernames=usernames,
+                district=_split_multivalue(parameters[3].valueAsText),
+                sectors=sectors,
+                cells=cells,
+                custom_boundary_geometry=custom_boundary_geometry,
+                service_url=parameters[8].valueAsText or None,
+                boundary_service_url=parameters[9].valueAsText or None,
+                version=parameters[10].valueAsText or "sde.DEFAULT",
+                user_name_map_path=parameters[11].valueAsText or None,
+                include_full_feeder_inventory=origin_enabled,
+            )
+        except _progress_report.TopologyDirtyAreaError as blocked:
+            # First dirty trace is a HARD BLOCKER for all network totals.
+            # A separate diagnostic workbook may be saved; NEVER mark the
+            # requested progress report successful or hide the trace failure.
+            arcpy.AddError(
+                "UTILITY NETWORK TOPOLOGY BLOCKED THE PROGRESS REPORT. "
+                "The original report is not published. "
+                f"Transformer OBJECTID {blocked.transformer_objectid}, "
+                f"trace {blocked.trace_position}/{blocked.trace_total}. "
+                "Resolve dirty topology with an authorized REG editor."
+            )
+            try:
+                diagnostic=_progress_report.write_topology_blocker_diagnostic(
+                    parameters[0].valueAsText,blocked,
+                    start_date=parameters[1].valueAsText,
+                    end_date=parameters[2].valueAsText,
+                    districts=_split_multivalue(parameters[3].valueAsText),
+                    sectors=sectors,cells=cells,usernames=usernames,
+                )
+            except Exception as diagnostic_error:
+                arcpy.AddWarning(
+                    f"Could not write TRACE BLOCKED Excel diagnostic: {diagnostic_error}"
+                )
+            else:
+                arcpy.AddWarning(
+                    "TRACE BLOCKED DIAGNOSTIC (NOT A PROGRESS REPORT): "
+                    +str(diagnostic)
+                )
+                arcpy.AddWarning(
+                    "Dirty ElectricLine GlobalIDs: "
+                    +", ".join(blocked.dirty_line_globalids)
+                )
+            raise
         arcpy.SetParameterAsText(0, summary["output_xlsx"])
         origin_coverage=summary.get("full_feeder_inventory")
         if origin_coverage is not None:
